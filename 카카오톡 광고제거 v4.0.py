@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-카카오톡 광고 차단기 Pro v3.0
+카카오톡 광고 차단기 Pro v4.0
 ===========================
 주요 개선사항:
 - 모던 UI/UX (ttk 테마, 애니메이션, 다크/라이트 모드)
+- 광고 레이아웃 숨기기 (Windows API)
+- Toast 알림 시스템
+- 키보드 단축키
+- 최신 카카오톡 광고 도메인 목록 (2024-2025)
 - 강화된 로깅 시스템
-- 더욱 안정적인 프로세스 모니터링
-- 최신 카카오톡 광고 도메인 목록
-- 향상된 오류 처리 및 복구
 - 실시간 상태 업데이트
 - 자동 백업/복원 시스템
 """
@@ -215,9 +216,12 @@ class ToastWidget(tk.Toplevel):
     
     def _close(self):
         """토스트 닫기"""
-        if self in ToastWidget._active_toasts:
-            ToastWidget._active_toasts.remove(self)
-        self.destroy()
+        try:
+            if self in ToastWidget._active_toasts:
+                ToastWidget._active_toasts.remove(self)
+            self.destroy()
+        except tk.TclError:
+            pass  # 이미 파괴된 위젯
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -250,6 +254,7 @@ class AppSettings:
     first_run: bool = True
     backup_on_modify: bool = True
     log_level: str = "INFO"
+    hide_ad_layout: bool = True  # 광고 레이아웃 숨기기
     
     @classmethod
     def load(cls, filepath: str) -> 'AppSettings':
@@ -437,6 +442,88 @@ class SystemUtils:
         except Exception:
             pass
         return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 광고 레이아웃 제거 (Windows API)
+# ═══════════════════════════════════════════════════════════════════════════════
+class AdLayoutHider:
+    """Windows API를 사용하여 카카오톡 광고 레이아웃을 숨깁니다."""
+    
+    MAIN_VIEW_AD_HEIGHT = 31  # 메인 뷰 하단 광고 영역 높이
+    SWP_NOMOVE = 0x0002
+    SWP_NOZORDER = 0x0004
+    
+    def __init__(self, logger: logging.Logger):
+        self.logger = logger
+        self.active = False
+        self.thread: Optional[threading.Thread] = None
+        self.user32 = None
+        if platform.system() == "Windows":
+            self.user32 = ctypes.windll.user32
+            self.WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    
+    def start(self):
+        if self.user32 is None:
+            return
+        self.active = True
+        self.thread = threading.Thread(target=self._hide_loop, daemon=True)
+        self.thread.start()
+        self.logger.info("광고 레이아웃 숨기기 시작됨")
+    
+    def stop(self):
+        self.active = False
+        self.logger.info("광고 레이아웃 숨기기 중지됨")
+    
+    def _hide_loop(self):
+        while self.active:
+            try:
+                self._hide_ad_windows()
+                time.sleep(0.5)
+            except Exception:
+                time.sleep(1)
+    
+    def _hide_ad_windows(self):
+        def enum_callback(hwnd, lParam):
+            try:
+                class_name = ctypes.create_unicode_buffer(256)
+                self.user32.GetClassNameW(hwnd, class_name, 256)
+                if class_name.value == "EVA_Window":
+                    self._process_window(hwnd)
+            except Exception:
+                pass
+            return True
+        callback = self.WNDENUMPROC(enum_callback)
+        self.user32.EnumWindows(callback, 0)
+    
+    def _process_window(self, parent):
+        def child_callback(hwnd, lParam):
+            try:
+                length = self.user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    self.user32.GetWindowTextW(hwnd, buf, length + 1)
+                    text = buf.value
+                    if text.startswith("OnlineMainView"):
+                        self._resize_main_view(hwnd)
+                    elif text.startswith("BannerAdView") or text.startswith("AdView"):
+                        self.user32.ShowWindow(hwnd, 0)
+            except Exception:
+                pass
+            return True
+        callback = self.WNDENUMPROC(child_callback)
+        self.user32.EnumChildWindows(parent, callback, 0)
+    
+    def _resize_main_view(self, hwnd):
+        try:
+            rect = ctypes.wintypes.RECT()
+            self.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+            width = rect.right - rect.left - 2
+            height = rect.bottom - rect.top - self.MAIN_VIEW_AD_HEIGHT
+            if height > 1:
+                self.user32.SetWindowPos(hwnd, 0, 0, 0, width, height, self.SWP_NOMOVE | self.SWP_NOZORDER)
+        except Exception:
+            pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -808,6 +895,7 @@ class AdBlockerApp:
         self.hosts_manager = HostsManager(SystemUtils.get_hosts_path(), self.logger)
         self.domain_manager = DomainManager(DOMAINS_FILE, self.logger)
         self.tray_icon: Optional[TrayIcon] = None
+        self.ad_layout_hider = AdLayoutHider(self.logger)
         
         # 상태 변수
         self.monitoring_active = False
@@ -821,6 +909,7 @@ class AdBlockerApp:
         # 초기화
         self._check_admin()
         self._start_monitoring()
+        self._start_layout_hider()
         self._update_ui_periodically()
     
     def _setup_window(self):
@@ -1038,6 +1127,15 @@ class AdBlockerApp:
             variable=self.monitor_var,
             command=self._toggle_monitoring
         ).pack(anchor=tk.W)
+        
+        # 광고 레이아웃 숨기기
+        self.hide_layout_var = tk.BooleanVar(value=self.settings.hide_ad_layout)
+        ttk.Checkbutton(
+            options_frame,
+            text="광고 레이아웃 숨기기 (빈 공간 제거)",
+            variable=self.hide_layout_var,
+            command=self._toggle_layout_hider
+        ).pack(anchor=tk.W)
     
     def _create_footer(self):
         """하단 정보 생성"""
@@ -1220,7 +1318,10 @@ class AdBlockerApp:
         """로그 큐 처리"""
         while not self.log_queue.empty():
             try:
-                self.log_queue.get_nowait()
+                msg = self.log_queue.get_nowait()
+                # 로그 메시지 처리 (콘솔에만 출력, GUI 표시는 별도)
+                if hasattr(self, 'logger'):
+                    pass  # 이미 파일/콘솔에 기록됨
             except queue.Empty:
                 break
     
@@ -1267,6 +1368,20 @@ class AdBlockerApp:
         """모니터링 토글"""
         self.settings.monitoring_enabled = self.monitor_var.get()
         self.settings.save(SETTINGS_FILE)
+    
+    def _start_layout_hider(self):
+        """광고 레이아웃 숨기기 시작"""
+        if self.settings.hide_ad_layout:
+            self.ad_layout_hider.start()
+    
+    def _toggle_layout_hider(self):
+        """광고 레이아웃 숨기기 토글"""
+        self.settings.hide_ad_layout = self.hide_layout_var.get()
+        self.settings.save(SETTINGS_FILE)
+        if self.settings.hide_ad_layout:
+            self.ad_layout_hider.start()
+        else:
+            self.ad_layout_hider.stop()
     
     # ═══════════════════════════════════════════════════════════════════════════
     # 다이얼로그
@@ -1491,6 +1606,7 @@ hosts 파일 기반 광고 차단 도구
     def quit_app(self):
         """앱 종료"""
         self.monitoring_active = False
+        self.ad_layout_hider.stop()
         self.settings.save(SETTINGS_FILE)
         
         if self.tray_icon:

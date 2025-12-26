@@ -1,25 +1,42 @@
 # -*- mode: python ; coding: utf-8 -*-
+"""
+PyInstaller spec file for KakaoTalk AdBlocker Pro v6.0
+Build: pyinstaller kakaotalk_adblock.spec
+"""
+
+# 경량화를 위한 제외 모듈
+EXCLUDES = [
+    'matplotlib', 'numpy', 'scipy', 'pandas',
+    'cv2', 'torch', 'tensorflow', 'keras', 'sklearn',
+    'IPython', 'jupyter', 'notebook', 'pytest',
+    'unittest', 'doctest', 'pdb', 'profile', 'pstats',
+    'xml.etree', 'xmlrpc', 'email', 'html.parser',
+    'distutils', 'setuptools', 'pkg_resources',
+]
 
 block_cipher = None
 
 a = Analysis(
-    ['카카오톡 광고제거 v4.0.py'],
+    ['카카오톡 광고제거 v6.0.py'],
     pathex=[],
     binaries=[],
     datas=[
         ('blocked_domains.txt', '.'),
-        ('adblock_settings.json', '.')
     ],
-    hiddenimports=['PIL', 'pystray', 'psutil'],
+    hiddenimports=[
+        'pystray._win32',
+        'PIL._tkinter_finder',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=EXCLUDES,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
 )
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
@@ -29,7 +46,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='KakaoTalkAdBlocker_Pro_v5.0',
+    name='KakaoTalkAdBlocker_v6',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -42,6 +59,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    uac_admin=True,  # 관리자 권한 요청
-    icon=None,       # 아이콘 파일이 있다면 경로 지정 (예: 'icon.ico')
+    uac_admin=True,
+    icon=None,  # 아이콘: 'icon.ico'
 )

@@ -1,0 +1,7 @@
+{
+    "auto_start": true,
+    "minimize_to_tray": true,
+    "realtime_protection": true,
+    "hide_layout": true,
+    "theme": "light"
+}

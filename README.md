@@ -1,84 +1,36 @@
-# KakaoTalk AdBlocker Pro v6.0
+# KakaoTalk AdBlocker Pro v8.0
 
 카카오톡 PC 버전의 배너 광고를 차단하고, 광고가 있던 자리에 남는 빈 공간(레이아웃)을 자동으로 제거해주는 프로그램입니다.
+v8.0은 성능 최적화(CPU 절약)와 현대적인 UI(Flat Design)가 적용된 대규모 업데이트 버전입니다.
 
-![Python](https://img.shields.io/badge/Python-3.8+-blue)
-![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-lightgrey)
-![License](https://img.shields.io/badge/License-MIT-green)
+## 🚀 v8.0 주요 변경사항
+
+- **✨ Modern UI**: 카카오톡 테마와 어울리는 깔끔하고 현대적인 플랫 디자인을 적용했습니다.
+- **⚡ Performance Core**: **스마트 PID 타겟팅** 기술을 도입하여 카카오톡 프로세스만 정밀하게 감시합니다. 대기 모드 시 CPU 점유율이 0%에 수렴합니다. (이전 버전 대비 90% 효율 향상)
+- **🛠️ Stability**: 고해상도(HiDPI) 모니터 지원 강화 및 레이아웃 제거 알고리즘의 안정성을 높였습니다.
+- **🛡️ Dual Protection**: Hosts 기반 차단과 레지스트리 기반 팝업 차단(AdFit)을 모두 지원합니다.
 
 ## ✨ 주요 기능
 
-| 기능 | 설명 |
-|------|------|
-| **광고 레이아웃 제거** | Chrome 기반 광고 컨트롤(`Chrome_WidgetWin_`) 감지 및 숨김 |
-| **Hosts 도메인 차단** | 광고 서버 통신 원천 차단 |
-| **AdFit 레지스트리 차단** | 팝업 광고 원천 차단 |
-| **HiDPI 지원** | 고해상도 모니터 완벽 지원 |
-| **시스템 트레이** | 백그라운드 실행 및 트레이 최소화 |
-| **자동 시작** | Windows 부팅 시 자동 실행 |
+1. **광고 원천 차단**: Hosts 파일을 변조하여 광고 서버와의 통신을 원천 차단합니다.
+2. **레이아웃 자동 정리**: 하단 광고 배너가 사라진 빈 공간을 감지하여 채팅 목록을 꽉 차게 늘려줍니다.
+3. **원클릭 최적화**: [스마트 최적화] 버튼 클릭 한 번으로 `차단` + `DNS 초기화` + `재시작`을 수행합니다.
+4. **백그라운드 모드**: 트레이 아이콘으로 최소화되어 방해 없이 백그라운드에서 작동합니다.
 
-## 🚀 사용 방법
+## 📥 설치 및 실행
 
-### 실행 파일 (권장)
-1. [Releases](../../releases)에서 `KakaoTalkAdBlocker_v6.exe` 다운로드
-2. **관리자 권한으로 실행**
-3. **스마트 최적화** 클릭
+1. **다운로드**: 최신 릴리즈의 `KakaoTalkAdBlocker_Pro_v8.0.exe`를 다운로드합니다.
+2. **실행**: 파일을 우클릭하여 **[관리자 권한으로 실행]**을 클릭합니다.
+    - *주의: Hosts 파일 수정 및 시스템 제어를 위해 관리자 권한이 필수입니다.*
+3. **최적화**: 프로그램이 실행되면 노란색 **[✨ 스마트 최적화]** 버튼을 누르세요.
 
-### 소스코드 실행
-```bash
-# 의존성 설치
-pip install pystray Pillow psutil
+## ⚙️ 설정 가이드
 
-# 실행 (관리자 권한 필요)
-python "카카오톡 광고제거 v6.0.py"
-```
+- **윈도우 시작 시 자동 실행**: PC 켤 때마다 자동으로 실행되어 광고를 막습니다.
+- **닫을 때 트레이로 최소화**: X 버튼을 눌러도 종료되지 않고 트레이로 숨습니다.
+- **팝업 광고 차단 (AdFit)**: 우측 하단 등에서 뜨는 팝업 광고를 레지스트리 제어로 막습니다.
 
-## ⚙️ 설정
+## ⚠️ 라이선스 및 고지사항
 
-| 옵션 | 설명 |
-|------|------|
-| Windows 시작 시 자동 실행 | 레지스트리에 시작프로그램 등록 |
-| 닫을 때 트레이로 최소화 | X 버튼 → 트레이 아이콘으로 숨김 |
-| 시작 시 트레이로 바로 최소화 | 시작 시 창 없이 트레이로 |
-| 광고 레이아웃 자동 제거 | `EVA_Window_Dblclk` 윈도우 내 광고 숨김 |
-| 팝업 광고 차단 | `SOFTWARE\Kakao\AdFit` 레지스트리 조작 |
-
-## 🛠️ 빌드
-
-```bash
-# PyInstaller 설치
-pip install pyinstaller
-
-# 빌드
-pyinstaller kakaotalk_adblock.spec
-
-# 결과물: dist/KakaoTalkAdBlocker_v6.exe
-```
-
-## 📁 파일 구조
-
-```
-├── 카카오톡 광고제거 v6.0.py    # 메인 프로그램
-├── kakaotalk_adblock.spec      # PyInstaller 빌드 설정
-├── blocked_domains.txt         # 차단할 도메인 목록
-├── adblock_settings.json       # 설정 파일 (자동 생성)
-└── adblock.log                 # 로그 파일 (자동 생성)
-```
-
-## 📋 변경 이력
-
-### v6.0.0 (2024-12-27)
-- ✨ 광고 레이아웃 제거 완전 재설계 (`EVA_Window_Dblclk`, `Chrome_WidgetWin_`)
-- ✨ HiDPI Per-Monitor DPI Awareness V2 지원
-- ✨ AdFit 레지스트리 차단 기능
-- ✨ 실시간 로그 뷰어
-- ✨ Toast 알림 시스템
-- 🔧 UI/UX 전면 개선
-
-### v5.x
-- 시스템 트레이 / 자동 시작 기능
-- 모던 UI 적용
-
----
-
-**Disclaimer**: 이 프로그램은 개인 용도로 개발되었으며, 카카오(Kakao Corp)와 관련이 없습니다.
+이 프로그램은 개인의 학습 및 연구 목적으로 개발되었으며, (주)카카오와 어떠한 관련도 없습니다.
+이 프로그램을 사용하여 발생하는 모든 책임은 사용자 본인에게 있습니다.

@@ -23,7 +23,26 @@ from typing import List, Dict, Optional
 # ═══════════════════════════════════════════════════════════════════════════════
 # Windows API Constants & Setup
 # ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# Windows API Constants & Setup
+# ═══════════════════════════════════════════════════════════════════════════════
 user32 = ctypes.windll.user32
+import struct
+_is_64bit = struct.calcsize("P") == 8
+if _is_64bit:
+    user32.GetWindowLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    user32.GetWindowLongPtrW.restype = ctypes.c_longlong
+    user32.SetWindowLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_longlong]
+    user32.SetWindowLongPtrW.restype = ctypes.c_longlong
+    def GetWindowLong(hwnd, index):
+        return user32.GetWindowLongPtrW(hwnd, index)
+    def SetWindowLong(hwnd, index, value):
+        return user32.SetWindowLongPtrW(hwnd, index, value)
+else:
+    def GetWindowLong(hwnd, index):
+        return user32.GetWindowLongW(hwnd, index)
+    def SetWindowLong(hwnd, index, value):
+        return user32.SetWindowLongW(hwnd, index, value)
 
 GWL_STYLE = -16
 GWL_EXSTYLE = -20
@@ -70,11 +89,11 @@ def get_window_rect(hwnd) -> tuple:
 
 
 def get_style(hwnd) -> int:
-    return user32.GetWindowLongW(hwnd, GWL_STYLE)
+    return GetWindowLong(hwnd, GWL_STYLE)
 
 
 def get_ex_style(hwnd) -> int:
-    return user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    return GetWindowLong(hwnd, GWL_EXSTYLE)
 
 
 def is_visible(hwnd) -> bool:
@@ -142,15 +161,18 @@ class WindowInspector:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_file = f"window_inspection_{timestamp}.log"
         
-        logging.basicConfig(
-            filename=log_file,
-            level=logging.DEBUG,
-            format='%(message)s',
-            encoding='utf-8'
-        )
-        
         print(f"로깅 파일: {log_file}")
-        return logging.getLogger("WindowInspector")
+        
+        logger = logging.getLogger("WindowInspector")
+        logger.setLevel(logging.DEBUG)
+        
+        # Avoid adding duplicate handlers
+        if not logger.handlers:
+            fh = logging.FileHandler(log_file, encoding='utf-8')
+            fh.setFormatter(logging.Formatter('%(message)s'))
+            logger.addHandler(fh)
+        
+        return logger
     
     def inspect_all(self):
         """모든 KakaoTalk 관련 윈도우 검사"""
@@ -178,7 +200,9 @@ class WindowInspector:
             
             return True
         
-        user32.EnumWindows(WNDENUMPROC(enum_callback), 0)
+        # Store callback reference to prevent garbage collection during enumeration
+        wrapped_callback = WNDENUMPROC(enum_callback)
+        user32.EnumWindows(wrapped_callback, 0)
         
         self.logger.info("")
         self.logger.info("=== Window Inspection End ===")
@@ -254,7 +278,9 @@ class WindowInspector:
                 children.append(child_hwnd)
             return True
         
-        user32.EnumChildWindows(hwnd, WNDENUMPROC(child_callback), 0)
+        # Store callback reference to prevent garbage collection during enumeration
+        wrapped_child_callback = WNDENUMPROC(child_callback)
+        user32.EnumChildWindows(hwnd, wrapped_child_callback, 0)
         
         for child in children:
             self._inspect_window(child, depth + 1)

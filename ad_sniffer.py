@@ -18,11 +18,11 @@ import platform
 import time
 import logging
 import threading
-import weakref
 from dataclasses import dataclass, field
 from typing import Optional, List, Callable, Dict, Set, Tuple
 from enum import Enum, auto
 from collections import OrderedDict
+import struct
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Windows API Constants
@@ -107,6 +107,7 @@ class WinAPIWrapper:
     
     def __init__(self):
         self.available = platform.system() == "Windows"
+        self._callback_refs = []  # Store callback references to prevent GC
         if not self.available:
             return
             
@@ -199,11 +200,21 @@ class WinAPIWrapper:
     def get_window_style(self, hwnd: int) -> int:
         if not self.available:
             return 0
+        if struct.calcsize("P") == 8:
+            # Use GetWindowLongPtrW for 64-bit compatibility
+            self.user32.GetWindowLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            self.user32.GetWindowLongPtrW.restype = ctypes.c_longlong
+            return self.user32.GetWindowLongPtrW(hwnd, GWL_STYLE)
         return self.user32.GetWindowLongW(hwnd, GWL_STYLE)
 
     def get_window_ex_style(self, hwnd: int) -> int:
         if not self.available:
             return 0
+        if struct.calcsize("P") == 8:
+            # Use GetWindowLongPtrW for 64-bit compatibility
+            self.user32.GetWindowLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            self.user32.GetWindowLongPtrW.restype = ctypes.c_longlong
+            return self.user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
         return self.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
 
     def get_parent(self, hwnd: int) -> Optional[int]:
@@ -237,7 +248,16 @@ class WinAPIWrapper:
         def _callback(child_hwnd, _):
             return callback(child_hwnd)
         
-        self.user32.EnumChildWindows(hwnd, self.WNDENUMPROC(_callback), 0)
+        # Store callback reference to prevent garbage collection during enumeration
+        wrapped_callback = self.WNDENUMPROC(_callback)
+        self._callback_refs.append(wrapped_callback)
+        
+        try:
+            self.user32.EnumChildWindows(hwnd, wrapped_callback, 0)
+        finally:
+            # Clean up callback reference after enumeration completes
+            if wrapped_callback in self._callback_refs:
+                self._callback_refs.remove(wrapped_callback)
 
     def get_window_info(self, hwnd: int) -> WindowInfo:
         """Full window information retrieval"""
@@ -270,6 +290,7 @@ class WindowHierarchyAnalyzer:
         self._cache: Dict[int, WindowInfo] = {}
         self._cache_time: float = 0
         self._cache_ttl: float = 0.5  # 500ms cache
+        self._cache_lock = threading.Lock()  # Thread safety for cache access
     
     def find_main_window(self) -> Optional[int]:
         """카카오톡 메인 윈도우 찾기"""
@@ -281,14 +302,15 @@ class WindowHierarchyAnalyzer:
         return self.api.find_window(self.MAIN_CLASS, None)
     
     def build_window_tree(self, root_hwnd: int, max_depth: int = 10) -> Optional[WindowInfo]:
-        """재귀적으로 윈도우 트리 구축"""
+        """재귀적으로 윈도우 트리 구축 (thread-safe)"""
         if not root_hwnd:
             return None
             
-        # Check cache
+        # Check cache with lock
         now = time.time()
-        if root_hwnd in self._cache and (now - self._cache_time) < self._cache_ttl:
-            return self._cache[root_hwnd]
+        with self._cache_lock:
+            if root_hwnd in self._cache and (now - self._cache_time) < self._cache_ttl:
+                return self._cache[root_hwnd]
         
         root_info = self.api.get_window_info(root_hwnd)
         
@@ -308,9 +330,10 @@ class WindowHierarchyAnalyzer:
                 child_info.parent_hwnd = root_hwnd
                 root_info.children.append(child_info)
         
-        # Cache result
-        self._cache[root_hwnd] = root_info
-        self._cache_time = now
+        # Cache result with lock
+        with self._cache_lock:
+            self._cache[root_hwnd] = root_info
+            self._cache_time = now
         
         return root_info
     
@@ -333,7 +356,7 @@ class WindowHierarchyAnalyzer:
         prefix = "  " * indent
         lines.append(
             f"{prefix}[{hex(info.hwnd)}] {info.class_name} "
-            f"'{info.title[:20]}' {info.width}x{info.height} "
+            f"'{self._sanitize_title(info.title)}' {info.width}x{info.height} "
             f"{'V' if info.is_visible else 'H'}"
         )
         
@@ -349,6 +372,16 @@ class WindowHierarchyAnalyzer:
             lines.append(self.dump_hierarchy(child_hwnd, indent + 1))
         
         return "\n".join(lines)
+
+    def _sanitize_title(self, title: str) -> str:
+        """Sanitize window title to remove PII"""
+        if not title:
+            return ""
+        # Safe list of known system/app titles
+        SAFE_TITLES = {"KakaoTalk", "카카오톡", "KakaoTalkEdgeWnd", "Default IME", "MSCTFIME UI"}
+        if title in SAFE_TITLES:
+            return title
+        return f"{title[:2]}***{title[-1:]}" if len(title) > 3 else "***"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -380,9 +413,24 @@ class AdPatternMatcher:
     BANNER_HEIGHT_MAX = 200
     MAX_DETECTED_CACHE_SIZE = 500  # Limit cache size to prevent memory leak
     
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    # Sensitivity thresholds - higher means more strict (fewer false positives)
+    SENSITIVITY_THRESHOLDS = {
+        "low": 0.90,    # Only very confident detections
+        "medium": 0.75, # Default - balanced
+        "high": 0.60    # Aggressive - may have more false positives
+    }
+    
+    def __init__(self, logger: Optional[logging.Logger] = None, sensitivity: str = "medium"):
         self.logger = logger or logging.getLogger(__name__)
         self._detected_ads: OrderedDict[int, bool] = OrderedDict()  # LRU cache for detected hwnds
+        self._sensitivity = sensitivity
+        self._confidence_threshold = self.SENSITIVITY_THRESHOLDS.get(sensitivity, 0.75)
+    
+    def set_sensitivity(self, sensitivity: str):
+        """Set detection sensitivity level"""
+        self._sensitivity = sensitivity
+        self._confidence_threshold = self.SENSITIVITY_THRESHOLDS.get(sensitivity, 0.75)
+        self.logger.info(f"Sensitivity set to: {sensitivity} (threshold: {self._confidence_threshold})")
     
     def analyze_window(self, window: WindowInfo, parent: Optional[WindowInfo] = None) -> Optional[AdDetectionResult]:
         """단일 윈도우 광고 분석"""
@@ -400,29 +448,37 @@ class AdPatternMatcher:
         # Check for popup ads first (high priority)
         if self._is_popup_ad(window):
             self._add_to_cache(window.hwnd)
-            return AdDetectionResult(
+            result = AdDetectionResult(
                 window=window,
                 ad_type=AdType.POPUP,
                 confidence=0.95,
                 reason="Popup window pattern detected (RichPopWnd)"
             )
+            return self._filter_by_confidence(result)
         
         # Check for Chrome widget ads (embedded web ads)
         if self._is_chrome_widget_ad(window, parent):
             self._add_to_cache(window.hwnd)
-            return AdDetectionResult(
+            result = AdDetectionResult(
                 window=window,
                 ad_type=AdType.EMBEDDED,
                 confidence=0.85,
                 reason="Chrome WidgetWin detected (embedded web ad)"
             )
+            return self._filter_by_confidence(result)
         
         # Check for banner ads by size/position
         banner_result = self._check_banner_heuristics(window, parent)
         if banner_result:
             self._add_to_cache(window.hwnd)
-            return banner_result
+            return self._filter_by_confidence(banner_result)
         
+        return None
+    
+    def _filter_by_confidence(self, result: Optional[AdDetectionResult]) -> Optional[AdDetectionResult]:
+        """Filter result by confidence threshold based on sensitivity setting"""
+        if result and result.confidence >= self._confidence_threshold:
+            return result
         return None
     
     def _is_popup_ad(self, window: WindowInfo) -> bool:
@@ -515,11 +571,12 @@ class AdLayoutSniffer:
     
     def __init__(self, logger: Optional[logging.Logger] = None, 
                  on_ad_detected: Optional[Callable[[AdDetectionResult], None]] = None,
-                 on_log: Optional[Callable[[str, str], None]] = None):
+                 on_log: Optional[Callable[[str, str], None]] = None,
+                 sensitivity: str = "medium"):
         self.logger = logger or logging.getLogger(__name__)
         self.api = WinAPIWrapper()
         self.analyzer = WindowHierarchyAnalyzer(self.api, self.logger)
-        self.matcher = AdPatternMatcher(self.logger)
+        self.matcher = AdPatternMatcher(self.logger, sensitivity=sensitivity)
         
         self.on_ad_detected = on_ad_detected
         self.on_log = on_log
@@ -557,6 +614,11 @@ class AdLayoutSniffer:
     
     def is_running(self) -> bool:
         return self._active
+    
+    def set_sensitivity(self, sensitivity: str):
+        """Set detection sensitivity level (low, medium, high)"""
+        self.matcher.set_sensitivity(sensitivity)
+        self._log("INFO", f"감도 설정 변경: {sensitivity}")
     
     def _log(self, level: str, message: str):
         if self.on_log:
@@ -654,25 +716,69 @@ class AdLayoutSniffer:
                 self.logger.error(f"Callback error: {e}")
     
     def _resize_main_content(self, main_window: WindowInfo, ad: AdDetectionResult):
-        """메인 콘텐츠 영역 리사이즈"""
-        # Find the main content child window (usually EVA_ChildWindow)
-        descendants = self.analyzer.get_all_descendants(main_window.hwnd)
+        """메인 콘텐츠 영역 리사이즈 (개선판)"""
+        # Content area class patterns - flexible matching for different KakaoTalk versions
+        CONTENT_CLASS_PATTERNS = [
+            "EVA_ChildWindow",
+            "EVA_Window",
+            "KakaoContent",
+            "ChatView",
+        ]
         
+        descendants = self.analyzer.get_all_descendants(main_window.hwnd)
+        client_w, client_h = self.api.get_client_rect(main_window.hwnd)
+        
+        # Find main content areas matching patterns
+        content_windows = []
         for window in descendants:
-            # Look for main content area
-            if "EVA_ChildWindow" in window.class_name:
-                # Check if it's the main chat/content area (similar width to main)
-                if abs(window.width - main_window.width) < 50 and window.height > 100:
-                    # Expand to fill parent
-                    client_w, client_h = self.api.get_client_rect(main_window.hwnd)
-                    
-                    if window.height < client_h:
-                        self.api.set_window_pos(
-                            window.hwnd, 0, 0, client_w, client_h,
-                            SWP_NOMOVE | SWP_NOZORDER
-                        )
-                        self._log("DEBUG", f"콘텐츠 영역 리사이즈: {client_w}x{client_h}")
+            if not window.is_visible:
+                continue
+            # Check if class matches any content pattern
+            for pattern in CONTENT_CLASS_PATTERNS:
+                if pattern in window.class_name:
+                    # Must be similar width to main window and have decent height
+                    if abs(window.width - main_window.width) < 50 and window.height > 100:
+                        content_windows.append(window)
                     break
+        
+        # Sort by size (largest first) - main content is usually the biggest
+        content_windows.sort(key=lambda w: w.width * w.height, reverse=True)
+        
+        for window in content_windows:
+            # Calculate new size based on ad type
+            # window.y is screen coordinate, we need client-relative. 
+            # Approximate by subtracting main window Y, ensuring non-negative.
+            new_y = max(0, window.y - main_window.y) 
+            new_h = window.height
+            
+            if ad.ad_type == AdType.BANNER_TOP:
+                # Top banner removed - expand upward
+                # Start from top of client area
+                new_y = 0
+                new_h = window.height + ad.window.height
+            elif ad.ad_type == AdType.BANNER_BOTTOM:
+                # Bottom banner removed - expand downward
+                # Y remains the same, new height should be current height + ad height
+                new_h = window.height + ad.window.height
+            else:
+                # Generic: try to fill available space
+                new_h = client_h
+            
+            # Ensure we don't exceed client area
+            if new_h > client_h:
+                new_h = client_h
+            
+            # Only resize if the new height is actually larger
+            if window.height < new_h:
+                try:
+                    self.api.set_window_pos(
+                        window.hwnd, 0, new_y, client_w, new_h,
+                        SWP_NOZORDER | SWP_NOACTIVATE
+                    )
+                    self._log("DEBUG", f"콘텐츠 영역 리사이즈: {window.class_name} -> {client_w}x{new_h} (y={new_y})")
+                except (OSError, ctypes.ArgumentError) as e:
+                    self._log("DEBUG", f"리사이즈 실패: {e}")
+            break  # Only resize the first (largest) content window
     
     def get_stats(self) -> Dict:
         """통계 반환 (thread-safe)"""

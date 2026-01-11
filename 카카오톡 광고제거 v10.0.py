@@ -62,15 +62,17 @@ except ImportError:
 # Configuration
 # ═══════════════════════════════════════════════════════════════════════════════
 class Config:
-    VERSION = "10.0.0"
+    VERSION = "10.0.1"
     APP_NAME = "KakaoTalk AdBlocker Pro"
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     SETTINGS_FILE = os.path.join(BASE_DIR, "adblock_settings_v10.json")
     LOG_FILE = os.path.join(BASE_DIR, "adblock_v10.log")
+    CUSTOM_DOMAINS_FILE = os.path.join(BASE_DIR, "custom_ad_domains.txt")
     HOSTS_PATH = r"C:\Windows\System32\drivers\etc\hosts"
     HOSTS_BACKUP = r"C:\Windows\System32\drivers\etc\hosts.bak"
     
-    AD_DOMAINS = [
+    # Default ad domains (hardcoded)
+    DEFAULT_AD_DOMAINS = [
         "display.ad.daum.net", "analytics.ad.daum.net", "ad.daum.net",
         "alea.adam.ad.daum.net", "adam.ad.daum.net", "wat.ad.daum.net",
         "biz.ad.daum.net", "cs.ad.daum.net", "ad.mad.daum.net",
@@ -79,6 +81,29 @@ class Config:
         "business.kakao.com", "ad.kakaocdn.net", "ad.kakaocdn.com",
         "track.tiara.kakao.com", "stat.tiara.kakao.com", "kakaoad.criteo.com"
     ] + [f"adimg{i}.kakaocdn.net" for i in range(1, 11)]
+    
+    @classmethod
+    def get_ad_domains(cls) -> list:
+        """Get ad domains with custom domains from external file"""
+        domains = cls.DEFAULT_AD_DOMAINS.copy()
+        
+        # Load custom domains from external file
+        if os.path.exists(cls.CUSTOM_DOMAINS_FILE):
+            try:
+                with open(cls.CUSTOM_DOMAINS_FILE, 'r', encoding='utf-8', errors='ignore') as f:
+                    for line in f:
+                        line = line.strip()
+                        # Skip empty lines and comments
+                        if line and not line.startswith('#'):
+                            if line not in domains:
+                                domains.append(line)
+            except Exception as e:
+                logging.getLogger("AdBlocker").warning(f"Failed to load custom domains: {e}")
+        
+        return domains
+    
+    # Backward compatibility
+    AD_DOMAINS = DEFAULT_AD_DOMAINS
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Logging Setup
@@ -106,6 +131,44 @@ def setup_logging() -> logging.Logger:
 
 logger = setup_logging()
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Resources & I18n
+# ═══════════════════════════════════════════════════════════════════════════════
+class Strings:
+    """UI Strings for Internationalization"""
+    APP_TITLE = "KakaoTalk AdBlocker Pro"
+    DASHBOARD = "대시보드"
+    SETTINGS = "설정"
+    LOGS = "로그"
+    DEBUG = "디버그"
+    INFO = "정보"
+    
+    STATUS_PROTECTED = "🛡️ 카카오톡 보호가\n   활성화되었습니다"
+    BTN_OPTIMIZE = "⚡ 지금 최적화"
+    BTN_RESTORE = "↩️ 복원"
+    
+    STAT_KAKAO = "카카오톡"
+    STAT_ADS = "감지된 광고"
+    STAT_POPUPS = "차단 팝업"
+    STAT_BANNERS = "숨긴 배너"
+    
+    # Status
+    RUNNING = "실행 중"
+    STOPPED = "중지됨"
+    WAITING = "대기중"
+    
+    # Toasts
+    TOAST_SENSITIVITY_SAVED = "감도 설정이 저장되었습니다"
+    TOAST_THEME_CHANGED = "테마가 변경되었습니다"
+    TOAST_SETTINGS_SAVED = "설정이 저장되었습니다"
+    TOAST_ANALYSIS_DONE = "분석 완료"
+    TOAST_RESTART_KAKAO = "최적화 완료! 카카오톡이 재시작됩니다."
+    TOAST_RESTORE_DONE = "복원 완료"
+    
+    # Errors
+    ERR_ADMIN_REQUIRED = "관리자 권한이 필요합니다"
+    ERR_OPTIMIZE_FAILED = "최적화 실패"
+    
 # ═══════════════════════════════════════════════════════════════════════════════
 # Theme System
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -164,8 +227,11 @@ class Theme:
 class SystemManager:
     @staticmethod
     def is_admin() -> bool:
-        try: return ctypes.windll.shell32.IsUserAnAdmin() != 0
-        except: return False
+        try: 
+            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+        except (OSError, AttributeError) as e:
+            logger.debug(f"Admin check failed: {e}")
+            return False
     
     @staticmethod
     def run_as_admin():
@@ -184,18 +250,20 @@ class SystemManager:
     # Process name cache for efficiency
     _process_cache: Dict[str, Tuple[bool, float]] = {}
     _cache_ttl = 2.0  # 2 second cache
+    _cache_lock = threading.Lock()  # Thread safety for cache access
     
     @staticmethod
     def process_exists(name: str) -> bool:
-        """Check if process exists with caching for efficiency"""
+        """Check if process exists with caching for efficiency (thread-safe)"""
         now = time.time()
         cache_key = name.lower()
         
-        # Check cache first
-        if cache_key in SystemManager._process_cache:
-            cached_result, cached_time = SystemManager._process_cache[cache_key]
-            if now - cached_time < SystemManager._cache_ttl:
-                return cached_result
+        # Check cache first (thread-safe)
+        with SystemManager._cache_lock:
+            if cache_key in SystemManager._process_cache:
+                cached_result, cached_time = SystemManager._process_cache[cache_key]
+                if now - cached_time < SystemManager._cache_ttl:
+                    return cached_result
         
         # Cache miss - do actual check
         result = False
@@ -213,8 +281,9 @@ class SystemManager:
             except Exception:
                 pass
         
-        # Update cache
-        SystemManager._process_cache[cache_key] = (result, now)
+        # Update cache (thread-safe)
+        with SystemManager._cache_lock:
+            SystemManager._process_cache[cache_key] = (result, now)
         return result
 
     @staticmethod
@@ -259,19 +328,46 @@ class AppSettings:
     
     def save(self):
         try:
-            with open(Config.SETTINGS_FILE, 'w') as f:
-                json.dump(self.__dict__, f, indent=2)
+            import tempfile
+            dir_path = os.path.dirname(Config.SETTINGS_FILE)
+            fd, tmp_path = tempfile.mkstemp(suffix='.json', dir=dir_path)
+            try:
+                with os.fdopen(fd, 'w') as f:
+                    json.dump(self.__dict__, f, indent=2)
+                os.replace(tmp_path, Config.SETTINGS_FILE)
+            except Exception:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                raise
         except Exception as e:
             logger.error(f"Settings Save Failed: {e}")
 
 class HostsManager:
     START, END = "# [KakaoTalk AdBlock Start]", "# [KakaoTalk AdBlock End]"
+    MAX_BACKUPS = 3  # Keep rolling backups
     
     def backup(self) -> bool:
         try:
-            if not os.path.exists(Config.HOSTS_BACKUP):
-                shutil.copy2(Config.HOSTS_PATH, Config.HOSTS_BACKUP)
-                logger.info("Hosts file backup created.")
+            # Rolling backup: keep up to MAX_BACKUPS versions
+            backup_base = Config.HOSTS_BACKUP
+            
+            # Rotate existing backups
+            for i in range(self.MAX_BACKUPS - 1, 0, -1):
+                old_backup = f"{backup_base}.{i}"
+                new_backup = f"{backup_base}.{i + 1}" if i < self.MAX_BACKUPS - 1 else None
+                if os.path.exists(old_backup):
+                    if new_backup:
+                        shutil.move(old_backup, new_backup)
+                    else:
+                        os.remove(old_backup)  # Remove oldest
+            
+            # Move current backup to .1
+            if os.path.exists(backup_base):
+                shutil.move(backup_base, f"{backup_base}.1")
+            
+            # Create new backup
+            shutil.copy2(Config.HOSTS_PATH, backup_base)
+            logger.info("Hosts file backup created (rolling).")
             return True
         except Exception as e:
             logger.error(f"Backup Failed: {e}")
@@ -288,9 +384,25 @@ class HostsManager:
             new = "\n".join(filtered).strip() + f"\n\n{self.START}\n# Updated: {datetime.now()}\n"
             new += "\n".join(f"0.0.0.0 {d}" for d in domains) + f"\n{self.END}\n"
             
-            os.chmod(Config.HOSTS_PATH, 0o777)
-            with open(Config.HOSTS_PATH, 'w', encoding='utf-8') as f:
-                f.write(new)
+            # Atomic write to prevent corruption
+            import tempfile
+            try:
+                # Determine directory from Config.HOSTS_PATH
+                dir_path = os.path.dirname(Config.HOSTS_PATH)
+                fd, tmp_path = tempfile.mkstemp(suffix='.tmp', dir=dir_path)
+                try:
+                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                        f.write(new)
+                    os.replace(tmp_path, Config.HOSTS_PATH)
+                except Exception:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                    raise
+            except Exception as e:
+                # Fallback to direct write if temp file creation fails (e.g. permission issues in system dir)
+                logger.warning(f"Atomic write failed, falling back to direct write: {e}")
+                with open(Config.HOSTS_PATH, 'w', encoding='utf-8') as f:
+                    f.write(new)
             
             logger.info(f"Blocked {len(domains)} domains.")
             return True, f"{len(domains)} 도메인 차단됨"
@@ -387,7 +499,9 @@ class AdSnifferWorker(QThread):
     
     def stop(self):
         self.active = False
-        self.wait()
+        if not self.wait(5000):  # 5 second timeout
+            self.terminate()
+            self.signals.log.emit("WARN", "AdSnifferWorker forcefully terminated")
     
     def inspect(self) -> str:
         if self.sniffer:
@@ -395,13 +509,14 @@ class AdSnifferWorker(QThread):
         return "Sniffer not running"
 
 class AdFitWorker(QThread):
-    """Legacy AdFit registry manipulation"""
+    """AdFit registry manipulation with effectiveness tracking"""
     
     def __init__(self, signals: WorkerSignals):
         super().__init__()
         self.signals = signals
         self._active = False
         self._stop_event = threading.Event()
+        self._blocked_count = 0  # Track how many times we blocked AdFit
     
     def run(self):
         self._active = True
@@ -410,6 +525,7 @@ class AdFitWorker(QThread):
         KEY = r"SOFTWARE\Kakao\AdFit"
         
         while self._active:
+            modified_count = 0
             try:
                 k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, KEY, 0, 
                                    winreg.KEY_READ | winreg.KEY_ENUMERATE_SUB_KEYS)
@@ -420,29 +536,53 @@ class AdFitWorker(QThread):
                         n = winreg.EnumKey(k, idx)
                         p = f"{KEY}\\{n}"
                         try:
-                            sk = winreg.OpenKey(winreg.HKEY_CURRENT_USER, p, 0, winreg.KEY_WRITE)
-                            winreg.SetValueEx(sk, "LUD", 0, winreg.REG_SZ, cur)
+                            sk = winreg.OpenKey(winreg.HKEY_CURRENT_USER, p, 0, winreg.KEY_READ | winreg.KEY_WRITE)
+                            # Check current value before modifying
+                            try:
+                                old_val, _ = winreg.QueryValueEx(sk, "LUD")
+                                if old_val != cur:
+                                    winreg.SetValueEx(sk, "LUD", 0, winreg.REG_SZ, cur)
+                                    modified_count += 1
+                            except FileNotFoundError:
+                                # LUD key doesn't exist, create it
+                                winreg.SetValueEx(sk, "LUD", 0, winreg.REG_SZ, cur)
+                                modified_count += 1
                             winreg.CloseKey(sk)
-                        except OSError:
-                            pass
+                        except OSError as e:
+                            logger.debug(f"AdFit subkey access error: {e}")
                         idx += 1
                     except OSError:
                         break
                 winreg.CloseKey(k)
+                
+                if modified_count > 0:
+                    self._blocked_count += modified_count
+                    self.signals.log.emit("DEBUG", f"AdFit 레지스트리 {modified_count}개 항목 수정됨 (총: {self._blocked_count})")
+                    
             except FileNotFoundError:
                 # Registry key doesn't exist - this is normal if AdFit not installed
                 pass
+            except PermissionError as e:
+                logger.warning(f"AdFit registry permission denied: {e}")
             except Exception as e:
-                logger.debug(f"AdFit registry check error: {e}")
+                logger.debug(f"AdFit registry check error: {type(e).__name__}: {e}")
             
             # Wait with interruptible sleep
             if self._stop_event.wait(timeout=5):
                 break
+        
+        if self._blocked_count > 0:
+            self.signals.log.emit("INFO", f"AdFit 차단기 종료 (총 {self._blocked_count}개 항목 수정됨)")
     
     def stop(self):
         self._active = False
         self._stop_event.set()
-        self.wait(timeout=2000)  # Wait max 2 seconds
+        if not self.wait(2000):  # Wait max 2 seconds
+            self.terminate()
+            self.signals.log.emit("WARN", "AdFitWorker forcefully terminated")
+    
+    def get_blocked_count(self) -> int:
+        return self._blocked_count
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # UI Components
@@ -492,13 +632,18 @@ class Toast(QWidget):
         self.pos_anim.setEndValue(QPoint(tx, ty))
         self.pos_anim.start()
         
-        # Store timer reference to prevent garbage collection issues
-        self._fade_timer = QTimer.singleShot(duration, self.fade_out)
+        # Schedule fade out (QTimer.singleShot returns None, no need to store)
+        QTimer.singleShot(duration, self.fade_out)
         
     def fade_out(self):
         self.anim.setDuration(300)
         self.anim.setStartValue(1)
         self.anim.setEndValue(0)
+        # Disconnect any previous connection to avoid duplicate calls
+        try:
+            self.anim.finished.disconnect(self._cleanup)
+        except (TypeError, RuntimeError):
+            pass
         self.anim.finished.connect(self._cleanup)
         self.anim.start()
     
@@ -558,7 +703,12 @@ class CustomTitleBar(QWidget):
     
     def mouseMoveEvent(self, e):
         if self.is_dragging:
-            self.window().move(e.globalPosition().toPoint() - self.start_pos)
+            new_pos = e.globalPosition().toPoint() - self.start_pos
+            # Ensure window stays within screen bounds
+            screen = QApplication.primaryScreen().geometry()
+            new_pos.setX(max(0, min(new_pos.x(), screen.width() - 100)))
+            new_pos.setY(max(0, min(new_pos.y(), screen.height() - 50)))
+            self.window().move(new_pos)
     
     def mouseReleaseEvent(self, e):
         self.is_dragging = False
@@ -846,10 +996,8 @@ class MainWindow(QMainWindow):
         
         # Ad blocking group
         layout.addWidget(QLabel("광고 차단"))
-        self._add_opt(layout, "광고 레이아웃 스니핑", "enable_sniffing", 
-                     lambda s: self.sniffer_worker.start() if s else self.sniffer_worker.stop())
-        self._add_opt(layout, "AdFit 팝업 차단", "block_adfit",
-                     lambda s: self.adfit_worker.start() if s else self.adfit_worker.stop())
+        self._add_opt(layout, "광고 레이아웃 스니핑", "enable_sniffing", self._toggle_sniffer)
+        self._add_opt(layout, "AdFit 팝업 차단", "block_adfit", self._toggle_adfit)
         self._add_opt(layout, "디버그 모드 (상세 로깅)", "debug_mode")
         
         layout.addSpacing(10)
@@ -895,6 +1043,11 @@ class MainWindow(QMainWindow):
         sens_values = ["low", "medium", "high"]
         self.settings.sniffing_sensitivity = sens_values[idx]
         self.settings.save()
+        
+        # Apply sensitivity to running sniffer
+        if hasattr(self, 'sniffer_worker') and self.sniffer_worker.sniffer:
+            self.sniffer_worker.sniffer.set_sensitivity(sens_values[idx])
+        
         self.show_toast("감도 설정이 저장되었습니다")
 
     def on_theme_changed(self, idx):
@@ -904,6 +1057,49 @@ class MainWindow(QMainWindow):
         self.apply_theme_mode()
         self.update_ui_theme()
         self.show_toast("테마가 변경되었습니다")
+
+    def _toggle_sniffer(self, enabled: bool):
+        """Toggle sniffer worker with proper lifecycle management"""
+        if enabled:
+            # Only start if not already running
+            if not self.sniffer_worker.isRunning():
+                # Recreate worker if it was previously stopped (QThread can't be restarted)
+                if self.sniffer_worker.isFinished():
+                    self.sniffer_worker = AdSnifferWorker(self.signals)
+                self.sniffer_worker.start()
+        else:
+            if self.sniffer_worker.isRunning():
+                self.sniffer_worker.stop()
+        self._update_engine_status()
+
+    def _toggle_adfit(self, enabled: bool):
+        """Toggle AdFit worker with proper lifecycle management"""
+        if enabled:
+            if not self.adfit_worker.isRunning():
+                if self.adfit_worker.isFinished():
+                    self.adfit_worker = AdFitWorker(self.signals)
+                self.adfit_worker.start()
+        else:
+            if self.adfit_worker.isRunning():
+                self.adfit_worker.stop()
+        self._update_engine_status()
+
+    def _update_engine_status(self):
+        """Update engine status labels based on actual worker state"""
+        if self.sniffer_worker.isRunning():
+            self.lbl_sniffer_status.setText("● AdSniffer: 실행중")
+            self.lbl_sniffer_status.setStyleSheet(f"color: {Theme.SUCCESS};")
+        else:
+            self.lbl_sniffer_status.setText("● AdSniffer: 중지됨")
+            self.lbl_sniffer_status.setStyleSheet(f"color: {Theme.color('text_sub')};")
+        
+        if self.adfit_worker.isRunning():
+            self.lbl_adfit_status.setText("● AdFit 차단: 실행중")
+            self.lbl_adfit_status.setStyleSheet(f"color: {Theme.SUCCESS};")
+        else:
+            self.lbl_adfit_status.setText("● AdFit 차단: 중지됨")
+            self.lbl_adfit_status.setStyleSheet(f"color: {Theme.color('text_sub')};")
+
 
     def _add_opt(self, layout, text, key, cb=None):
         row = QFrame()
@@ -1033,24 +1229,32 @@ class MainWindow(QMainWindow):
 
     def optimize(self):
         if not SystemManager.is_admin():
-            self.show_toast("관리자 권한 필요", "⚠️")
+            self.show_toast("관리자 권한이 필요합니다. 프로그램을 우클릭 → '관리자 권한으로 실행'하세요.", "⚠️")
+            self.log("WARN", "최적화 실패: 관리자 권한 필요")
             return
         
         hm = HostsManager()
-        suc, msg = hm.block(Config.AD_DOMAINS)
+        # Use dynamic domain loading (includes custom domains from external file)
+        suc, msg = hm.block(Config.get_ad_domains())
         
         if suc:
             SystemManager.flush_dns()
             SystemManager.restart_process("KakaoTalk.exe")
-            self.show_toast("최적화 완료!", "⚡")
+            self.show_toast("최적화 완료! 카카오톡이 재시작됩니다.", "⚡")
             self.log("INFO", "최적화 완료")
         else:
-            self.show_toast("실패", "❌")
-            self.log("ERROR", msg)
+            user_msg = "최적화 실패: Hosts 파일 수정 불가"
+            if "Access" in msg or "Permission" in msg:
+                user_msg = "최적화 실패: 파일 접근 권한 오류"
+            elif "not found" in msg.lower():
+                user_msg = "최적화 실패: 파일을 찾을 수 없음"
+            self.show_toast(user_msg, "❌")
+            self.log("ERROR", f"{user_msg} - {msg}")
 
     def restore(self):
         if not SystemManager.is_admin():
-            self.show_toast("관리자 권한 필요", "⚠️")
+            self.show_toast("관리자 권한이 필요합니다. 프로그램을 우클릭 → '관리자 권한으로 실행'하세요.", "⚠️")
+            self.log("WARN", "복원 실패: 관리자 권한 필요")
             return
         
         res = QMessageBox.question(

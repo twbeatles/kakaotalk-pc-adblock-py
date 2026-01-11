@@ -95,5 +95,5 @@ exe = EXE(
     entitlements_file=None,
     icon=None,  # Add icon path here if you have one
     version=None,
-    uac_admin=False,  # Request admin at runtime, not at launch
+    uac_admin=True,  # Request admin at runtime
 )

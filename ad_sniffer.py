@@ -400,7 +400,7 @@ class AdPatternMatcher:
     
     # Class patterns for main content (to avoid false positives)
     SAFE_CLASS_PATTERNS = [
-        "EVA_Window",            # Main KakaoTalk windows
+        # "EVA_Window",          # Removed to detect EVA_Window based ads (user feedback)
         "Edit",                  # Text input fields
         "Button",                # Buttons
         "Static",                # Labels
@@ -438,6 +438,17 @@ class AdPatternMatcher:
         # Skip invisible windows
         if not window.is_visible:
             return None
+
+        # Check safe patterns
+        for safe_pattern in self.SAFE_CLASS_PATTERNS:
+            if safe_pattern in window.class_name:
+                return None
+        
+        # Special check for EVA_Window: only safe if NOT banner size
+        if "EVA_Window" in window.class_name:
+            if not (self.BANNER_HEIGHT_MIN <= window.height <= self.BANNER_HEIGHT_MAX):
+                return None
+            # If it is banner size, continue to check if it's an ad
         
         # Skip already detected (with LRU cache limit)
         if window.hwnd in self._detected_ads:

@@ -594,16 +594,16 @@ class Toast(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(15, 10, 20, 10)
+        layout.setContentsMargins(20, 15, 25, 15)
         
         bg = QFrame()
-        bg.setStyleSheet(f"background-color: #333333; border: 1px solid {Theme.SUCCESS}; border-radius: 20px;")
+        bg.setStyleSheet(f"background-color: #333333; border: 1px solid {Theme.SUCCESS}; border-radius: 25px;")
         bg.setGraphicsEffect(QGraphicsDropShadowEffect(blurRadius=10, xOffset=0, yOffset=2))
         
         bl = QHBoxLayout(bg)
         bl.addWidget(QLabel(icon))
         msg = QLabel(text)
-        msg.setStyleSheet("color: white; font-weight: bold; margin-left: 5px;")
+        msg.setStyleSheet("color: white; font-weight: bold; margin-left: 8px; font-size: 16px;")
         bl.addWidget(msg)
         layout.addWidget(bg)
         
@@ -1338,6 +1338,9 @@ class MainWindow(QMainWindow):
 # Entry Point
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
+    if not SystemManager.is_admin():
+        SystemManager.run_as_admin()
+        
     app = QApplication(sys.argv)
     window = MainWindow()
     if "--minimized" not in sys.argv:

@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+
+*.log
+window_inspection.log
+adblock.log
+
+.pytest_cache/
+
+build/
+dist/

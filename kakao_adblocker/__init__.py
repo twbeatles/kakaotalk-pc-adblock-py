@@ -19,7 +19,7 @@ from .window_graph import WindowGraph, WindowNode
 from .services import HostsManager, AdFitBlocker, SystemManager, StartupManager
 from .logging_setup import setup_logging, QueueHandler
 from .win32_api import User32
-from .legacy import EVENT_OBJECT_SHOW, EVENT_OBJECT_LOCATIONCHANGE
+from .legacy import EVENT_OBJECT_SHOW, EVENT_OBJECT_LOCATIONCHANGE, SmartOptimizeResult, run_smart_optimize
 
 __all__ = [
     "main",
@@ -48,6 +48,8 @@ __all__ = [
     "User32",
     "EVENT_OBJECT_SHOW",
     "EVENT_OBJECT_LOCATIONCHANGE",
+    "SmartOptimizeResult",
+    "run_smart_optimize",
     "resource_base_dir",
     "get_app_data_dir",
     "migrate_legacy_user_files",

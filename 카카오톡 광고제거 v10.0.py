@@ -31,6 +31,8 @@ from kakao_adblocker import (
     User32,
     EVENT_OBJECT_SHOW,
     EVENT_OBJECT_LOCATIONCHANGE,
+    SmartOptimizeResult,
+    run_smart_optimize,
     APPDATA_DIR,
     SETTINGS_FILE,
     DOMAINS_FILE,

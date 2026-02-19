@@ -2666,6 +2666,15 @@ class SystemManager:
     _proc_cache_ttl = 1.5
 
     @staticmethod
+    def _normalize_process_name(name: str) -> str:
+        normalized = (name or "").strip().lower()
+        if not normalized:
+            return ""
+        if normalized.endswith(".exe"):
+            return normalized
+        return f"{normalized}.exe"
+
+    @staticmethod
     def is_admin(): 
         try: return ctypes.windll.shell32.IsUserAnAdmin() != 0
         except: return False
@@ -2682,7 +2691,10 @@ class SystemManager:
         except: return False
     @staticmethod
     def is_process_running(name):
-        key = (name or "").lower()
+        image_name = SystemManager._normalize_process_name(name)
+        if not image_name:
+            return False
+        key = image_name
         now = time.time()
         cached = SystemManager._proc_cache.get(key)
         if cached and (now - cached[0]) <= SystemManager._proc_cache_ttl:
@@ -2692,13 +2704,14 @@ class SystemManager:
         if PSUTIL_AVAILABLE:
             try:
                 for p in psutil.process_iter(['name']):
-                    if key in (p.info['name'] or '').lower():
+                    proc_name = (p.info['name'] or '').strip().lower()
+                    if proc_name == image_name:
                         result = True
                         break
             except: pass
         if not result:
             try:
-                res = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {name}.exe', '/NH'], capture_output=True, text=True, creationflags=0x08000000, timeout=5)
+                res = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {image_name}', '/NH'], capture_output=True, text=True, creationflags=0x08000000, timeout=5)
                 result = key in res.stdout.lower()
             except:
                 result = False
@@ -2706,13 +2719,17 @@ class SystemManager:
         return result
     @staticmethod
     def restart_process(name):
+        image_name = SystemManager._normalize_process_name(name)
+        if not image_name:
+            return False
         exe_path = None
         if PSUTIL_AVAILABLE:
             try:
                 for p in psutil.process_iter(['name', 'exe']):
-                    if name.lower() in (p.info['name'] or '').lower(): exe_path = p.info['exe']; break
+                    proc_name = (p.info['name'] or '').strip().lower()
+                    if proc_name == image_name: exe_path = p.info['exe']; break
             except: pass
-        subprocess.run(['taskkill', '/f', '/im', name], capture_output=True, creationflags=0x08000000)
+        subprocess.run(['taskkill', '/f', '/im', image_name], capture_output=True, creationflags=0x08000000)
         time.sleep(1.5)
         if exe_path and os.path.exists(exe_path): os.startfile(exe_path); return True
         paths = [os.path.join(os.environ.get(k, ''), 'Kakao', 'KakaoTalk', 'KakaoTalk.exe') for k in ['PROGRAMFILES', 'PROGRAMFILES(X86)', 'LOCALAPPDATA']]
@@ -2770,22 +2787,24 @@ class HostsManager:
             except Exception:
                 pass
 
-    def _strip_block(self, content: str) -> tuple[str, bool]:
+    def _strip_block(self, content: str) -> tuple[str, bool, bool]:
         lines = content.splitlines()
-        out = []
-        skipping = False
-        removed = False
-        for line in lines:
-            if self.START in line:
-                skipping = True
-                removed = True
-                continue
-            if skipping:
-                if self.END in line:
-                    skipping = False
-                continue
-            out.append(line)
-        return "\n".join(out), removed
+        start_idx = [i for i, line in enumerate(lines) if self.START in line]
+        end_idx = [i for i, line in enumerate(lines) if self.END in line]
+
+        if not start_idx and not end_idx:
+            return "\n".join(lines), False, False
+
+        malformed = (
+            len(start_idx) != 1
+            or len(end_idx) != 1
+            or end_idx[0] <= start_idx[0]
+        )
+        if malformed:
+            return "\n".join(lines), False, True
+
+        out = lines[:start_idx[0]] + lines[end_idx[0] + 1:]
+        return "\n".join(out), True, False
 
     @staticmethod
     def _normalize_domains(domains: List[str], logger: Optional[logging.Logger] = None) -> List[str]:
@@ -2828,7 +2847,10 @@ class HostsManager:
             self.logger.error(f"Failed to read hosts file: {e}")
             return False
 
-        stripped, _removed = self._strip_block(content)
+        stripped, _removed, malformed = self._strip_block(content)
+        if malformed:
+            self.logger.error("Malformed KakaoTalk AdBlock marker block detected in hosts file; aborting update for safety")
+            return False
         stripped = stripped.rstrip("\r\n")
 
         block_lines = [
@@ -2868,7 +2890,10 @@ class HostsManager:
             self.logger.error(f"Failed to read hosts file: {e}")
             return False
 
-        stripped, removed = self._strip_block(content)
+        stripped, removed, malformed = self._strip_block(content)
+        if malformed:
+            self.logger.error("Malformed KakaoTalk AdBlock marker block detected in hosts file; aborting restore for safety")
+            return False
         if not removed:
             self.logger.info("Hosts block not found (nothing to restore)")
             return True
@@ -2916,6 +2941,79 @@ class HostsManager:
             return matched / len(domains)
         except Exception:
             return 0.0
+
+@dataclass(frozen=True)
+class SmartOptimizeResult:
+    hosts_blocked: bool
+    dns_flushed: bool
+    process_restarted: bool
+    blocked_domain_count: int
+    errors: List[str] = field(default_factory=list)
+
+    @property
+    def overall_status(self) -> str:
+        if not self.hosts_blocked:
+            return "failed"
+        if self.dns_flushed and self.process_restarted:
+            return "success"
+        return "partial"
+
+
+def run_smart_optimize(logger: logging.Logger, hosts_mgr: HostsManager, domains: List[str]) -> SmartOptimizeResult:
+    normalized_domains = HostsManager._normalize_domains(domains, logger.getChild("SmartOptimize"))
+    blocked_domain_count = len(normalized_domains)
+    errors: List[str] = []
+
+    logger.info("Smart optimize step: hosts block")
+    try:
+        hosts_blocked = bool(hosts_mgr.block(normalized_domains))
+    except Exception as e:
+        hosts_blocked = False
+        errors.append(f"hosts: {e}")
+
+    if not hosts_blocked:
+        errors.append("hosts")
+        logger.error("Smart optimize failed at hosts step")
+        return SmartOptimizeResult(
+            hosts_blocked=False,
+            dns_flushed=False,
+            process_restarted=False,
+            blocked_domain_count=blocked_domain_count,
+            errors=errors,
+        )
+    logger.info(f"Smart optimize step success: hosts blocked ({blocked_domain_count} domains)")
+
+    logger.info("Smart optimize step: DNS flush")
+    try:
+        dns_flushed = bool(SystemManager.flush_dns())
+    except Exception as e:
+        dns_flushed = False
+        errors.append(f"dns: {e}")
+    if dns_flushed:
+        logger.info("Smart optimize step success: DNS cache flushed")
+    else:
+        errors.append("dns")
+        logger.warning("Smart optimize step failed: DNS cache flush")
+
+    logger.info("Smart optimize step: KakaoTalk restart")
+    try:
+        process_restarted = bool(SystemManager.restart_process("kakaotalk.exe"))
+    except Exception as e:
+        process_restarted = False
+        errors.append(f"restart: {e}")
+    if process_restarted:
+        logger.info("Smart optimize step success: KakaoTalk restarted")
+    else:
+        errors.append("restart")
+        logger.warning("Smart optimize step failed: KakaoTalk restart")
+
+    return SmartOptimizeResult(
+        hosts_blocked=True,
+        dns_flushed=dns_flushed,
+        process_restarted=process_restarted,
+        blocked_domain_count=blocked_domain_count,
+        errors=errors,
+    )
 
 class StartupManager:
     KEY = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
@@ -3450,14 +3548,30 @@ class MainWindow:
                     custom = [l.strip() for l in f if l.strip() and not l.startswith('#')]
                     if custom: domains = custom
             except: pass
-        self.hosts_mgr.block(domains)
-        SystemManager.flush_dns()
-        self.logger.info("DNS cache flushed")
-        if SystemManager.restart_process("kakaotalk.exe"):
-            self.logger.info("KakaoTalk restarted")
-            messagebox.showinfo("완료", "스마트 최적화가 완료되었습니다.")
-        else:
-            messagebox.showwarning("주의", "카카오톡 재시작에 실패했습니다.")
+        result = run_smart_optimize(self.logger, self.hosts_mgr, domains)
+        failed_steps = []
+        if not result.hosts_blocked:
+            failed_steps.append("Hosts")
+        if result.hosts_blocked and not result.dns_flushed:
+            failed_steps.append("DNS")
+        if result.hosts_blocked and not result.process_restarted:
+            failed_steps.append("카카오톡 재시작")
+
+        if result.overall_status == "failed":
+            messagebox.showerror(
+                "실패",
+                f"스마트 최적화에 실패했습니다.\n실패 단계: {', '.join(failed_steps)}\n로그를 확인해 주세요."
+            )
+            return
+        if result.overall_status == "partial":
+            messagebox.showwarning(
+                "부분 완료",
+                f"스마트 최적화가 부분 완료되었습니다.\n실패 단계: {', '.join(failed_steps)}\n"
+                f"Hosts 차단: {result.blocked_domain_count}개"
+            )
+            return
+
+        messagebox.showinfo("완료", f"스마트 최적화가 완료되었습니다.\nHosts 차단: {result.blocked_domain_count}개")
     
     def _save(self):
         self.settings.auto_start = self.v_auto.get()

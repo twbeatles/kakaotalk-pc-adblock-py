@@ -67,3 +67,30 @@ def test_hosts_block_unblock_idempotent_and_preserve_crlf(tmp_path: Path):
     assert end not in after
     assert "# custom line" in after
     assert "# tail" in after
+
+
+def test_hosts_malformed_marker_block_fails_safe_without_changes(tmp_path: Path):
+    m = load_module()
+
+    m.APPDATA_DIR = str(tmp_path)
+    logger = logging.getLogger("test")
+    logger.addHandler(logging.NullHandler())
+
+    hosts_path = tmp_path / "hosts"
+    start = m.HostsManager.START
+    malformed = (
+        "127.0.0.1 localhost\r\n"
+        f"{start}\r\n"
+        "0.0.0.0 ad.example\r\n"
+        "# END marker intentionally missing\r\n"
+    )
+    hosts_path.write_text(malformed, encoding="utf-8", newline="\n")
+    before_bytes = hosts_path.read_bytes()
+
+    hm = m.HostsManager(logger, hosts_path=str(hosts_path))
+
+    assert hm.block(["example.com"]) is False
+    assert hosts_path.read_bytes() == before_bytes
+
+    assert hm.unblock() is False
+    assert hosts_path.read_bytes() == before_bytes

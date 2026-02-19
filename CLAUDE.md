@@ -74,6 +74,20 @@ SetWinEventHook ──► _win_event_callback ──► Queue ──► _process
 | `AdFitBlocker` | 레지스트리 팝업 차단 | `_update()` (LUD 값 조작) |
 | `SystemManager` | 프로세스/DNS/권한 관리 | `is_admin()`, `flush_dns()`, `restart_process()` |
 | `StartupManager` | 윈도우 시작프로그램 | `is_enabled()`, `set_enabled()` |
+| `SmartOptimizeResult` | 스마트 최적화 단계별 결과 계약 | `overall_status` (`failed`/`partial`/`success`) |
+
+### 스마트 최적화 실행 함수
+
+| 함수 | 역할 | 반환 |
+|:--|:--|:--|
+| `run_smart_optimize(logger, hosts_mgr, domains)` | Hosts 차단 → DNS flush → 프로세스 재시작 순차 실행 | `SmartOptimizeResult` |
+| `SmartOptimizeResult` | 스마트 최적화 단계별 결과 계약 | `overall_status` (`failed`/`partial`/`success`) |
+
+### 스마트 최적화 실행 함수
+
+| 함수 | 역할 | 반환 |
+|:--|:--|:--|
+| `run_smart_optimize(logger, hosts_mgr, domains)` | Hosts 차단 → DNS flush → 프로세스 재시작 순차 실행 | `SmartOptimizeResult` |
 
 ### UI 컴포넌트
 
@@ -140,7 +154,15 @@ SetWinEventHook ──► _win_event_callback ──► Queue ──► _process
 3. **Thread-Safety**: 모든 윈도우 조작은 `RLock`으로 보호
 4. **Event Hook 우선**: 이벤트 훅 실패 시에만 Polling 폴백 사용
 5. **폴링 간격**: `timing.scan_interval_*` 설정으로 폴링 간격 조정
-
+6. **Smart Optimize 실패 안전성**:
+   - Hosts 단계 실패 시 DNS flush/재시작을 실행하지 않음
+   - UI는 `failed/partial/success` 상태별로 명확히 분기
+7. **Hosts 마커 손상 정책**:
+   - `# [KakaoTalk AdBlock Start]` / `# [KakaoTalk AdBlock End]`가 비정상(누락/역순/중복)일 때 파일 수정 금지
+   - `block()`/`unblock()`은 즉시 실패 반환(안전중단)
+8. **프로세스명 정규화**:
+   - `KakaoTalk`와 `kakaotalk.exe` 입력을 모두 `kakaotalk.exe`로 정규화
+   - `tasklist`/`taskkill` 호출에서 `.exe.exe` 중복 금지
 ## 6. 디렉토리 구조
 
 ```

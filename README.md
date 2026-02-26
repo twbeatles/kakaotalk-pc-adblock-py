@@ -55,6 +55,23 @@ pyinstaller kakaotalk_adblock.spec
 
 `uac_admin`은 제거되어 관리자 권한 없이 실행됩니다.
 
+## 패키징 실행 오류 대응
+
+아래 오류가 보이면:
+
+```text
+PermissionError: [Errno 13] Permission denied: '...KakaoTalkLayoutAdBlocker_v11.exe'
+```
+
+대부분 관리자 권한 문제가 아니라, OneDrive/보안 솔루션이 EXE 파일 자체 접근을 잠시 잠그는 케이스입니다.
+
+권장 조치:
+
+1. EXE를 OneDrive 바탕화면이 아닌 `C:\Apps\KakaoTalkLayoutAdBlocker` 같은 로컬 폴더로 이동
+2. 파일 우클릭 → 속성 → `차단 해제`가 보이면 체크 후 적용
+3. OneDrive에서 `항상 이 장치에 유지`로 고정
+4. Windows 보안(랜섬웨어 보호/실시간 보호) 예외에 EXE 추가
+
 ## 이전 hosts 수정 이슈 수동 복구
 
 v11은 hosts를 자동 수정하지 않습니다. 이전 버전으로 hosts가 남아 로그인 문제가 있으면 직접 정리하세요.

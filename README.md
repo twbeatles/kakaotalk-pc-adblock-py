@@ -42,7 +42,7 @@ python kakaotalk_layout_adblock_v11.py --dump-tree --dump-dir "C:\temp"
 - 시작프로그램 등록
 - 창 열기
 - 로그 폴더 열기
-- 릴리스 페이지 열기(수동)
+- GitHub 리포 열기(수동)
 - 종료
 
 ## 빌드
@@ -50,6 +50,8 @@ python kakaotalk_layout_adblock_v11.py --dump-tree --dump-dir "C:\temp"
 ```bash
 pyinstaller kakaotalk_adblock.spec
 ```
+
+`kakaotalk_adblock.spec`는 **onefile** 빌드 설정이며, 결과물은 `dist/KakaoTalkLayoutAdBlocker_v11.exe`로 생성됩니다.
 
 `uac_admin`은 제거되어 관리자 권한 없이 실행됩니다.
 

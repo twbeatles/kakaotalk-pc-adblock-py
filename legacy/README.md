@@ -14,6 +14,8 @@
   - `ad_patterns.json`, `adblock_settings.json`, `blocked_domains.txt`, `adblock.log`
 - `scripts/`
   - `카카오톡 광고제거 v8.0.py`
+- `specs/`
+  - `kakaotalk_adblock_v10.spec`
 
 ## 정책
 

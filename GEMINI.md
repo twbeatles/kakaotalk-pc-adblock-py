@@ -41,7 +41,7 @@
 - `layout_settings_v11.json`
 - `layout_rules_v11.json`
 - `kakaotalk_adblock.spec`
-- `kakaotalk_adblock_v10.spec` (legacy filename, v11 build target)
+- `legacy/specs/kakaotalk_adblock_v10.spec` (legacy spec archive)
 
 ## Legacy Archive
 

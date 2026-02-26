@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from typing import Optional
 
 from .config import APP_NAME, APPDATA_DIR, LayoutSettingsV11, SETTINGS_FILE
@@ -36,6 +36,7 @@ class TrayController:
         self.logger = logger.getChild("TrayController")
         self.icon = None
         self._tray_running = False
+        self._startup_notice_shown = False
         try:
             self._status_var = tk.StringVar(master=self.root, value="상태: 초기화")
         except Exception:
@@ -64,7 +65,7 @@ class TrayController:
         btn_row2 = ttk.Frame(wrapper)
         btn_row2.pack(fill="x", pady=6)
         ttk.Button(btn_row2, text="로그 폴더 열기", command=self.open_log_folder).pack(side="left")
-        ttk.Button(btn_row2, text="릴리스 페이지", command=self.open_releases_page).pack(side="left", padx=(8, 0))
+        ttk.Button(btn_row2, text="GitHub 리포", command=self.open_releases_page).pack(side="left", padx=(8, 0))
 
         ttk.Button(wrapper, text="종료", command=self.shutdown).pack(anchor="e", pady=(14, 0))
 
@@ -140,7 +141,7 @@ class TrayController:
                 pystray.MenuItem("시작프로그램 등록", self._menu_toggle_startup, checked=lambda _item: StartupManager.is_enabled()),
                 pystray.MenuItem("창 열기", self._menu_show_window),
                 pystray.MenuItem("로그 폴더 열기", self._menu_open_logs),
-                pystray.MenuItem("릴리스 페이지 열기", self._menu_open_release),
+                pystray.MenuItem("GitHub 리포 열기", self._menu_open_release),
                 pystray.MenuItem("종료", self._menu_exit),
             ),
         )
@@ -186,6 +187,19 @@ class TrayController:
 
     def _menu_exit(self, _icon, _item) -> None:
         self.root.after(0, self.shutdown)
+
+    def show_startup_notice(self) -> None:
+        if self._startup_notice_shown:
+            return
+        self._startup_notice_shown = True
+        try:
+            messagebox.showinfo(
+                "KakaoTalk Layout AdBlocker",
+                "카카오톡 광고 레이아웃 차단이 활성화되었습니다.",
+                parent=self.root if hasattr(self.root, "winfo_exists") else None,
+            )
+        except Exception:
+            self.logger.debug("Startup notice popup skipped")
 
 
 class _ValueHolder:

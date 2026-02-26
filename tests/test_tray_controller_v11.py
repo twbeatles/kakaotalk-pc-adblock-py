@@ -75,3 +75,22 @@ def test_tray_controller_release_menu(monkeypatch):
     monkeypatch.setattr("kakao_adblocker.ui.ReleaseService.open_releases_page", lambda: called.__setitem__("url", called["url"] + 1) or True)
     controller.open_releases_page()
     assert called["url"] == 1
+
+
+def test_tray_controller_startup_notice_once(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    called = {"popup": 0}
+
+    def fake_showinfo(*_args, **_kwargs):
+        called["popup"] += 1
+        return "ok"
+
+    monkeypatch.setattr("kakao_adblocker.ui.messagebox.showinfo", fake_showinfo)
+    controller.show_startup_notice()
+    controller.show_startup_notice()
+    assert called["popup"] == 1

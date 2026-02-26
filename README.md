@@ -8,6 +8,13 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - `blurfx/KakaoTalkAdBlock` 방식에 맞춰 `100ms` 폴링 기반 레이아웃 엔진으로 재설계했습니다.
 - 기본 동작은 트레이 중심이며, 설정 창은 필요 시 열 수 있습니다.
 
+## 최근 안정성 개선 (v11.0.x)
+
+- `--minimized` 또는 `start_minimized=true`로 시작할 때는 시작 안내 팝업을 띄우지 않습니다.
+- 엔진이 `layout_rules_v11.json`의 `main_window_classes`를 실제 메인 윈도우 탐지에 반영합니다.
+- 공격 모드에서 짧은 토큰(예: `Ad`)은 단어 경계 기준으로 매칭하여 오탐(`ReadLater`, `Header` 등)을 줄였습니다.
+- 시작프로그램 토글 시 레지스트리 갱신 실패가 발생하면 설정 파일(`run_on_startup`)을 잘못 저장하지 않습니다.
+
 ## 실행
 
 ```bash
@@ -52,6 +59,7 @@ pyinstaller kakaotalk_adblock.spec
 ```
 
 `kakaotalk_adblock.spec`는 **onefile** 빌드 설정이며, 결과물은 `dist/KakaoTalkLayoutAdBlocker_v11.exe`로 생성됩니다.
+- `.spec`는 프로젝트 루트 기준 절대 경로를 사용하도록 보강되어, 빌드 실행 위치에 덜 민감합니다.
 
 `uac_admin`은 제거되어 관리자 권한 없이 실행됩니다.
 

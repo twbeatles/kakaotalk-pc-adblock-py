@@ -1,17 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_submodules
+
+PROJECT_ROOT = Path(__file__).resolve().parent
 
 hiddenimports = ["psutil", "PIL", "pystray"]
 hiddenimports += collect_submodules("pystray")
 
 a = Analysis(
-    ["kakaotalk_layout_adblock_v11.py"],
-    pathex=[],
+    [str(PROJECT_ROOT / "kakaotalk_layout_adblock_v11.py")],
+    pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=[
-        ("layout_settings_v11.json", "."),
-        ("layout_rules_v11.json", "."),
+        (str(PROJECT_ROOT / "layout_settings_v11.json"), "."),
+        (str(PROJECT_ROOT / "layout_rules_v11.json"), "."),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],

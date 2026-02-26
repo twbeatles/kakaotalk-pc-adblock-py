@@ -133,3 +133,25 @@ def test_engine_cache_cleanup_removes_stale():
     engine._cleanup_caches()
     assert 9999 not in engine._text_cache
     assert 9999 not in engine._class_cache
+
+
+def test_engine_uses_rules_main_window_classes():
+    api = FakeAPI()
+    api.windows[100]["class"] = "CustomMainWindow"
+    api.windows[100]["text"] = "Custom Main"
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    rules = LayoutRulesV11(main_window_classes=["CustomMainWindow"], main_window_titles=["Custom"])
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    assert engine.state.main_window_count == 1
+
+    engine.apply_once()
+    resized_handles = [x[0] for x in api.set_pos_calls]
+    assert 101 in resized_handles

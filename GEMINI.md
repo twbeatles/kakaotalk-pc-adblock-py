@@ -19,11 +19,14 @@
   - AppData path: `%APPDATA%\KakaoTalkAdBlockerLayout`
 - `event_engine.py`
   - `LayoutOnlyEngine`: watch/apply polling loops
+  - main window detection uses `main_window_classes` from rules
 - `layout_engine.py`
   - Main/lock view resize formulas
   - Aggressive bottom-banner heuristics
+  - short ASCII ad tokens are word-boundary matched to reduce false positives
 - `ui.py`
   - `TrayController` (status, toggle, startup, logs, release page, exit)
+  - startup notice is skipped when launching minimized
 - `services.py`
   - process scan, startup registry, shell/open-url helpers
 
@@ -42,6 +45,10 @@
 - `layout_rules_v11.json`
 - `kakaotalk_adblock.spec`
 - `legacy/specs/kakaotalk_adblock_v10.spec` (legacy spec archive)
+
+## Build Notes
+
+- `kakaotalk_adblock.spec` resolves entry script and data files from project-root absolute paths for stable `pyinstaller` invocation.
 
 ## Legacy Archive
 

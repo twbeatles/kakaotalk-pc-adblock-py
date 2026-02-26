@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional, Tuple
 
 from .config import LayoutRulesV11
 from .win32_api import SWP_NOMOVE, Win32API
 
 Rect = Tuple[int, int, int, int]
+_ASCII_WORD_RE = re.compile(r"[a-z0-9]+")
 
 
 def _rect_width(rect: Rect) -> int:
@@ -32,6 +34,11 @@ class LayoutEngine:
             height = _rect_height(parent_rect)
         if height is None or width < 1 or height < 1:
             return False
+        get_rect = getattr(self.api, "get_window_rect", None)
+        if callable(get_rect):
+            current = get_rect(child_hwnd)
+            if current and _rect_width(current) == width and _rect_height(current) == height:
+                return False
         self.api.update_window(child_hwnd)
         return bool(self.api.set_window_pos(child_hwnd, 0, 0, width, height, SWP_NOMOVE))
 
@@ -51,7 +58,18 @@ class LayoutEngine:
 
     def contains_ad_token(self, text: str) -> bool:
         low = (text or "").lower()
-        return any(token in low for token in self.rules.aggressive_ad_tokens_lc)
+        words = set(_ASCII_WORD_RE.findall(low))
+        for token in self.rules.aggressive_ad_tokens_lc:
+            if not token:
+                continue
+            # Very short ASCII tokens like "ad" should match whole words only.
+            if token.isascii() and token.isalnum() and len(token) <= 2:
+                if token in words:
+                    return True
+                continue
+            if token in low:
+                return True
+        return False
 
     def is_chrome_widget_class(self, class_name: str) -> bool:
         return any(class_name.startswith(prefix) for prefix in self.rules.chrome_widget_prefixes)

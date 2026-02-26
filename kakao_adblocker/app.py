@@ -41,9 +41,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     controller = TrayController(root, engine, settings, logger)
     engine.start()
     controller.start()
-    controller.show_startup_notice()
+    should_start_minimized = bool(args.minimized or settings.start_minimized)
+    if not should_start_minimized:
+        controller.show_startup_notice()
 
-    if args.minimized or settings.start_minimized:
+    if should_start_minimized:
         controller.hide_window()
     else:
         controller.show_window()

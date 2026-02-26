@@ -143,22 +143,22 @@ class LayoutOnlyEngine:
         windows = self._collect_windows(pids)
         main_handles: Set[int] = set()
         candidates: Set[int] = set()
+        main_classes = set(self.rules.main_window_classes)
 
         for item in windows:
-            if item.class_name == "EVA_Window_Dblclk":
-                if item.text and item.parent_hwnd == 0:
-                    main_handles.add(item.hwnd)
-            elif item.class_name == "EVA_Window":
-                if item.text and item.parent_hwnd == 0 and self._is_main_title(item.text):
-                    main_handles.add(item.hwnd)
+            if item.class_name not in main_classes:
+                continue
+            if item.parent_hwnd != 0 or not item.text:
+                continue
+            if item.class_name == "EVA_Window" and not self._is_main_title(item.text):
+                continue
+            main_handles.add(item.hwnd)
 
         for item in windows:
-            if item.class_name == "EVA_Window_Dblclk":
-                if item.text == "" and item.parent_hwnd in main_handles:
-                    candidates.add(item.hwnd)
-            elif item.class_name == "EVA_Window":
-                if item.text == "" and item.parent_hwnd == 0:
-                    candidates.add(item.hwnd)
+            if item.class_name not in main_classes or item.text != "":
+                continue
+            if item.parent_hwnd in main_handles or item.parent_hwnd == 0:
+                candidates.add(item.hwnd)
 
         with self._data_lock:
             self._kakao_pids = pids
@@ -319,8 +319,9 @@ class LayoutOnlyEngine:
         )
 
     def _is_main_title(self, title: str) -> bool:
+        title_lc = (title or "").lower()
         for token in self.rules.main_window_titles:
-            if token and token in (title or ""):
+            if token and token.lower() in title_lc:
                 return True
         return False
 

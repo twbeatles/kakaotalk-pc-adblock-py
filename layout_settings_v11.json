@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "run_on_startup": false,
+  "start_minimized": true,
+  "poll_interval_ms": 100,
+  "aggressive_mode": true,
+  "log_level": "INFO"
+}

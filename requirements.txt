@@ -1,7 +1,5 @@
 psutil
 pystray
 Pillow
-pywinauto
 pywin32
-comtypes
 pytest

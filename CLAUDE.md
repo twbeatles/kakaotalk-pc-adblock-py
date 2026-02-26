@@ -1,204 +1,49 @@
-# AI Context: KakaoTalk PC AdBlocker Pro v10.0
+# AI Context: KakaoTalk Layout AdBlocker v11
 
-> 이 문서는 AI 에이전트가 프로젝트를 이해하고 코드를 수정할 때 참고해야 할 핵심 정보입니다.
+## 개요
 
-## 1. 프로젝트 개요
+- 목적: 카카오톡 Windows 클라이언트의 광고 영역을 레이아웃 조정으로 제거
+- 버전: `11.x`
+- 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, 100ms 폴링 엔진
 
-| 항목 | 내용 |
-|:--|:--|
-| **목적** | 카카오톡 PC 버전의 광고 차단 및 레이아웃 정리 |
-| **언어** | Python 3.9+ |
-| **GUI** | tkinter (Tk/Tcl) |
-| **최신 버전** | v10.0 (Event-Driven Architecture) |
-| **코드 규모** | 약 1,100줄, 15개 클래스 |
+## 엔트리포인트
 
-## 2. 핵심 아키텍처
+- 실행: `kakaotalk_layout_adblock_v11.py`
+- 기존 `카카오톡 광고제거 v10.0.py`는 사용중단 안내만 출력
 
-### 3-Layer 광고 차단 시스템
+## 핵심 모듈
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ Layer 1: Hosts 파일 차단                                │
-│ → 광고 서버 도메인을 0.0.0.0으로 리다이렉트             │
-│ → HostsManager 클래스                                   │
-├─────────────────────────────────────────────────────────┤
-│ Layer 2: Windows API 레이아웃 조작                      │
-│ → SetWinEventHook으로 이벤트 감지                       │
-│ → ShowWindow(SW_HIDE)로 광고 숨김                       │
-│ → SetWindowPos로 메인 뷰 리사이징                       │
-│ → 레이아웃 휴리스틱(하단 배너) 감지                     │
-│ → EventDrivenAdBlocker 클래스                           │
-├─────────────────────────────────────────────────────────┤
-│ Layer 3: AdFit 레지스트리 차단                          │
-│ → 팝업 광고 LUD 값 조작                                 │
-│ → AdFitBlocker 클래스                                   │
-└─────────────────────────────────────────────────────────┘
-```
+- `kakao_adblocker/config.py`
+  - `LayoutSettingsV11`, `LayoutRulesV11`
+  - `%APPDATA%\KakaoTalkAdBlockerLayout` 경로 관리
+- `kakao_adblocker/event_engine.py`
+  - `LayoutOnlyEngine`, `EngineState`
+  - watch/apply 루프(100ms)
+- `kakao_adblocker/layout_engine.py`
+  - `OnlineMainView` / `LockModeView` 리사이즈 규칙
+  - 공격적 배너 휴리스틱
+- `kakao_adblocker/ui.py`
+  - `TrayController`
+  - 트레이 메뉴: 상태/OnOff/시작프로그램/창 열기/로그/릴리스/종료
+- `kakao_adblocker/services.py`
+  - `ProcessInspector`, `StartupManager`, `ReleaseService`
 
-### 이벤트 기반 감지 흐름
+## 동작 규칙
 
-```
-SetWinEventHook ──► _win_event_callback ──► Queue ──► _process_events
-       │                                                    │
-       │                                                    ▼
-       │                                        PatternMatcher.is_ad_window()
-       │                                                    │
-       ▼                                                    ▼
-  Message Pump                                    ShowWindow(hwnd, SW_HIDE)
-  (GetMessage loop)                                         │
-                                                            ▼
-                                                   _resize_view()
-```
+1. `kakaotalk.exe` PID 집합을 수집
+2. 메인 윈도우(`EVA_Window_Dblclk`/`EVA_Window`) 식별
+3. `OnlineMainView`: `width=parent-2`, `height=parent-31`
+4. `LockModeView`: `width=parent-2`, `height=parent`
+5. `Chrome Legacy Window` 하위 광고 서브윈도우 숨김
+6. 공격 모드에서 `Chrome_WidgetWin_* + ad token`/하단 배너 후보 숨김
 
-## 3. 핵심 클래스 설명
+## 설정 파일
 
-### 광고 차단 엔진
+- `%APPDATA%\KakaoTalkAdBlockerLayout\layout_settings_v11.json`
+- `%APPDATA%\KakaoTalkAdBlockerLayout\layout_rules_v11.json`
+- `%APPDATA%\KakaoTalkAdBlockerLayout\layout_adblock.log`
 
-| 클래스 | 역할 | 주요 메서드 |
-|:--|:--|:--|
-| `EventDrivenAdBlocker` | 이벤트 기반 광고 감지/차단 엔진 | `start()`, `stop()`, `_win_event_callback()` |
-| `PatternMatcher` | 외부 설정 기반 패턴 매칭 | `is_ad_window()`, `is_resize_target()` |
-| `PatternConfig` | ad_patterns.json 로드/관리 | `_load_config()`, `_parse_patterns()` |
+## 레거시 보관
 
-### Windows API 래퍼
-
-| 클래스 | 역할 | 주요 메서드 |
-|:--|:--|:--|
-| `User32` | user32.dll 정적 래퍼 | `get_pid()`, `get_class()`, `get_text()`, `show_window()`, `set_window_pos()` |
-
-### 시스템 관리
-
-| 클래스 | 역할 | 주요 메서드 |
-|:--|:--|:--|
-| `HostsManager` | Hosts 파일 조작 | `block(domains)`, `get_status()` |
-| `AdFitBlocker` | 레지스트리 팝업 차단 | `_update()` (LUD 값 조작) |
-| `SystemManager` | 프로세스/DNS/권한 관리 | `is_admin()`, `flush_dns()`, `restart_process()` |
-| `StartupManager` | 윈도우 시작프로그램 | `is_enabled()`, `set_enabled()` |
-| `SmartOptimizeResult` | 스마트 최적화 단계별 결과 계약 | `overall_status` (`failed`/`partial`/`success`) |
-
-### 스마트 최적화 실행 함수
-
-| 함수 | 역할 | 반환 |
-|:--|:--|:--|
-| `run_smart_optimize(logger, hosts_mgr, domains)` | Hosts 차단 → DNS flush → 프로세스 재시작 순차 실행 | `SmartOptimizeResult` |
-| `SmartOptimizeResult` | 스마트 최적화 단계별 결과 계약 | `overall_status` (`failed`/`partial`/`success`) |
-
-### 스마트 최적화 실행 함수
-
-| 함수 | 역할 | 반환 |
-|:--|:--|:--|
-| `run_smart_optimize(logger, hosts_mgr, domains)` | Hosts 차단 → DNS flush → 프로세스 재시작 순차 실행 | `SmartOptimizeResult` |
-
-### UI 컴포넌트
-
-| 클래스 | 역할 |
-|:--|:--|
-| `MainWindow` | 메인 GUI 윈도우 |
-| `ModernButton` | 둥근 모서리 커스텀 버튼 |
-| `StatusCard` | 상태 표시 카드 위젯 |
-| `TrayManager` | 시스템 트레이 관리 |
-
-**UI 설정:** 실시간 보호 토글, 테마(라이트/다크) 즉시 적용 지원
-
-## 4. 중요 설정 파일
-
-### ad_patterns.json (외부 패턴 설정)
-
-```json
-{
-  "ad_patterns": {
-    "hide": [
-      {"type": "text_startswith", "value": "BannerAdView"},
-      {"type": "text_startswith", "value": "AdView"}
-    ]
-  },
-  "resize_patterns": {
-    "targets": [
-      {"type": "text_startswith", "value": "OnlineMainView"}
-    ]
-  },
-  "layout_heuristics": {
-    "enabled": true,
-    "min_height_px": 80,
-    "max_height_px": 170,
-    "min_width_ratio": 0.85,
-    "bottom_margin_px": 10
-  },
-  "timing": {
-    "scan_interval_active_ms": 500,
-    "scan_interval_idle_ms": 2000
-  },
-  "event_hook": {
-    "enabled": true,
-    "fallback_polling": true
-  }
-}
-```
-
-**지원하는 패턴 타입:**
-- `text_startswith` - 윈도우 텍스트가 특정 문자열로 시작
-- `text_contains` - 윈도우 텍스트에 특정 문자열 포함
-- `text_equals` - 정확히 일치
-- `text_regex` - 정규식 매칭
-- `class_equals` - 클래스 이름 일치
-- `class_startswith` - 클래스 이름 시작
-
-### adblock_settings.json (사용자 설정)
-- `realtime_protection`: 전체 차단 엔진 ON/OFF
-- `theme`: `light`/`dark`
-
-## 5. 핵심 규칙
-
-1. **관리자 권한 필수**: Hosts 파일 수정에 필요
-2. **외부 패턴 설정**: `ad_patterns.json`에서 광고 패턴 관리 (코드 수정 불필요)
-3. **Thread-Safety**: 모든 윈도우 조작은 `RLock`으로 보호
-4. **Event Hook 우선**: 이벤트 훅 실패 시에만 Polling 폴백 사용
-5. **폴링 간격**: `timing.scan_interval_*` 설정으로 폴링 간격 조정
-6. **Smart Optimize 실패 안전성**:
-   - Hosts 단계 실패 시 DNS flush/재시작을 실행하지 않음
-   - UI는 `failed/partial/success` 상태별로 명확히 분기
-7. **Hosts 마커 손상 정책**:
-   - `# [KakaoTalk AdBlock Start]` / `# [KakaoTalk AdBlock End]`가 비정상(누락/역순/중복)일 때 파일 수정 금지
-   - `block()`/`unblock()`은 즉시 실패 반환(안전중단)
-8. **프로세스명 정규화**:
-   - `KakaoTalk`와 `kakaotalk.exe` 입력을 모두 `kakaotalk.exe`로 정규화
-   - `tasklist`/`taskkill` 호출에서 `.exe.exe` 중복 금지
-## 6. 디렉토리 구조
-
-```
-├── 카카오톡 광고제거 v10.0.py    # 메인 실행 파일 (1,087줄)
-├── ad_patterns.json              # 광고 패턴 설정
-├── adblock_settings.json         # 사용자 설정 (auto_start, minimize_to_tray 등)
-├── blocked_domains.txt           # 차단할 도메인 목록 (약 30개)
-├── window_inspector.py           # 윈도우 구조 분석 도구
-├── kakaotalk_adblock.spec        # PyInstaller 빌드 스펙
-├── CLAUDE.md / GEMINI.md         # AI 컨텍스트 파일
-├── README.md                     # 사용자 문서
-└── backup/                       # 이전 버전 보관 (v4.0~v9.0)
-```
-
-## 7. 빌드 및 실행
-
-```bash
-# Python으로 실행
-python "카카오톡 광고제거 v10.0.py"
-
-# PyInstaller 빌드
-pyinstaller kakaotalk_adblock.spec
-```
-
-## 8. 주의사항
-
-- 카카오톡 업데이트 시 윈도우 클래스/텍스트명이 변경될 수 있음
-- `ad_patterns.json`만 수정하면 새 광고 유형 대응 가능
-- `EVA_Window`는 카카오톡 메인 윈도우 클래스명
-
-## 9. 의존성
-
-| 패키지 | 필수 여부 | 용도 |
-|:--|:--|:--|
-| `tkinter` | 필수 | GUI 프레임워크 |
-| `ctypes` | 필수 | Windows API 호출 |
-| `psutil` | 선택 | 프로세스 감지 (없으면 tasklist 사용) |
-| `pystray` | 선택 | 시스템 트레이 아이콘 |
-| `PIL/Pillow` | 선택 | 트레이 아이콘 이미지 생성 |
+- 구버전 자산은 `legacy/`로 이동됨
+- 원본 모놀리식: `legacy/kakao_adblocker/legacy.py`

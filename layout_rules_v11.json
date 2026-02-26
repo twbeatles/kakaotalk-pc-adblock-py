@@ -1,0 +1,32 @@
+{
+  "main_window_classes": [
+    "EVA_Window_Dblclk",
+    "EVA_Window"
+  ],
+  "main_window_titles": [
+    "카카오톡",
+    "KakaoTalk"
+  ],
+  "main_view_prefix": "OnlineMainView",
+  "lock_view_prefix": "LockModeView",
+  "eva_child_class": "EVA_ChildWindow",
+  "custom_scroll_prefix": "_EVA_",
+  "chrome_legacy_title": "Chrome Legacy Window",
+  "chrome_widget_prefixes": [
+    "Chrome_WidgetWin_"
+  ],
+  "aggressive_ad_tokens": [
+    "Ad",
+    "AdFit",
+    "Advertisement",
+    "광고"
+  ],
+  "banner_min_height_px": 40,
+  "banner_max_height_px": 260,
+  "banner_min_width_ratio": 0.75,
+  "banner_bottom_margin_px": 40,
+  "layout_shadow_padding_px": 2,
+  "main_view_padding_px": 31,
+  "cache_ttl_seconds": 8.0,
+  "log_rate_limit_seconds": 8.0
+}

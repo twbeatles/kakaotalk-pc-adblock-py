@@ -99,9 +99,13 @@ class TrayController:
 
     def toggle_startup(self) -> None:
         current = StartupManager.is_enabled()
-        StartupManager.set_enabled(not current)
-        self.settings.run_on_startup = not current
+        target = not current
+        if not StartupManager.set_enabled(target):
+            self.logger.warning("Failed to update startup registration")
+            return
+        self.settings.run_on_startup = target
         self.settings.save(SETTINGS_FILE)
+        self.logger.info("Startup registration toggled: %s", "ON" if target else "OFF")
 
     def open_log_folder(self) -> None:
         ShellService.open_folder(APPDATA_DIR)

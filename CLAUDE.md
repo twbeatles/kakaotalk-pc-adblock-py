@@ -18,13 +18,14 @@
   - `%APPDATA%\KakaoTalkAdBlockerLayout` 경로 관리
 - `kakao_adblocker/event_engine.py`
   - `LayoutOnlyEngine`, `EngineState`
-  - watch/apply 루프(100ms)
+  - watch/apply 루프(100ms), `main_window_classes` 기반 메인 윈도우 식별
 - `kakao_adblocker/layout_engine.py`
   - `OnlineMainView` / `LockModeView` 리사이즈 규칙
-  - 공격적 배너 휴리스틱
+  - 공격적 배너 휴리스틱, 짧은 ad 토큰 단어 경계 매칭
 - `kakao_adblocker/ui.py`
   - `TrayController`
   - 트레이 메뉴: 상태/OnOff/시작프로그램/창 열기/로그/릴리스/종료
+  - 최소화 시작 시(`--minimized`/`start_minimized`) 시작 안내 팝업 생략
 - `kakao_adblocker/services.py`
   - `ProcessInspector`, `StartupManager`, `ReleaseService`
 
@@ -36,6 +37,7 @@
 4. `LockModeView`: `width=parent-2`, `height=parent`
 5. `Chrome Legacy Window` 하위 광고 서브윈도우 숨김
 6. 공격 모드에서 `Chrome_WidgetWin_* + ad token`/하단 배너 후보 숨김
+7. 시작프로그램 토글은 레지스트리 갱신 성공 시에만 설정 파일에 반영
 
 ## 설정 파일
 

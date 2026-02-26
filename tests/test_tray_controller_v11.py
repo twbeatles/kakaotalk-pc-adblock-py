@@ -94,3 +94,37 @@ def test_tray_controller_startup_notice_once(monkeypatch):
     controller.show_startup_notice()
     controller.show_startup_notice()
     assert called["popup"] == 1
+
+
+def test_toggle_startup_does_not_persist_on_registry_failure(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True, run_on_startup=False)
+    saved = {"called": 0}
+    monkeypatch.setattr(settings, "save", lambda _path=None: saved.__setitem__("called", saved["called"] + 1))
+    monkeypatch.setattr("kakao_adblocker.ui.StartupManager.is_enabled", lambda: False)
+    monkeypatch.setattr("kakao_adblocker.ui.StartupManager.set_enabled", lambda _enable: False)
+
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    controller.toggle_startup()
+
+    assert settings.run_on_startup is False
+    assert saved["called"] == 0
+
+
+def test_toggle_startup_persists_on_registry_success(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True, run_on_startup=False)
+    saved = {"called": 0}
+    monkeypatch.setattr(settings, "save", lambda _path=None: saved.__setitem__("called", saved["called"] + 1))
+    monkeypatch.setattr("kakao_adblocker.ui.StartupManager.is_enabled", lambda: False)
+    monkeypatch.setattr("kakao_adblocker.ui.StartupManager.set_enabled", lambda _enable: True)
+
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    controller.toggle_startup()
+
+    assert settings.run_on_startup is True
+    assert saved["called"] == 1

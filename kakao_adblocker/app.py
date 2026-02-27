@@ -1,14 +1,30 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
-import tkinter as tk
-from typing import Optional
+from types import SimpleNamespace
+from typing import Any, Optional
 
 from .config import LayoutRulesV11, LayoutSettingsV11, VERSION, ensure_runtime_files
 from .event_engine import LayoutOnlyEngine
 from .logging_setup import setup_logging
-from .ui import TrayController
+
+# Lazy-loaded UI dependencies for faster non-UI startup paths.
+tk: Any = SimpleNamespace(Tk=None)
+TrayController: Any = None
+
+
+def _load_ui_dependencies() -> None:
+    global tk, TrayController
+    if getattr(tk, "Tk", None) is None:
+        import tkinter as _tk
+
+        tk = _tk
+    if TrayController is None:
+        from .ui import TrayController as _TrayController
+
+        TrayController = _TrayController
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,6 +36,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    if os.name != "nt":
+        print("This application only supports Windows.", file=sys.stderr)
+        return 2
+
     args = build_parser().parse_args(argv if argv is not None else sys.argv[1:])
 
     ensure_runtime_files()
@@ -37,6 +57,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("KakaoTalk not running (or root not found)")
         return 1
 
+    _load_ui_dependencies()
     root = tk.Tk()
     controller = TrayController(root, engine, settings, logger)
     engine.start()

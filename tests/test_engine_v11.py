@@ -1,8 +1,10 @@
 import logging
+import threading
 import time
 
 from kakao_adblocker.config import LayoutRulesV11, LayoutSettingsV11
 from kakao_adblocker.event_engine import LayoutOnlyEngine
+from kakao_adblocker.win32_api import SW_HIDE, SW_SHOW
 
 
 class FakeAPI:
@@ -23,6 +25,7 @@ class FakeAPI:
         }
         self.set_pos_calls = []
         self.hide_calls = []
+        self.show_calls = []
         self.send_calls = []
 
     def enum_windows(self, callback):
@@ -58,8 +61,12 @@ class FakeAPI:
         return self.windows[hwnd]["visible"]
 
     def show_window(self, hwnd, _cmd):
-        self.hide_calls.append(hwnd)
-        self.windows[hwnd]["visible"] = False
+        if _cmd == SW_HIDE:
+            self.hide_calls.append(hwnd)
+            self.windows[hwnd]["visible"] = False
+        elif _cmd == SW_SHOW:
+            self.show_calls.append(hwnd)
+            self.windows[hwnd]["visible"] = True
         return True
 
     def set_window_pos(self, hwnd, x, y, width, height, _flags):
@@ -155,3 +162,224 @@ def test_engine_uses_rules_main_window_classes():
     engine.apply_once()
     resized_handles = [x[0] for x in api.set_pos_calls]
     assert 101 in resized_handles
+
+
+def test_engine_restores_hidden_windows_when_disabled():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    rules = LayoutRulesV11()
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    engine.scan_once()
+    engine.apply_once()
+    assert api.windows[102]["visible"] is False
+    assert api.windows[200]["visible"] is False
+
+    engine.set_enabled(False)
+
+    assert api.windows[102]["visible"] is True
+    assert api.windows[200]["visible"] is True
+    assert 102 in api.show_calls
+    assert 200 in api.show_calls
+
+
+def test_engine_restores_hidden_windows_on_stop():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    rules = LayoutRulesV11()
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    engine.scan_once()
+    engine.apply_once()
+    assert api.windows[102]["visible"] is False
+    assert api.windows[200]["visible"] is False
+
+    engine.stop()
+
+    assert api.windows[102]["visible"] is True
+    assert api.windows[200]["visible"] is True
+
+
+def test_engine_cache_access_is_thread_safe_under_stress():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    rules = LayoutRulesV11(cache_ttl_seconds=0.1)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    errors = []
+
+    def read_loop():
+        try:
+            for _ in range(800):
+                engine._get_text(100)
+                engine._get_class(100)
+        except Exception as exc:  # pragma: no cover - should never happen
+            errors.append(exc)
+
+    def cleanup_loop():
+        try:
+            for _ in range(800):
+                engine._cleanup_caches()
+        except Exception as exc:  # pragma: no cover - should never happen
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=read_loop),
+        threading.Thread(target=read_loop),
+        threading.Thread(target=cleanup_loop),
+        threading.Thread(target=cleanup_loop),
+    ]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join(timeout=5.0)
+
+    assert errors == []
+
+
+def test_engine_candidate_detection_requires_class_and_legacy_signature():
+    api = FakeAPI()
+    api.windows[200]["class"] = "AdCandidateWin"
+    api.windows[210] = {
+        "pid": 42,
+        "class": "AdCandidateWin",
+        "text": "",
+        "parent": 0,
+        "rect": (20, 20, 320, 320),
+        "visible": True,
+    }
+    api.children[210] = []
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    rules = LayoutRulesV11(ad_candidate_classes=["AdCandidateWin"])
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert 200 in api.hide_calls
+    assert 210 not in api.hide_calls
+
+
+def test_engine_pid_scan_is_throttled():
+    api = FakeAPI()
+    calls = {"count": 0}
+
+    def provider(_name):
+        calls["count"] += 1
+        return {42}
+
+    settings = LayoutSettingsV11(
+        enabled=True,
+        poll_interval_ms=100,
+        idle_poll_interval_ms=500,
+        pid_scan_interval_ms=5000,
+        cache_cleanup_interval_ms=1000,
+        aggressive_mode=True,
+    )
+    engine = LayoutOnlyEngine(logging.getLogger("test"), settings, LayoutRulesV11(), api=api, process_ids_provider=provider)
+
+    engine.scan_once()
+    engine.scan_once()
+
+    assert calls["count"] == 1
+
+
+def test_engine_switches_between_idle_and_active_intervals():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(
+        enabled=True,
+        poll_interval_ms=100,
+        idle_poll_interval_ms=500,
+        pid_scan_interval_ms=500,
+        cache_cleanup_interval_ms=1000,
+        aggressive_mode=True,
+    )
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: set(),
+    )
+
+    now = time.time()
+    with engine._data_lock:
+        engine._kakao_pids = set()
+        engine._last_activity = 0.0
+    assert abs(engine._current_loop_interval_seconds(now) - 0.5) < 1e-9
+
+    with engine._data_lock:
+        engine._kakao_pids = {42}
+    assert abs(engine._current_loop_interval_seconds(now) - 0.1) < 1e-9
+
+    with engine._data_lock:
+        engine._kakao_pids = set()
+        engine._last_activity = now - 1.0
+    assert abs(engine._current_loop_interval_seconds(now) - 0.1) < 1e-9
+
+    with engine._data_lock:
+        engine._last_activity = now - 4.0
+    assert abs(engine._current_loop_interval_seconds(now) - 0.5) < 1e-9
+
+
+def test_engine_cache_cleanup_is_throttled(monkeypatch):
+    api = FakeAPI()
+    settings = LayoutSettingsV11(
+        enabled=True,
+        poll_interval_ms=100,
+        idle_poll_interval_ms=500,
+        pid_scan_interval_ms=500,
+        cache_cleanup_interval_ms=1000,
+        aggressive_mode=True,
+    )
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    called = {"count": 0}
+    monkeypatch.setattr(engine, "_cleanup_caches", lambda: called.__setitem__("count", called["count"] + 1))
+
+    engine._maybe_cleanup_caches(now=10.0)
+    engine._maybe_cleanup_caches(now=10.4)
+    engine._maybe_cleanup_caches(now=11.1)
+
+    assert called["count"] == 2
+
+
+def test_engine_default_idle_settings_meet_500ms_target():
+    api = FakeAPI()
+    settings = LayoutSettingsV11()
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: set(),
+    )
+
+    assert engine._idle_poll_interval_seconds() <= 0.5
+    assert engine._pid_scan_interval_seconds() <= 0.5

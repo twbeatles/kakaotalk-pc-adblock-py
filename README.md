@@ -5,15 +5,23 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 ## 핵심 변경점
 
 - `hosts/DNS/AdFit` 기능을 완전히 제거했습니다.
-- `blurfx/KakaoTalkAdBlock` 방식에 맞춰 `100ms` 폴링 기반 레이아웃 엔진으로 재설계했습니다.
+- `blurfx/KakaoTalkAdBlock` 방식에 맞춰 레이아웃 엔진으로 재설계했습니다.
+- 폴링은 적응형으로 동작합니다: 활성 상태 `100ms`, 유휴 상태 `500ms`(기본값).
 - 기본 동작은 트레이 중심이며, 설정 창은 필요 시 열 수 있습니다.
 
 ## 최근 안정성 개선 (v11.0.x)
 
 - `--minimized` 또는 `start_minimized=true`로 시작할 때는 시작 안내 팝업을 띄우지 않습니다.
 - 엔진이 `layout_rules_v11.json`의 `main_window_classes`를 실제 메인 윈도우 탐지에 반영합니다.
+- 광고 후보 탐지는 `ad_candidate_classes`를 분리 적용하고, 최상위 후보는 `Chrome Legacy Window` 시그니처를 만족할 때만 처리합니다.
 - 공격 모드에서 짧은 토큰(예: `Ad`)은 단어 경계 기준으로 매칭하여 오탐(`ReadLater`, `Header` 등)을 줄였습니다.
 - 시작프로그램 토글 시 레지스트리 갱신 실패가 발생하면 설정 파일(`run_on_startup`)을 잘못 저장하지 않습니다.
+- 앱 시작 시 `run_on_startup`은 레지스트리 상태를 기준으로 1회 동기화됩니다.
+- 차단 OFF 전환 또는 앱 종료 시, 이전에 숨김/이동한 광고 창은 즉시 원복됩니다.
+- 상태 표시에 마지막 오류(`last_error`)와 마지막 갱신 시각(`last_tick`)이 함께 표시됩니다.
+- PID 스캔/캐시 정리는 주기 스로틀이 적용되어 유휴 상태 CPU 사용량을 줄였습니다.
+- `--dump-tree` 경로는 UI/트레이 모듈을 지연 로딩하여 시작 오버헤드를 최소화합니다.
+- 기본 설정(`idle_poll_interval_ms=500`) 기준으로 유휴 복귀 지연은 최대 약 500ms를 목표로 합니다.
 
 ## 실행
 
@@ -24,11 +32,21 @@ python kakaotalk_layout_adblock_v11.py --dump-tree
 python kakaotalk_layout_adblock_v11.py --dump-tree --dump-dir "C:\temp"
 ```
 
+- 이 도구는 Windows 전용입니다. 비Windows 환경에서는 `This application only supports Windows.` 메시지와 함께 종료 코드 `2`로 종료됩니다.
+
 ## 설정/로그 경로
 
 - `%APPDATA%\KakaoTalkAdBlockerLayout\layout_settings_v11.json`
 - `%APPDATA%\KakaoTalkAdBlockerLayout\layout_rules_v11.json`
 - `%APPDATA%\KakaoTalkAdBlockerLayout\layout_adblock.log`
+
+`layout_settings_v11.json` 고급 성능 설정(기본값):
+
+- `idle_poll_interval_ms`: `500`
+- `pid_scan_interval_ms`: `500`
+- `cache_cleanup_interval_ms`: `1000`
+
+신규 성능 필드가 없는 구버전 설정 파일도 기본값으로 자동 보완되어 그대로 동작합니다.
 
 기존 `adblock_settings.json`, `ad_patterns.json`, `blocked_domains.txt`는 읽지 않습니다.
 
@@ -46,6 +64,7 @@ python kakaotalk_layout_adblock_v11.py --dump-tree --dump-dir "C:\temp"
 
 - 상태
 - 차단 On/Off
+- 공격 모드
 - 시작프로그램 등록
 - 창 열기
 - 로그 폴더 열기
@@ -60,6 +79,7 @@ pyinstaller kakaotalk_adblock.spec
 
 `kakaotalk_adblock.spec`는 **onefile** 빌드 설정이며, 결과물은 `dist/KakaoTalkLayoutAdBlocker_v11.exe`로 생성됩니다.
 - `.spec`는 프로젝트 루트 기준 절대 경로를 사용하도록 보강되어, 빌드 실행 위치에 덜 민감합니다.
+- `.spec`는 lazy-import 경로(`kakao_adblocker.app`, `kakao_adblocker.ui`, `pystray`, `PIL`)를 `hiddenimports`로 명시해 onefile 패키징 누락을 방지합니다.
 
 `uac_admin`은 제거되어 관리자 권한 없이 실행됩니다.
 

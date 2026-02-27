@@ -6,8 +6,18 @@ from PyInstaller.utils.hooks import collect_submodules
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-hiddenimports = ["psutil", "PIL", "pystray"]
+# Keep lazy-imported runtime modules explicit so onefile packaging stays stable.
+hiddenimports = [
+    "psutil",
+    "PIL",
+    "PIL.Image",
+    "PIL.ImageDraw",
+    "pystray",
+    "kakao_adblocker.app",
+    "kakao_adblocker.ui",
+]
 hiddenimports += collect_submodules("pystray")
+hiddenimports += collect_submodules("PIL")
 
 a = Analysis(
     [str(PROJECT_ROOT / "kakaotalk_layout_adblock_v11.py")],

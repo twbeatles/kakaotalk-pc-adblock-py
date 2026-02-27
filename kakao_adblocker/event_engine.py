@@ -12,7 +12,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 from .config import APPDATA_DIR, LayoutRulesV11, LayoutSettingsV11
 from .layout_engine import LayoutEngine
 from .services import ProcessInspector
-from .win32_api import SW_HIDE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, WM_CLOSE, Win32API
+from .win32_api import SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, WM_CLOSE, Win32API
 
 Rect = Tuple[int, int, int, int]
 
@@ -41,6 +41,12 @@ class EngineState:
     last_error: str = ""
 
 
+@dataclass
+class HiddenWindowSnapshot:
+    was_visible: bool
+    rect: Optional[Rect]
+
+
 class LayoutOnlyEngine:
     def __init__(
         self,
@@ -60,14 +66,22 @@ class LayoutOnlyEngine:
         self._state = EngineState(enabled=self.settings.enabled, running=False)
         self._state_lock = threading.Lock()
         self._data_lock = threading.Lock()
+        self._cache_lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._wake_event = threading.Event()
         self._watch_thread: Optional[threading.Thread] = None
         self._apply_thread: Optional[threading.Thread] = None
 
+        self._main_window_class_set = frozenset(self.rules.main_window_classes)
+        self._ad_candidate_class_set = frozenset(self.rules.ad_candidate_classes)
         self._main_window_handles: Set[int] = set()
         self._ad_subwindow_candidates: Set[int] = set()
         self._kakao_pids: Set[int] = set()
-        self._hidden_hwnds: Set[int] = set()
+        self._pid_scan_cache: Set[int] = set()
+        self._last_pid_scan: float = 0.0
+        self._last_cache_cleanup: float = 0.0
+        self._last_activity: float = 0.0
+        self._hidden_windows: Dict[int, HiddenWindowSnapshot] = {}
         self._custom_scroll_cache: Dict[int, bool] = {}
 
         self._text_cache: Dict[int, Tuple[float, str]] = {}
@@ -86,8 +100,14 @@ class LayoutOnlyEngine:
             self._state.running = True
             self._state.enabled = bool(self.settings.enabled)
             self._state.last_error = ""
+        with self._data_lock:
+            self._pid_scan_cache = set()
+            self._last_pid_scan = 0.0
+            self._last_cache_cleanup = 0.0
+            self._last_activity = 0.0
 
         self._stop_event.clear()
+        self._wake_event.clear()
         self._watch_thread = threading.Thread(target=self._watch_loop, daemon=True)
         self._apply_thread = threading.Thread(target=self._apply_loop, daemon=True)
         self._watch_thread.start()
@@ -95,19 +115,27 @@ class LayoutOnlyEngine:
 
     def stop(self) -> None:
         self._stop_event.set()
+        self._wake_event.set()
         if self._watch_thread and self._watch_thread.is_alive():
             self._watch_thread.join(timeout=2.0)
         if self._apply_thread and self._apply_thread.is_alive():
             self._apply_thread.join(timeout=2.0)
         self._watch_thread = None
         self._apply_thread = None
+        self._restore_hidden_windows(reason="stop")
         with self._state_lock:
             self._state.running = False
 
     def set_enabled(self, enabled: bool) -> None:
-        self.settings.enabled = bool(enabled)
+        enabled_value = bool(enabled)
+        self.settings.enabled = enabled_value
         with self._state_lock:
-            self._state.enabled = bool(enabled)
+            was_enabled = self._state.enabled
+            self._state.enabled = enabled_value
+        if was_enabled and not enabled_value:
+            self._restore_hidden_windows(reason="disabled")
+        if enabled_value:
+            self._wake_event.set()
 
     def force_scan(self) -> None:
         self.scan_once()
@@ -119,8 +147,68 @@ class LayoutOnlyEngine:
     def apply_once(self) -> None:
         self._apply_once()
 
-    def _poll_interval_seconds(self) -> float:
+    def _active_poll_interval_seconds(self) -> float:
         return max(int(self.settings.poll_interval_ms), 50) / 1000.0
+
+    def _idle_poll_interval_seconds(self) -> float:
+        return max(int(self.settings.idle_poll_interval_ms), 200) / 1000.0
+
+    def _pid_scan_interval_seconds(self) -> float:
+        return max(int(self.settings.pid_scan_interval_ms), 100) / 1000.0
+
+    def _cache_cleanup_interval_seconds(self) -> float:
+        return max(int(self.settings.cache_cleanup_interval_ms), 250) / 1000.0
+
+    def _is_enabled(self) -> bool:
+        with self._state_lock:
+            return self._state.enabled
+
+    def _is_active_mode(self, now: Optional[float] = None) -> bool:
+        now_value = now or time.time()
+        with self._data_lock:
+            if self._kakao_pids:
+                return True
+            last_activity = self._last_activity
+        return bool(last_activity and (now_value - last_activity) <= 3.0)
+
+    def _current_loop_interval_seconds(self, now: Optional[float] = None) -> float:
+        if self._is_active_mode(now):
+            return self._active_poll_interval_seconds()
+        return self._idle_poll_interval_seconds()
+
+    def _wait_next_tick(self, timeout: float) -> None:
+        if timeout <= 0:
+            return
+        self._wake_event.wait(timeout)
+        self._wake_event.clear()
+
+    def _mark_activity(self, now: float, wake: bool = False) -> None:
+        with self._data_lock:
+            self._last_activity = now
+        if wake:
+            self._wake_event.set()
+
+    def _get_kakao_pids(self, now: float) -> Set[int]:
+        scan_interval = self._pid_scan_interval_seconds()
+        with self._data_lock:
+            use_cached = self._last_pid_scan > 0 and (now - self._last_pid_scan) < scan_interval
+            if use_cached:
+                return set(self._pid_scan_cache)
+
+        pids = set(self._process_ids_provider("kakaotalk.exe"))
+        with self._data_lock:
+            self._pid_scan_cache = set(pids)
+            self._last_pid_scan = now
+        return pids
+
+    def _maybe_cleanup_caches(self, now: Optional[float] = None, force: bool = False) -> None:
+        now_value = now or time.time()
+        interval = self._cache_cleanup_interval_seconds()
+        with self._data_lock:
+            if not force and self._last_cache_cleanup > 0 and (now_value - self._last_cache_cleanup) < interval:
+                return
+            self._last_cache_cleanup = now_value
+        self._cleanup_caches()
 
     def _watch_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -128,7 +216,7 @@ class LayoutOnlyEngine:
                 self._watch_once()
             except Exception as e:
                 self._set_error(f"watch: {e}")
-            time.sleep(self._poll_interval_seconds())
+            self._wait_next_tick(self._current_loop_interval_seconds())
 
     def _apply_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -136,17 +224,19 @@ class LayoutOnlyEngine:
                 self._apply_once()
             except Exception as e:
                 self._set_error(f"apply: {e}")
-            time.sleep(self._poll_interval_seconds())
+            self._wait_next_tick(self._current_loop_interval_seconds())
 
     def _watch_once(self) -> None:
-        pids = set(self._process_ids_provider("kakaotalk.exe"))
-        windows = self._collect_windows(pids)
+        now = time.time()
+        was_active = self._is_active_mode(now)
+        pids = self._get_kakao_pids(now)
+        windows = self._collect_windows(pids) if pids else []
         main_handles: Set[int] = set()
         candidates: Set[int] = set()
-        main_classes = set(self.rules.main_window_classes)
+        legacy_text_memo: Dict[Tuple[int, str, int], bool] = {}
 
         for item in windows:
-            if item.class_name not in main_classes:
+            if item.class_name not in self._main_window_class_set:
                 continue
             if item.parent_hwnd != 0 or not item.text:
                 continue
@@ -155,9 +245,16 @@ class LayoutOnlyEngine:
             main_handles.add(item.hwnd)
 
         for item in windows:
-            if item.class_name not in main_classes or item.text != "":
+            if item.class_name not in self._ad_candidate_class_set or item.text != "":
                 continue
-            if item.parent_hwnd in main_handles or item.parent_hwnd == 0:
+            if item.parent_hwnd in main_handles:
+                candidates.add(item.hwnd)
+                continue
+            if item.parent_hwnd == 0 and self._has_window_text(
+                item.hwnd,
+                self.rules.chrome_legacy_title,
+                memo=legacy_text_memo,
+            ):
                 candidates.add(item.hwnd)
 
         with self._data_lock:
@@ -165,15 +262,18 @@ class LayoutOnlyEngine:
             self._main_window_handles = main_handles
             self._ad_subwindow_candidates = candidates
 
+        if pids:
+            self._mark_activity(now, wake=not was_active)
+
         with self._state_lock:
             self._state.kakao_pid_count = len(pids)
             self._state.main_window_count = len(main_handles)
-            self._state.last_tick = time.time()
+            self._state.last_tick = now
 
-        self._cleanup_caches()
+        self._maybe_cleanup_caches(now)
 
     def _apply_once(self) -> None:
-        if not self.state.enabled:
+        if not self._is_enabled():
             return
 
         with self._data_lock:
@@ -184,6 +284,8 @@ class LayoutOnlyEngine:
         resized = 0
         hidden = 0
         closed = 0
+        now = time.time()
+        legacy_text_memo: Dict[Tuple[int, str, int], bool] = {}
 
         for wnd in main_handles:
             if not self.api.is_window(wnd):
@@ -197,6 +299,7 @@ class LayoutOnlyEngine:
             children = self._enum_children(wnd)
             if not self._is_main_window(children):
                 continue
+            parent_text = self._get_text(wnd)
             for child in children:
                 if not self.api.is_window(child):
                     continue
@@ -204,13 +307,14 @@ class LayoutOnlyEngine:
                     continue
                 class_name = self._get_class(child)
                 window_text = self._get_text(child)
-                parent_text = self._get_text(wnd)
 
                 if class_name == self.rules.eva_child_class and window_text == "" and parent_text != "":
-                    has_custom_scroll = self._custom_scroll_cache.get(wnd)
+                    with self._cache_lock:
+                        has_custom_scroll = self._custom_scroll_cache.get(wnd)
                     if has_custom_scroll is None:
                         has_custom_scroll = self._class_name_starts_with(wnd, self.rules.custom_scroll_prefix)
-                        self._custom_scroll_cache[wnd] = has_custom_scroll
+                        with self._cache_lock:
+                            self._custom_scroll_cache[wnd] = has_custom_scroll
                     if self._layout.should_close_empty_eva_child(class_name, window_text, parent_text, has_custom_scroll):
                         self.api.send_message(child, WM_CLOSE, 0, 0)
                         closed += 1
@@ -231,7 +335,7 @@ class LayoutOnlyEngine:
             pid = self.api.get_window_thread_process_id(wnd)
             if pid not in kakao_pids:
                 continue
-            if self._has_window_text(wnd, self.rules.chrome_legacy_title):
+            if self._has_window_text(wnd, self.rules.chrome_legacy_title, memo=legacy_text_memo):
                 if self._hide_window(wnd):
                     hidden += 1
 
@@ -239,9 +343,9 @@ class LayoutOnlyEngine:
             self._state.resized_windows += resized
             self._state.hidden_windows += hidden
             self._state.closed_windows += closed
-            self._state.last_tick = time.time()
+            self._state.last_tick = now
 
-        self._cleanup_caches()
+        self._maybe_cleanup_caches(now)
 
     def _collect_windows(self, pids: Set[int]) -> List[WindowInfo]:
         if not pids:
@@ -292,22 +396,46 @@ class LayoutOnlyEngine:
                 return True
         return False
 
-    def _has_window_text(self, hwnd: int, target: str, max_depth: int = 8) -> bool:
+    def _has_window_text(
+        self,
+        hwnd: int,
+        target: str,
+        max_depth: int = 8,
+        memo: Optional[Dict[Tuple[int, str, int], bool]] = None,
+    ) -> bool:
+        cache_key = (hwnd, target, max_depth)
+        if memo is not None and cache_key in memo:
+            return memo[cache_key]
         if max_depth < 0 or not self.api.is_window(hwnd):
+            if memo is not None:
+                memo[cache_key] = False
             return False
         if self._get_text(hwnd) == target:
+            if memo is not None:
+                memo[cache_key] = True
             return True
         for child in self._enum_children(hwnd):
-            if self._has_window_text(child, target, max_depth - 1):
+            if self._has_window_text(child, target, max_depth - 1, memo=memo):
+                if memo is not None:
+                    memo[cache_key] = True
                 return True
+        if memo is not None:
+            memo[cache_key] = False
         return False
 
     def _hide_window(self, hwnd: int) -> bool:
+        if not self.api.is_window(hwnd):
+            return False
+        with self._cache_lock:
+            if hwnd not in self._hidden_windows:
+                self._hidden_windows[hwnd] = HiddenWindowSnapshot(
+                    was_visible=bool(self.api.is_window_visible(hwnd)),
+                    rect=self.api.get_window_rect(hwnd),
+                )
         self.api.show_window(hwnd, SW_HIDE)
         if not self.api.is_window_visible(hwnd):
-            self._hidden_hwnds.add(hwnd)
             return True
-        return bool(
+        moved = bool(
             self.api.set_window_pos(
                 hwnd,
                 -32000,
@@ -317,6 +445,44 @@ class LayoutOnlyEngine:
                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
             )
         )
+        if moved:
+            return True
+        with self._cache_lock:
+            self._hidden_windows.pop(hwnd, None)
+        return False
+
+    def _restore_hidden_windows(self, reason: str) -> None:
+        with self._cache_lock:
+            snapshots = list(self._hidden_windows.items())
+            self._hidden_windows.clear()
+        if not snapshots:
+            return
+        for hwnd, snap in snapshots:
+            if not self.api.is_window(hwnd):
+                continue
+            restored = True
+            if snap.rect:
+                left, top, right, bottom = snap.rect
+                width = right - left
+                height = bottom - top
+                if width > 0 and height > 0:
+                    if not self.api.set_window_pos(
+                        hwnd,
+                        left,
+                        top,
+                        width,
+                        height,
+                        SWP_NOZORDER | SWP_NOACTIVATE,
+                    ):
+                        restored = False
+                else:
+                    restored = False
+            if snap.was_visible:
+                self.api.show_window(hwnd, SW_SHOW)
+                if not self.api.is_window_visible(hwnd):
+                    restored = False
+            if not restored:
+                self.logger.warning("Failed to restore hidden window hwnd=%s reason=%s", hwnd, reason)
 
     def _is_main_title(self, title: str) -> bool:
         title_lc = (title or "").lower()
@@ -327,12 +493,13 @@ class LayoutOnlyEngine:
 
     def _get_cached(self, cache: Dict[int, Tuple[float, str]], hwnd: int, loader: Callable[[], str]) -> str:
         now = time.time()
-        hit = cache.get(hwnd)
-        if hit and (now - hit[0]) <= self.rules.cache_ttl_seconds:
-            return hit[1]
-        value = loader() or ""
-        cache[hwnd] = (now, value)
-        return value
+        with self._cache_lock:
+            hit = cache.get(hwnd)
+            if hit and (now - hit[0]) <= self.rules.cache_ttl_seconds:
+                return hit[1]
+            value = loader() or ""
+            cache[hwnd] = (now, value)
+            return value
 
     def _get_text(self, hwnd: int) -> str:
         return self._get_cached(self._text_cache, hwnd, lambda: self.api.get_window_text(hwnd))
@@ -343,13 +510,14 @@ class LayoutOnlyEngine:
     def _cleanup_caches(self) -> None:
         now = time.time()
         max_age = self.rules.cache_ttl_seconds
-        for cache in (self._text_cache, self._class_cache):
-            stale = [hwnd for hwnd, (ts, _value) in cache.items() if now - ts > max_age or not self.api.is_window(hwnd)]
-            for hwnd in stale:
-                cache.pop(hwnd, None)
+        with self._cache_lock:
+            for cache in (self._text_cache, self._class_cache):
+                stale = [hwnd for hwnd, (ts, _value) in cache.items() if now - ts > max_age or not self.api.is_window(hwnd)]
+                for hwnd in stale:
+                    cache.pop(hwnd, None)
 
-        self._hidden_hwnds = {hwnd for hwnd in self._hidden_hwnds if self.api.is_window(hwnd)}
-        self._custom_scroll_cache = {hwnd: val for hwnd, val in self._custom_scroll_cache.items() if self.api.is_window(hwnd)}
+            self._hidden_windows = {hwnd: snap for hwnd, snap in self._hidden_windows.items() if self.api.is_window(hwnd)}
+            self._custom_scroll_cache = {hwnd: val for hwnd, val in self._custom_scroll_cache.items() if self.api.is_window(hwnd)}
 
     def _set_error(self, message: str) -> None:
         now = time.time()
@@ -401,4 +569,4 @@ class LayoutOnlyEngine:
         return node
 
 
-__all__ = ["LayoutOnlyEngine", "EngineState", "WindowInfo"]
+__all__ = ["LayoutOnlyEngine", "EngineState", "WindowInfo", "HiddenWindowSnapshot"]

@@ -84,6 +84,9 @@ class LayoutSettingsV11:
     run_on_startup: bool = False
     start_minimized: bool = True
     poll_interval_ms: int = 100
+    idle_poll_interval_ms: int = 500
+    pid_scan_interval_ms: int = 500
+    cache_cleanup_interval_ms: int = 1000
     aggressive_mode: bool = True
     log_level: str = "INFO"
 
@@ -100,6 +103,24 @@ class LayoutSettingsV11:
                 run_on_startup=_coerce_bool(raw.get("run_on_startup"), defaults.run_on_startup),
                 start_minimized=_coerce_bool(raw.get("start_minimized"), defaults.start_minimized),
                 poll_interval_ms=_coerce_int(raw.get("poll_interval_ms"), defaults.poll_interval_ms, minimum=50, maximum=5000),
+                idle_poll_interval_ms=_coerce_int(
+                    raw.get("idle_poll_interval_ms"),
+                    defaults.idle_poll_interval_ms,
+                    minimum=200,
+                    maximum=5000,
+                ),
+                pid_scan_interval_ms=_coerce_int(
+                    raw.get("pid_scan_interval_ms"),
+                    defaults.pid_scan_interval_ms,
+                    minimum=100,
+                    maximum=5000,
+                ),
+                cache_cleanup_interval_ms=_coerce_int(
+                    raw.get("cache_cleanup_interval_ms"),
+                    defaults.cache_cleanup_interval_ms,
+                    minimum=250,
+                    maximum=10000,
+                ),
                 aggressive_mode=_coerce_bool(raw.get("aggressive_mode"), defaults.aggressive_mode),
                 log_level=_coerce_str(raw.get("log_level"), defaults.log_level).upper(),
             )
@@ -119,6 +140,7 @@ class LayoutSettingsV11:
 @dataclass
 class LayoutRulesV11:
     main_window_classes: List[str] = field(default_factory=lambda: ["EVA_Window_Dblclk", "EVA_Window"])
+    ad_candidate_classes: List[str] = field(default_factory=lambda: ["EVA_Window"])
     main_window_titles: List[str] = field(default_factory=lambda: ["카카오톡", "KakaoTalk"])
     main_view_prefix: str = "OnlineMainView"
     lock_view_prefix: str = "LockModeView"
@@ -150,6 +172,7 @@ class LayoutRulesV11:
                 return defaults
             return cls(
                 main_window_classes=_coerce_str_list(raw.get("main_window_classes"), defaults.main_window_classes),
+                ad_candidate_classes=_coerce_str_list(raw.get("ad_candidate_classes"), defaults.ad_candidate_classes),
                 main_window_titles=_coerce_str_list(raw.get("main_window_titles"), defaults.main_window_titles),
                 main_view_prefix=_coerce_str(raw.get("main_view_prefix"), defaults.main_view_prefix),
                 lock_view_prefix=_coerce_str(raw.get("lock_view_prefix"), defaults.lock_view_prefix),

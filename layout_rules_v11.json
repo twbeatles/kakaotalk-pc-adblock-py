@@ -4,6 +4,7 @@
     "EVA_Window"
   ],
   "ad_candidate_classes": [
+    "EVA_Window_Dblclk",
     "EVA_Window"
   ],
   "main_window_titles": [

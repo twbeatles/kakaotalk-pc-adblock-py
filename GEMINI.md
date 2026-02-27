@@ -23,10 +23,11 @@
   - AppData path: `%APPDATA%\KakaoTalkAdBlockerLayout`
   - advanced perf knobs: `idle_poll_interval_ms`, `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
   - missing new perf fields are backfilled with safe defaults
+  - rules loader falls back `ad_candidate_classes` to `main_window_classes` when missing/invalid
 - `event_engine.py`
   - `LayoutOnlyEngine`: watch/apply polling loops
   - main window detection uses `main_window_classes` from rules
-  - ad candidate filtering uses `ad_candidate_classes` + `Chrome Legacy Window` signature
+  - ad candidate filtering uses `ad_candidate_classes` (default: `EVA_Window_Dblclk`, `EVA_Window`) + `Chrome Legacy Window` signature
   - hidden/moved windows are restored when blocking is disabled or engine stops
   - cache dictionaries are protected by a shared lock
   - process-id scan and cache cleanup are interval-throttled for idle CPU savings

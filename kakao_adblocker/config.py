@@ -140,7 +140,7 @@ class LayoutSettingsV11:
 @dataclass
 class LayoutRulesV11:
     main_window_classes: List[str] = field(default_factory=lambda: ["EVA_Window_Dblclk", "EVA_Window"])
-    ad_candidate_classes: List[str] = field(default_factory=lambda: ["EVA_Window"])
+    ad_candidate_classes: List[str] = field(default_factory=lambda: ["EVA_Window_Dblclk", "EVA_Window"])
     main_window_titles: List[str] = field(default_factory=lambda: ["카카오톡", "KakaoTalk"])
     main_view_prefix: str = "OnlineMainView"
     lock_view_prefix: str = "LockModeView"
@@ -170,9 +170,15 @@ class LayoutRulesV11:
                 raw = json.load(f)
             if not isinstance(raw, dict):
                 return defaults
+            main_window_classes = _coerce_str_list(raw.get("main_window_classes"), defaults.main_window_classes)
+            raw_ad_candidate_classes = raw.get("ad_candidate_classes")
+            if isinstance(raw_ad_candidate_classes, list):
+                ad_candidate_classes = _coerce_str_list(raw_ad_candidate_classes, main_window_classes)
+            else:
+                ad_candidate_classes = list(main_window_classes)
             return cls(
-                main_window_classes=_coerce_str_list(raw.get("main_window_classes"), defaults.main_window_classes),
-                ad_candidate_classes=_coerce_str_list(raw.get("ad_candidate_classes"), defaults.ad_candidate_classes),
+                main_window_classes=main_window_classes,
+                ad_candidate_classes=ad_candidate_classes,
                 main_window_titles=_coerce_str_list(raw.get("main_window_titles"), defaults.main_window_titles),
                 main_view_prefix=_coerce_str(raw.get("main_view_prefix"), defaults.main_view_prefix),
                 lock_view_prefix=_coerce_str(raw.get("lock_view_prefix"), defaults.lock_view_prefix),

@@ -14,6 +14,7 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - `--minimized` 또는 `start_minimized=true`로 시작할 때는 시작 안내 팝업을 띄우지 않습니다.
 - 엔진이 `layout_rules_v11.json`의 `main_window_classes`를 실제 메인 윈도우 탐지에 반영합니다.
 - 광고 후보 탐지는 `ad_candidate_classes`를 분리 적용하고, 최상위 후보는 `Chrome Legacy Window` 시그니처를 만족할 때만 처리합니다.
+- 기본 광고 후보 클래스는 `EVA_Window_Dblclk`, `EVA_Window`이며, 구버전 rules에서 `ad_candidate_classes`가 누락/비정상이면 `main_window_classes`로 폴백합니다.
 - 공격 모드에서 짧은 토큰(예: `Ad`)은 단어 경계 기준으로 매칭하여 오탐(`ReadLater`, `Header` 등)을 줄였습니다.
 - 시작프로그램 토글 시 레지스트리 갱신 실패가 발생하면 설정 파일(`run_on_startup`)을 잘못 저장하지 않습니다.
 - 앱 시작 시 `run_on_startup`은 레지스트리 상태를 기준으로 1회 동기화됩니다.
@@ -47,6 +48,7 @@ python kakaotalk_layout_adblock_v11.py --dump-tree --dump-dir "C:\temp"
 - `cache_cleanup_interval_ms`: `1000`
 
 신규 성능 필드가 없는 구버전 설정 파일도 기본값으로 자동 보완되어 그대로 동작합니다.
+구버전 rules 파일에서 `ad_candidate_classes` 키가 없거나 타입이 잘못된 경우에도 `main_window_classes` 기반 폴백으로 무중단 호환됩니다.
 
 기존 `adblock_settings.json`, `ad_patterns.json`, `blocked_domains.txt`는 읽지 않습니다.
 

@@ -71,12 +71,45 @@ def test_rules_load_with_bounds(tmp_path: Path):
     )
     rules = LayoutRulesV11.load(str(path))
     assert rules.main_window_classes == ["EVA_Window_Dblclk"]
-    assert rules.ad_candidate_classes == ["EVA_Window"]
+    assert rules.ad_candidate_classes == ["EVA_Window_Dblclk"]
     assert rules.main_window_titles == ["카카오톡"]
     assert rules.banner_min_height_px >= 1
     assert rules.banner_max_height_px >= 1
     assert 0.1 <= rules.banner_min_width_ratio <= 1.0
     assert rules.cache_ttl_seconds >= 0.1
+
+
+def test_rules_load_falls_back_ad_candidate_classes_to_main_window_classes(tmp_path: Path):
+    path = tmp_path / "layout_rules_v11.json"
+    path.write_text(
+        json.dumps(
+            {
+                "main_window_classes": ["MainA", "MainB"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rules = LayoutRulesV11.load(str(path))
+    assert rules.main_window_classes == ["MainA", "MainB"]
+    assert rules.ad_candidate_classes == ["MainA", "MainB"]
+
+
+def test_rules_load_falls_back_ad_candidate_classes_when_invalid_type(tmp_path: Path):
+    path = tmp_path / "layout_rules_v11.json"
+    path.write_text(
+        json.dumps(
+            {
+                "main_window_classes": ["MainOnly"],
+                "ad_candidate_classes": "EVA_Window_Dblclk",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rules = LayoutRulesV11.load(str(path))
+    assert rules.main_window_classes == ["MainOnly"]
+    assert rules.ad_candidate_classes == ["MainOnly"]
 
 
 def test_rules_load_coerces_ad_candidate_classes(tmp_path: Path):

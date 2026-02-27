@@ -281,6 +281,43 @@ def test_engine_candidate_detection_requires_class_and_legacy_signature():
     assert 210 not in api.hide_calls
 
 
+def test_engine_hides_eva_window_dblclk_legacy_candidate_with_default_rules():
+    api = FakeAPI()
+    api.windows[220] = {
+        "pid": 42,
+        "class": "EVA_Window_Dblclk",
+        "text": "",
+        "parent": 0,
+        "rect": (20, 620, 480, 700),
+        "visible": True,
+    }
+    api.windows[221] = {
+        "pid": 42,
+        "class": "Chrome_WidgetWin_1",
+        "text": "Chrome Legacy Window",
+        "parent": 220,
+        "rect": (20, 620, 480, 700),
+        "visible": True,
+    }
+    api.children[220] = [221]
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    rules = LayoutRulesV11()
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    assert 220 in engine._ad_subwindow_candidates
+
+    engine.apply_once()
+
+    assert 220 in api.hide_calls
+
+
 def test_engine_pid_scan_is_throttled():
     api = FakeAPI()
     calls = {"count": 0}

@@ -19,6 +19,8 @@ hiddenimports = [
 ]
 hiddenimports += collect_submodules("pystray")
 hiddenimports += collect_submodules("PIL")
+# Keep package root importable when runtime or tooling touches lazy exports.
+hiddenimports += ["kakao_adblocker"]
 
 a = Analysis(
     [str(PROJECT_ROOT / "kakaotalk_layout_adblock_v11.py")],

@@ -477,7 +477,7 @@ def test_engine_start_runs_warmup_before_background_thread(monkeypatch):
     assert abs(engine._current_loop_interval_seconds(now=10.1) - 0.1) < 1e-9
 
 
-def test_engine_default_idle_settings_meet_500ms_target():
+def test_engine_default_idle_settings_meet_200ms_target():
     api = FakeAPI()
     settings = LayoutSettingsV11()
     engine = LayoutOnlyEngine(
@@ -488,8 +488,8 @@ def test_engine_default_idle_settings_meet_500ms_target():
         process_ids_provider=lambda _name: set(),
     )
 
-    assert engine._idle_poll_interval_seconds() <= 0.5
-    assert engine._pid_scan_interval_seconds() <= 0.5
+    assert engine._idle_poll_interval_seconds() <= 0.2
+    assert engine._pid_scan_interval_seconds() <= 0.2
 
 
 def test_engine_scan_path_skips_rect_and_visibility_calls():

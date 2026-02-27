@@ -4,7 +4,7 @@
 
 - 목적: 카카오톡 Windows 클라이언트의 광고 영역을 레이아웃 조정으로 제거
 - 버전: `11.x`
-- 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, 적응형 폴링 엔진(active 50ms / idle 500ms 기본)
+- 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, 적응형 폴링 엔진(active 50ms / idle 200ms 기본)
 - 실행 정책: Windows 전용(비Windows에서는 fail-fast 종료 코드 `2`)
 
 ## 엔트리포인트
@@ -34,7 +34,7 @@
   - `WindowIdentity(hwnd,pid,class)` 기반 text/custom-scroll/hidden-window 캐시로 HWND 재사용 오동작 방지
   - 스캔 경로는 경량 수집(`rect/visible` 미조회)으로 호출 부담 감소, `--dump-tree`만 상세 수집 사용
   - PID 스캔/캐시 정리 주기 스로틀 적용
-  - 기본 설정 기준 idle->active 복귀 목표 지연 약 500ms
+  - 기본 설정 기준 idle->active 복귀 목표 지연 약 200ms
   - `report_warning()`로 시작 시점 경고를 상태(`last_error`)에 반영 가능
 - `kakao_adblocker/layout_engine.py`
   - `OnlineMainView` / `LockModeView` 리사이즈 규칙

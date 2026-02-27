@@ -47,7 +47,7 @@
 3. 상세 geometry/visibility 수집은 `--dump-tree` 경로에서만 수행한다.
 4. PID 스캔/캐시 정리는 스로틀을 유지한다.
 5. 엔진 시작 시 watch/apply warm-up 1회를 동기 수행해 초기 깜빡임을 줄인다.
-6. 기본 목표 지연: active 50ms, idle 500ms.
+6. 기본 목표 지연: active 50ms, idle 200ms.
 
 ### 2.6 설정/경고 규칙
 

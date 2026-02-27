@@ -133,8 +133,8 @@ class LayoutSettingsV11:
     run_on_startup: bool = False
     start_minimized: bool = True
     poll_interval_ms: int = 50
-    idle_poll_interval_ms: int = 500
-    pid_scan_interval_ms: int = 500
+    idle_poll_interval_ms: int = 200
+    pid_scan_interval_ms: int = 200
     cache_cleanup_interval_ms: int = 1000
     aggressive_mode: bool = True
     log_level: str = "INFO"

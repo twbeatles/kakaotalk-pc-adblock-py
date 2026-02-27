@@ -28,8 +28,8 @@ def test_settings_load_with_type_coercion(tmp_path: Path):
     assert cfg.run_on_startup is False
     assert cfg.start_minimized is False
     assert cfg.poll_interval_ms == 50
-    assert cfg.idle_poll_interval_ms == 500
-    assert cfg.pid_scan_interval_ms == 500
+    assert cfg.idle_poll_interval_ms == 200
+    assert cfg.pid_scan_interval_ms == 200
     assert cfg.cache_cleanup_interval_ms == 1000
     assert cfg.aggressive_mode is True
     assert cfg.log_level == "INFO"

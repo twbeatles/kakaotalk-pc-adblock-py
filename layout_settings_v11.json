@@ -3,8 +3,8 @@
   "run_on_startup": false,
   "start_minimized": true,
   "poll_interval_ms": 50,
-  "idle_poll_interval_ms": 500,
-  "pid_scan_interval_ms": 500,
+  "idle_poll_interval_ms": 200,
+  "pid_scan_interval_ms": 200,
   "cache_cleanup_interval_ms": 1000,
   "aggressive_mode": true,
   "log_level": "INFO"

@@ -7,7 +7,7 @@
 - Version line: `v11`
 - Scope: Layout-only ad blocking (no hosts, no DNS flush, no AdFit registry writes)
 - Non-Windows execution: fail-fast with message and exit code `2`
-- Polling model: adaptive (active 50ms / idle 500ms by default)
+- Polling model: adaptive (active 50ms / idle 200ms by default)
 
 ## Runtime Entry
 
@@ -37,7 +37,7 @@
   - `WindowIdentity(hwnd,pid,class)` keyed caches protect against HWND reuse side effects
   - watch scan path avoids geometry/visibility calls; dump-tree path still collects full geometry
   - process-id scan and cache cleanup are interval-throttled for idle CPU savings
-  - default idle->active detection target is <= 500ms
+  - default idle->active detection target is <= 200ms
   - `report_warning()` allows startup warning propagation to tray status context
 - `layout_engine.py`
   - Main/lock view resize formulas

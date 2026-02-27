@@ -31,6 +31,8 @@
   - `LayoutOnlyEngine`: single watch+apply polling loop
   - main window detection uses `main_window_classes` from rules
   - ad candidate filtering uses `ad_candidate_classes` (default: `EVA_Window_Dblclk`, `EVA_Window`) + `Chrome Legacy Window` signature
+  - synchronous warm-up scan/apply on engine start reduces first-run ad flash
+  - empty-string text cache uses short TTL refresh to reduce startup detection lag
   - hidden/moved windows are restored when blocking is disabled or engine stops
   - `WindowIdentity(hwnd,pid,class)` keyed caches protect against HWND reuse side effects
   - watch scan path avoids geometry/visibility calls; dump-tree path still collects full geometry
@@ -71,7 +73,8 @@
 ## Build Notes
 
 - `kakaotalk_adblock.spec` resolves entry script and data files from project-root absolute paths for stable `pyinstaller` invocation.
-- `kakaotalk_adblock.spec` explicitly includes lazy-import modules (`kakao_adblocker.app`, `kakao_adblocker.ui`, `pystray`, `PIL`) in `hiddenimports`.
+- `kakaotalk_adblock.spec` explicitly includes lazy-import modules (`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.ui`, `pystray`, `PIL`) in `hiddenimports`.
+- `kakaotalk_adblock.spec` also includes `collect_submodules("pystray")` and `collect_submodules("PIL")` to avoid onefile runtime import misses.
 
 ## Legacy Archive
 

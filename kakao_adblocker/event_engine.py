@@ -105,7 +105,14 @@ class LayoutOnlyEngine:
             self._pid_scan_cache = set()
             self._last_pid_scan = 0.0
             self._last_cache_cleanup = 0.0
-            self._last_activity = 0.0
+            self._last_activity = time.time()
+
+        # Warm-up immediately in caller thread to reduce first-run ad flash.
+        try:
+            self._watch_once()
+            self._apply_once()
+        except Exception as e:
+            self._set_error(f"warmup: {e}")
 
         self._stop_event.clear()
         self._wake_event.clear()
@@ -421,9 +428,7 @@ class LayoutOnlyEngine:
                 memo[cache_key] = False
             return False
 
-        pid = self.api.get_window_thread_process_id(hwnd)
-        class_name = self._get_class(hwnd)
-        if self._get_text(hwnd, pid, class_name) == target:
+        if (self.api.get_window_text(hwnd) or "") == target:
             if memo is not None:
                 memo[cache_key] = True
             return True
@@ -535,11 +540,19 @@ class LayoutOnlyEngine:
         now = time.time()
         with self._cache_lock:
             hit = cache.get(key)
-            if hit and (now - hit[0]) <= self.rules.cache_ttl_seconds:
-                return hit[1]
+            if hit:
+                ts, cached_value = hit
+                # Empty strings are common during transient UI construction.
+                # Refresh them quickly to avoid missing windows for multiple seconds.
+                ttl = self.rules.cache_ttl_seconds if cached_value else self._empty_text_cache_ttl_seconds()
+                if (now - ts) <= ttl:
+                    return cached_value
             value = loader() or ""
             cache[key] = (now, value)
             return value
+
+    def _empty_text_cache_ttl_seconds(self) -> float:
+        return min(self.rules.cache_ttl_seconds, max(self._active_poll_interval_seconds(), 0.05))
 
     def _window_identity(self, hwnd: int, pid: Optional[int] = None, class_name: Optional[str] = None) -> Optional[WindowIdentity]:
         resolved_pid = pid if pid is not None else self.api.get_window_thread_process_id(hwnd)

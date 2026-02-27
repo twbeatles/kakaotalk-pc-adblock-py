@@ -28,6 +28,8 @@
   - `LayoutOnlyEngine`, `EngineState`
   - 단일 watch+apply 루프(적응형 폴링), `main_window_classes` 기반 메인 윈도우 식별
   - 광고 후보는 `ad_candidate_classes`(기본: `EVA_Window_Dblclk`, `EVA_Window`)와 레거시 시그니처(`Chrome Legacy Window`)를 함께 사용해 필터링
+  - 엔진 시작 시 동기 warm-up(scan+apply 1회)으로 초기 광고 깜빡임 완화
+  - 빈 문자열 텍스트 캐시는 짧은 TTL로 재조회해 초기 UI 구성 구간 탐지 지연 완화
   - 차단 OFF/엔진 종료 시 숨김·이동 창 원복
   - `WindowIdentity(hwnd,pid,class)` 기반 text/custom-scroll/hidden-window 캐시로 HWND 재사용 오동작 방지
   - 스캔 경로는 경량 수집(`rect/visible` 미조회)으로 호출 부담 감소, `--dump-tree`만 상세 수집 사용
@@ -51,7 +53,7 @@
 
 ## 빌드 메모
 
-- `kakaotalk_adblock.spec`는 lazy-import 모듈(`kakao_adblocker.app`, `kakao_adblocker.ui`, `pystray`, `PIL`)을 `hiddenimports`로 명시해 onefile 누락을 방지
+- `kakaotalk_adblock.spec`는 lazy-import 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.ui`, `pystray`, `PIL`)을 `hiddenimports`로 명시하고 `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 누락을 방지
 
 ## 동작 규칙
 

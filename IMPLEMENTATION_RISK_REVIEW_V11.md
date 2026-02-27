@@ -20,6 +20,15 @@
 - 근거 파일: `kakao_adblocker/event_engine.py`
 - 검증 테스트: `tests/test_engine_v11.py`의 scan 경량화 호출 횟수 검증
 
+### P1-3. 초기 광고 깜빡임 완화
+
+- 조치: 엔진 시작 시 background thread 기동 전 동기 warm-up(`watch_once + apply_once`) 수행
+- 조치: 시작 직후 active 구간 진입을 위해 `last_activity`를 현재 시각으로 초기화
+- 조치: 빈 문자열 텍스트 캐시는 짧은 TTL로 재조회하도록 보정
+- 조치: `Chrome Legacy Window` 시그니처 판별은 실시간 `get_window_text` 경로 사용
+- 근거 파일: `kakao_adblocker/event_engine.py`
+- 검증 테스트: `tests/test_engine_v11.py`의 warm-up 선적용/빈 텍스트 캐시 재조회 케이스
+
 ### P2-1. JSON fallback 가시화
 
 - 조치: settings/rules JSON 파손 시 `*.broken-YYYYMMDD-HHMMSS` 백업 생성
@@ -57,6 +66,7 @@
 ## 2) 문서/빌드 정합성 반영
 
 - `README.md` 안정성 항목 갱신(파손 백업/경고 노출, identity 캐시, 스캔 경량화, safe-after)
+- `README.md`에 warm-up/빈 텍스트 캐시 갱신 및 spec hiddenimports 설명 최신화 반영
 - `CLAUDE.md`, `GEMINI.md`를 현재 코드 동작(active 50ms 포함) 기준으로 갱신
 - `ADBLOCK_ALGORITHM_BASELINE_V11.md`를 최신 알고리즘 계약 기준으로 재정리
 - `kakaotalk_adblock.spec` hiddenimports 보강(`kakao_adblocker.config`, `kakao_adblocker.event_engine`)

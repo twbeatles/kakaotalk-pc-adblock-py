@@ -437,6 +437,46 @@ def test_engine_watch_loop_runs_apply_in_same_cycle(monkeypatch):
     assert calls == ["watch", "apply"]
 
 
+def test_engine_start_runs_warmup_before_background_thread(monkeypatch):
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    calls = []
+    monkeypatch.setattr("kakao_adblocker.event_engine.time.time", lambda: 10.0)
+
+    monkeypatch.setattr(engine, "_watch_once", lambda: calls.append("warmup_watch"))
+    monkeypatch.setattr(engine, "_apply_once", lambda: calls.append("warmup_apply"))
+
+    class DummyThread:
+        def __init__(self, target, daemon):
+            self.target = target
+            self.daemon = daemon
+
+        def start(self):
+            calls.append("thread_start")
+
+        def is_alive(self):
+            return False
+
+        def join(self, timeout=None):
+            return None
+
+    monkeypatch.setattr("kakao_adblocker.event_engine.threading.Thread", DummyThread)
+
+    engine.start()
+
+    assert calls[:2] == ["warmup_watch", "warmup_apply"]
+    assert "thread_start" in calls
+    assert engine.state.running is True
+    assert abs(engine._current_loop_interval_seconds(now=10.1) - 0.1) < 1e-9
+
+
 def test_engine_default_idle_settings_meet_500ms_target():
     api = FakeAPI()
     settings = LayoutSettingsV11()
@@ -497,6 +537,36 @@ def test_engine_text_cache_uses_hwnd_pid_class_identity():
     assert new_text == "NewText"
     cached_keys = [key for key in engine._text_cache.keys() if key[0] == 400]
     assert len(cached_keys) == 2
+
+
+def test_engine_empty_text_cache_refreshes_quickly(monkeypatch):
+    api = FakeAPI()
+    api.windows[400] = {
+        "pid": 42,
+        "class": "ClassA",
+        "text": "",
+        "parent": 0,
+        "rect": (0, 0, 100, 100),
+        "visible": True,
+    }
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(cache_ttl_seconds=8.0),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    now = {"value": 0.0}
+    monkeypatch.setattr("kakao_adblocker.event_engine.time.time", lambda: now["value"])
+
+    first = engine._get_text(400, 42, "ClassA")
+    api.windows[400]["text"] = "NowReady"
+    now["value"] = 0.11
+    second = engine._get_text(400, 42, "ClassA")
+
+    assert first == ""
+    assert second == "NowReady"
 
 
 def test_engine_skips_restore_for_recycled_hwnd():

@@ -27,6 +27,8 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 엔진 내부 캐시/숨김 스냅샷 키를 `WindowIdentity(hwnd,pid,class)`로 강화해 HWND 재사용 시 오동작 가능성을 낮췄습니다.
 - 스캔 경로는 경량 수집(`rect/visible` 미조회)으로 최적화되고, 상세 수집은 `--dump-tree` 경로에만 적용됩니다.
 - 트레이 메뉴 콜백은 안전 스케줄링(`_safe_after`)으로 종료 경합 시 예외 전파를 막습니다.
+- 엔진 시작 시 동기 warm-up(scan+apply 1회)을 먼저 수행해 초기 광고 깜빡임을 줄였습니다.
+- 빈 텍스트 캐시는 짧은 TTL로 빠르게 재조회해 초기 UI 구성 구간의 탐지 지연을 줄였습니다.
 
 ## 실행
 
@@ -85,7 +87,7 @@ pyinstaller kakaotalk_adblock.spec
 
 `kakaotalk_adblock.spec`는 **onefile** 빌드 설정이며, 결과물은 `dist/KakaoTalkLayoutAdBlocker_v11.exe`로 생성됩니다.
 - `.spec`는 프로젝트 루트 기준 절대 경로를 사용하도록 보강되어, 빌드 실행 위치에 덜 민감합니다.
-- `.spec`는 lazy-import 경로(`kakao_adblocker.app`, `kakao_adblocker.ui`, `pystray`, `PIL`)를 `hiddenimports`로 명시해 onefile 패키징 누락을 방지합니다.
+- `.spec`는 lazy-import 경로(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.ui`, `pystray`, `PIL`)를 `hiddenimports`로 명시하고, `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 패키징 누락을 방지합니다.
 
 `uac_admin`은 제거되어 관리자 권한 없이 실행됩니다.
 

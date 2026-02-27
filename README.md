@@ -102,13 +102,6 @@ PermissionError: [Errno 13] Permission denied: '...KakaoTalkLayoutAdBlocker_v11.
 3. OneDrive에서 `항상 이 장치에 유지`로 고정
 4. Windows 보안(랜섬웨어 보호/실시간 보호) 예외에 EXE 추가
 
-## 이전 hosts 수정 이슈 수동 복구
-
-v11은 hosts를 자동 수정하지 않습니다. 이전 버전으로 hosts가 남아 로그인 문제가 있으면 직접 정리하세요.
-
-1. 관리자 권한 메모장으로 `C:\Windows\System32\drivers\etc\hosts` 열기
-2. `# [KakaoTalk AdBlock Start]` ~ `# [KakaoTalk AdBlock End]` 블록 삭제
-3. 저장 후 카카오톡 재시작
 
 ## 참고
 

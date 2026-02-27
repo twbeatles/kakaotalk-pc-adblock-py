@@ -214,26 +214,36 @@ class TrayController:
         return img
 
     # Tray callbacks are called from tray thread.
+    def _safe_after(self, callback) -> None:
+        try:
+            if hasattr(self.root, "winfo_exists"):
+                if not bool(self.root.winfo_exists()):
+                    return
+            if hasattr(self.root, "after"):
+                self.root.after(0, callback)
+        except Exception:
+            self.logger.debug("Tray callback scheduling skipped")
+
     def _menu_toggle_blocking(self, _icon, _item) -> None:
-        self.root.after(0, self.toggle_blocking)
+        self._safe_after(self.toggle_blocking)
 
     def _menu_toggle_startup(self, _icon, _item) -> None:
-        self.root.after(0, self.toggle_startup)
+        self._safe_after(self.toggle_startup)
 
     def _menu_toggle_aggressive_mode(self, _icon, _item) -> None:
-        self.root.after(0, self.toggle_aggressive_mode)
+        self._safe_after(self.toggle_aggressive_mode)
 
     def _menu_show_window(self, _icon, _item) -> None:
-        self.root.after(0, self.show_window)
+        self._safe_after(self.show_window)
 
     def _menu_open_logs(self, _icon, _item) -> None:
-        self.root.after(0, self.open_log_folder)
+        self._safe_after(self.open_log_folder)
 
     def _menu_open_release(self, _icon, _item) -> None:
-        self.root.after(0, self.open_releases_page)
+        self._safe_after(self.open_releases_page)
 
     def _menu_exit(self, _icon, _item) -> None:
-        self.root.after(0, self.shutdown)
+        self._safe_after(self.shutdown)
 
     def show_startup_notice(self) -> None:
         if self._startup_notice_shown:

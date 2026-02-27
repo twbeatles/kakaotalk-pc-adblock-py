@@ -2,14 +2,32 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
+import threading
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, List
 
 VERSION = "11.0.0"
 APP_NAME = "KakaoTalk Layout AdBlocker"
 APPDATA_DIRNAME = "KakaoTalkAdBlockerLayout"
+
+_LOAD_WARNINGS: List[str] = []
+_LOAD_WARNINGS_LOCK = threading.Lock()
+
+
+def _push_load_warning(message: str) -> None:
+    with _LOAD_WARNINGS_LOCK:
+        _LOAD_WARNINGS.append(message)
+
+
+def consume_load_warnings() -> List[str]:
+    with _LOAD_WARNINGS_LOCK:
+        out = list(_LOAD_WARNINGS)
+        _LOAD_WARNINGS.clear()
+        return out
 
 
 def resource_base_dir() -> str:
@@ -78,12 +96,43 @@ def _coerce_str_list(value: Any, default: List[str]) -> List[str]:
     return out if out else list(default)
 
 
+def _backup_broken_json(path: str, label: str, reason: str) -> None:
+    if not os.path.exists(path):
+        return
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = f"{path}.broken-{timestamp}"
+    try:
+        shutil.copy2(path, backup_path)
+        _push_load_warning(
+            f"{label} 손상 감지: {reason}. 백업 생성: {backup_path}. 기본값으로 동작합니다."
+        )
+    except Exception as exc:
+        _push_load_warning(
+            f"{label} 손상 감지: {reason}. 백업 실패({exc.__class__.__name__}). 기본값으로 동작합니다."
+        )
+
+
+def _load_json_object(path: str, label: str) -> dict[str, Any] | None:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        _backup_broken_json(path, label, f"JSON 파싱 실패({exc.__class__.__name__})")
+        return None
+    if not isinstance(raw, dict):
+        _backup_broken_json(path, label, "최상위 타입이 object(dict)가 아님")
+        return None
+    return raw
+
+
 @dataclass
 class LayoutSettingsV11:
     enabled: bool = True
     run_on_startup: bool = False
     start_minimized: bool = True
-    poll_interval_ms: int = 100
+    poll_interval_ms: int = 50
     idle_poll_interval_ms: int = 500
     pid_scan_interval_ms: int = 500
     cache_cleanup_interval_ms: int = 1000
@@ -93,39 +142,35 @@ class LayoutSettingsV11:
     @classmethod
     def load(cls, path: str = SETTINGS_FILE) -> "LayoutSettingsV11":
         defaults = cls()
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-            if not isinstance(raw, dict):
-                return defaults
-            return cls(
-                enabled=_coerce_bool(raw.get("enabled"), defaults.enabled),
-                run_on_startup=_coerce_bool(raw.get("run_on_startup"), defaults.run_on_startup),
-                start_minimized=_coerce_bool(raw.get("start_minimized"), defaults.start_minimized),
-                poll_interval_ms=_coerce_int(raw.get("poll_interval_ms"), defaults.poll_interval_ms, minimum=50, maximum=5000),
-                idle_poll_interval_ms=_coerce_int(
-                    raw.get("idle_poll_interval_ms"),
-                    defaults.idle_poll_interval_ms,
-                    minimum=200,
-                    maximum=5000,
-                ),
-                pid_scan_interval_ms=_coerce_int(
-                    raw.get("pid_scan_interval_ms"),
-                    defaults.pid_scan_interval_ms,
-                    minimum=100,
-                    maximum=5000,
-                ),
-                cache_cleanup_interval_ms=_coerce_int(
-                    raw.get("cache_cleanup_interval_ms"),
-                    defaults.cache_cleanup_interval_ms,
-                    minimum=250,
-                    maximum=10000,
-                ),
-                aggressive_mode=_coerce_bool(raw.get("aggressive_mode"), defaults.aggressive_mode),
-                log_level=_coerce_str(raw.get("log_level"), defaults.log_level).upper(),
-            )
-        except Exception:
+        raw = _load_json_object(path, "layout_settings_v11.json")
+        if raw is None:
             return defaults
+        return cls(
+            enabled=_coerce_bool(raw.get("enabled"), defaults.enabled),
+            run_on_startup=_coerce_bool(raw.get("run_on_startup"), defaults.run_on_startup),
+            start_minimized=_coerce_bool(raw.get("start_minimized"), defaults.start_minimized),
+            poll_interval_ms=_coerce_int(raw.get("poll_interval_ms"), defaults.poll_interval_ms, minimum=50, maximum=5000),
+            idle_poll_interval_ms=_coerce_int(
+                raw.get("idle_poll_interval_ms"),
+                defaults.idle_poll_interval_ms,
+                minimum=200,
+                maximum=5000,
+            ),
+            pid_scan_interval_ms=_coerce_int(
+                raw.get("pid_scan_interval_ms"),
+                defaults.pid_scan_interval_ms,
+                minimum=100,
+                maximum=5000,
+            ),
+            cache_cleanup_interval_ms=_coerce_int(
+                raw.get("cache_cleanup_interval_ms"),
+                defaults.cache_cleanup_interval_ms,
+                minimum=250,
+                maximum=10000,
+            ),
+            aggressive_mode=_coerce_bool(raw.get("aggressive_mode"), defaults.aggressive_mode),
+            log_level=_coerce_str(raw.get("log_level"), defaults.log_level).upper(),
+        )
 
     def save(self, path: str = SETTINGS_FILE) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -165,39 +210,44 @@ class LayoutRulesV11:
     @classmethod
     def load(cls, path: str = RULES_FILE) -> "LayoutRulesV11":
         defaults = cls()
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-            if not isinstance(raw, dict):
-                return defaults
-            main_window_classes = _coerce_str_list(raw.get("main_window_classes"), defaults.main_window_classes)
-            raw_ad_candidate_classes = raw.get("ad_candidate_classes")
-            if isinstance(raw_ad_candidate_classes, list):
-                ad_candidate_classes = _coerce_str_list(raw_ad_candidate_classes, main_window_classes)
-            else:
-                ad_candidate_classes = list(main_window_classes)
-            return cls(
-                main_window_classes=main_window_classes,
-                ad_candidate_classes=ad_candidate_classes,
-                main_window_titles=_coerce_str_list(raw.get("main_window_titles"), defaults.main_window_titles),
-                main_view_prefix=_coerce_str(raw.get("main_view_prefix"), defaults.main_view_prefix),
-                lock_view_prefix=_coerce_str(raw.get("lock_view_prefix"), defaults.lock_view_prefix),
-                eva_child_class=_coerce_str(raw.get("eva_child_class"), defaults.eva_child_class),
-                custom_scroll_prefix=_coerce_str(raw.get("custom_scroll_prefix"), defaults.custom_scroll_prefix),
-                chrome_legacy_title=_coerce_str(raw.get("chrome_legacy_title"), defaults.chrome_legacy_title),
-                chrome_widget_prefixes=_coerce_str_list(raw.get("chrome_widget_prefixes"), defaults.chrome_widget_prefixes),
-                aggressive_ad_tokens=_coerce_str_list(raw.get("aggressive_ad_tokens"), defaults.aggressive_ad_tokens),
-                banner_min_height_px=_coerce_int(raw.get("banner_min_height_px"), defaults.banner_min_height_px, minimum=1),
-                banner_max_height_px=_coerce_int(raw.get("banner_max_height_px"), defaults.banner_max_height_px, minimum=1),
-                banner_min_width_ratio=_coerce_float(raw.get("banner_min_width_ratio"), defaults.banner_min_width_ratio, minimum=0.1, maximum=1.0),
-                banner_bottom_margin_px=_coerce_int(raw.get("banner_bottom_margin_px"), defaults.banner_bottom_margin_px, minimum=0),
-                layout_shadow_padding_px=_coerce_int(raw.get("layout_shadow_padding_px"), defaults.layout_shadow_padding_px, minimum=0),
-                main_view_padding_px=_coerce_int(raw.get("main_view_padding_px"), defaults.main_view_padding_px, minimum=0),
-                cache_ttl_seconds=_coerce_float(raw.get("cache_ttl_seconds"), defaults.cache_ttl_seconds, minimum=0.1),
-                log_rate_limit_seconds=_coerce_float(raw.get("log_rate_limit_seconds"), defaults.log_rate_limit_seconds, minimum=0.1),
-            )
-        except Exception:
+        raw = _load_json_object(path, "layout_rules_v11.json")
+        if raw is None:
             return defaults
+        main_window_classes = _coerce_str_list(raw.get("main_window_classes"), defaults.main_window_classes)
+        raw_ad_candidate_classes = raw.get("ad_candidate_classes")
+        if isinstance(raw_ad_candidate_classes, list):
+            ad_candidate_classes = _coerce_str_list(raw_ad_candidate_classes, main_window_classes)
+        else:
+            ad_candidate_classes = list(main_window_classes)
+
+        banner_min_height_px = _coerce_int(raw.get("banner_min_height_px"), defaults.banner_min_height_px, minimum=1)
+        banner_max_height_px = _coerce_int(raw.get("banner_max_height_px"), defaults.banner_max_height_px, minimum=1)
+        if banner_min_height_px > banner_max_height_px:
+            banner_min_height_px, banner_max_height_px = banner_max_height_px, banner_min_height_px
+            _push_load_warning(
+                "layout_rules_v11.json banner 높이 범위(min/max)가 역전되어 자동 교정했습니다."
+            )
+
+        return cls(
+            main_window_classes=main_window_classes,
+            ad_candidate_classes=ad_candidate_classes,
+            main_window_titles=_coerce_str_list(raw.get("main_window_titles"), defaults.main_window_titles),
+            main_view_prefix=_coerce_str(raw.get("main_view_prefix"), defaults.main_view_prefix),
+            lock_view_prefix=_coerce_str(raw.get("lock_view_prefix"), defaults.lock_view_prefix),
+            eva_child_class=_coerce_str(raw.get("eva_child_class"), defaults.eva_child_class),
+            custom_scroll_prefix=_coerce_str(raw.get("custom_scroll_prefix"), defaults.custom_scroll_prefix),
+            chrome_legacy_title=_coerce_str(raw.get("chrome_legacy_title"), defaults.chrome_legacy_title),
+            chrome_widget_prefixes=_coerce_str_list(raw.get("chrome_widget_prefixes"), defaults.chrome_widget_prefixes),
+            aggressive_ad_tokens=_coerce_str_list(raw.get("aggressive_ad_tokens"), defaults.aggressive_ad_tokens),
+            banner_min_height_px=banner_min_height_px,
+            banner_max_height_px=banner_max_height_px,
+            banner_min_width_ratio=_coerce_float(raw.get("banner_min_width_ratio"), defaults.banner_min_width_ratio, minimum=0.1, maximum=1.0),
+            banner_bottom_margin_px=_coerce_int(raw.get("banner_bottom_margin_px"), defaults.banner_bottom_margin_px, minimum=0),
+            layout_shadow_padding_px=_coerce_int(raw.get("layout_shadow_padding_px"), defaults.layout_shadow_padding_px, minimum=0),
+            main_view_padding_px=_coerce_int(raw.get("main_view_padding_px"), defaults.main_view_padding_px, minimum=0),
+            cache_ttl_seconds=_coerce_float(raw.get("cache_ttl_seconds"), defaults.cache_ttl_seconds, minimum=0.1),
+            log_rate_limit_seconds=_coerce_float(raw.get("log_rate_limit_seconds"), defaults.log_rate_limit_seconds, minimum=0.1),
+        )
 
     def save(self, path: str = RULES_FILE) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -249,4 +299,5 @@ __all__ = [
     "resource_base_dir",
     "get_app_data_dir",
     "ensure_runtime_files",
+    "consume_load_warnings",
 ]

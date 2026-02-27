@@ -23,6 +23,8 @@ class FakeAPI:
             200: [201],
             300: [301],
         }
+        self.rect_calls = 0
+        self.visible_calls = 0
         self.set_pos_calls = []
         self.hide_calls = []
         self.show_calls = []
@@ -52,12 +54,14 @@ class FakeAPI:
         return self.windows[hwnd]["parent"]
 
     def get_window_rect(self, hwnd):
+        self.rect_calls += 1
         return self.windows[hwnd]["rect"]
 
     def is_window(self, hwnd):
         return hwnd in self.windows
 
     def is_window_visible(self, hwnd):
+        self.visible_calls += 1
         return self.windows[hwnd]["visible"]
 
     def show_window(self, hwnd, _cmd):
@@ -135,11 +139,9 @@ def test_engine_cache_cleanup_removes_stale():
         process_ids_provider=lambda _name: {42},
     )
     old = time.time() - 5
-    engine._text_cache[9999] = (old, "x")
-    engine._class_cache[9999] = (old, "y")
+    engine._text_cache[(9999, 42, "UnknownClass")] = (old, "x")
     engine._cleanup_caches()
-    assert 9999 not in engine._text_cache
-    assert 9999 not in engine._class_cache
+    assert (9999, 42, "UnknownClass") not in engine._text_cache
 
 
 def test_engine_uses_rules_main_window_classes():
@@ -407,6 +409,34 @@ def test_engine_cache_cleanup_is_throttled(monkeypatch):
     assert called["count"] == 2
 
 
+def test_engine_watch_loop_runs_apply_in_same_cycle(monkeypatch):
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    rules = LayoutRulesV11()
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    calls = []
+
+    monkeypatch.setattr(engine, "_watch_once", lambda: calls.append("watch"))
+
+    def _apply_once():
+        calls.append("apply")
+        engine._stop_event.set()
+
+    monkeypatch.setattr(engine, "_apply_once", _apply_once)
+    monkeypatch.setattr(engine, "_wait_next_tick", lambda _timeout: None)
+
+    engine._stop_event.clear()
+    engine._watch_loop()
+
+    assert calls == ["watch", "apply"]
+
+
 def test_engine_default_idle_settings_meet_500ms_target():
     api = FakeAPI()
     settings = LayoutSettingsV11()
@@ -420,3 +450,76 @@ def test_engine_default_idle_settings_meet_500ms_target():
 
     assert engine._idle_poll_interval_seconds() <= 0.5
     assert engine._pid_scan_interval_seconds() <= 0.5
+
+
+def test_engine_scan_path_skips_rect_and_visibility_calls():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+
+    assert api.rect_calls == 0
+    assert api.visible_calls == 0
+
+
+def test_engine_text_cache_uses_hwnd_pid_class_identity():
+    api = FakeAPI()
+    api.windows[400] = {
+        "pid": 42,
+        "class": "ClassA",
+        "text": "OldText",
+        "parent": 0,
+        "rect": (0, 0, 100, 100),
+        "visible": True,
+    }
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    old_text = engine._get_text(400, 42, "ClassA")
+    api.windows[400]["class"] = "ClassB"
+    api.windows[400]["text"] = "NewText"
+    new_text = engine._get_text(400, 42, "ClassB")
+
+    assert old_text == "OldText"
+    assert new_text == "NewText"
+    cached_keys = [key for key in engine._text_cache.keys() if key[0] == 400]
+    assert len(cached_keys) == 2
+
+
+def test_engine_skips_restore_for_recycled_hwnd():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+    assert api.windows[200]["visible"] is False
+
+    # Simulate HWND reuse by a different process/class.
+    api.windows[200]["pid"] = 777
+    api.windows[200]["class"] = "ReusedWindowClass"
+    api.windows[200]["visible"] = False
+
+    engine.set_enabled(False)
+
+    assert 200 not in api.show_calls
+    assert api.windows[200]["visible"] is False

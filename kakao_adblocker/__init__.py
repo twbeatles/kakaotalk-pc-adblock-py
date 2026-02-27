@@ -22,6 +22,7 @@ _ATTR_EXPORTS: Dict[str, Tuple[str, str]] = {
     "resource_base_dir": ("kakao_adblocker.config", "resource_base_dir"),
     "get_app_data_dir": ("kakao_adblocker.config", "get_app_data_dir"),
     "ensure_runtime_files": ("kakao_adblocker.config", "ensure_runtime_files"),
+    "consume_load_warnings": ("kakao_adblocker.config", "consume_load_warnings"),
     "LayoutOnlyEngine": ("kakao_adblocker.event_engine", "LayoutOnlyEngine"),
     "EngineState": ("kakao_adblocker.event_engine", "EngineState"),
     "WindowInfo": ("kakao_adblocker.event_engine", "WindowInfo"),
@@ -76,6 +77,7 @@ __all__ = [
     "resource_base_dir",
     "get_app_data_dir",
     "ensure_runtime_files",
+    "consume_load_warnings",
 ]
 
 

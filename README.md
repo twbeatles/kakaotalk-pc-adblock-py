@@ -6,7 +6,7 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 
 - `hosts/DNS/AdFit` 기능을 완전히 제거했습니다.
 - `blurfx/KakaoTalkAdBlock` 방식에 맞춰 레이아웃 엔진으로 재설계했습니다.
-- 폴링은 적응형으로 동작합니다: 활성 상태 `100ms`, 유휴 상태 `500ms`(기본값).
+- 폴링은 적응형으로 동작합니다: 활성 상태 `50ms`, 유휴 상태 `500ms`(기본값).
 - 기본 동작은 트레이 중심이며, 설정 창은 필요 시 열 수 있습니다.
 
 ## 최근 안정성 개선 (v11.0.x)
@@ -23,6 +23,10 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - PID 스캔/캐시 정리는 주기 스로틀이 적용되어 유휴 상태 CPU 사용량을 줄였습니다.
 - `--dump-tree` 경로는 UI/트레이 모듈을 지연 로딩하여 시작 오버헤드를 최소화합니다.
 - 기본 설정(`idle_poll_interval_ms=500`) 기준으로 유휴 복귀 지연은 최대 약 500ms를 목표로 합니다.
+- `layout_settings_v11.json`, `layout_rules_v11.json` 파손(파싱 실패/최상위 타입 오류) 시 `*.broken-YYYYMMDD-HHMMSS` 백업을 생성하고 경고를 상태/로그에 노출합니다.
+- 엔진 내부 캐시/숨김 스냅샷 키를 `WindowIdentity(hwnd,pid,class)`로 강화해 HWND 재사용 시 오동작 가능성을 낮췄습니다.
+- 스캔 경로는 경량 수집(`rect/visible` 미조회)으로 최적화되고, 상세 수집은 `--dump-tree` 경로에만 적용됩니다.
+- 트레이 메뉴 콜백은 안전 스케줄링(`_safe_after`)으로 종료 경합 시 예외 전파를 막습니다.
 
 ## 실행
 
@@ -101,7 +105,6 @@ PermissionError: [Errno 13] Permission denied: '...KakaoTalkLayoutAdBlocker_v11.
 2. 파일 우클릭 → 속성 → `차단 해제`가 보이면 체크 후 적용
 3. OneDrive에서 `항상 이 장치에 유지`로 고정
 4. Windows 보안(랜섬웨어 보호/실시간 보호) 예외에 EXE 추가
-
 
 ## 참고
 

@@ -43,12 +43,17 @@ class ProcessInspector:
         pids: Set[int] = set()
         if PSUTIL_AVAILABLE:
             try:
-                for proc in psutil.process_iter(["pid", "name"]):
-                    proc_name = (proc.info.get("name") or "").strip().lower()
-                    if proc_name == normalized:
-                        pids.add(int(proc.info["pid"]))
+                proc_iter = psutil.process_iter(["pid", "name"])
             except Exception:
-                pass
+                proc_iter = []
+            for proc in proc_iter:
+                try:
+                    proc_info = proc.info or {}
+                    proc_name = (proc_info.get("name") or "").strip().lower()
+                    if proc_name == normalized:
+                        pids.add(int(proc_info["pid"]))
+                except Exception:
+                    continue
             return pids
 
         try:

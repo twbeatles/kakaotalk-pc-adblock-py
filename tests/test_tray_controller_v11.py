@@ -223,3 +223,26 @@ def test_status_update_skips_redundant_set(monkeypatch):
     controller._update_status()
 
     assert calls["set"] == 1
+
+
+def test_tray_menu_callbacks_swallow_after_errors(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+
+    class FailingAfterRoot(FakeRoot):
+        def after(self, _ms, _fn):
+            raise RuntimeError("tk closed")
+
+    root = FailingAfterRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    controller._menu_toggle_blocking(None, None)
+    controller._menu_toggle_startup(None, None)
+    controller._menu_toggle_aggressive_mode(None, None)
+    controller._menu_show_window(None, None)
+    controller._menu_open_logs(None, None)
+    controller._menu_open_release(None, None)
+    controller._menu_exit(None, None)
+
+    assert True

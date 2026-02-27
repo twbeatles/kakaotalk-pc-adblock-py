@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from kakao_adblocker.config import LayoutRulesV11, LayoutSettingsV11
+from kakao_adblocker.config import LayoutRulesV11, LayoutSettingsV11, consume_load_warnings
 
 
 def test_settings_load_with_type_coercion(tmp_path: Path):
@@ -27,7 +27,7 @@ def test_settings_load_with_type_coercion(tmp_path: Path):
     assert cfg.enabled is True
     assert cfg.run_on_startup is False
     assert cfg.start_minimized is False
-    assert cfg.poll_interval_ms == 100
+    assert cfg.poll_interval_ms == 50
     assert cfg.idle_poll_interval_ms == 500
     assert cfg.pid_scan_interval_ms == 500
     assert cfg.cache_cleanup_interval_ms == 1000
@@ -125,3 +125,52 @@ def test_rules_load_coerces_ad_candidate_classes(tmp_path: Path):
 
     rules = LayoutRulesV11.load(str(path))
     assert rules.ad_candidate_classes == ["AdCandidateWin", "PopupCandidate"]
+
+
+def test_settings_load_backs_up_malformed_json_and_records_warning(tmp_path: Path):
+    path = tmp_path / "layout_settings_v11.json"
+    path.write_text("{ not-json", encoding="utf-8")
+    consume_load_warnings()
+
+    cfg = LayoutSettingsV11.load(str(path))
+
+    assert cfg == LayoutSettingsV11()
+    backups = list(tmp_path.glob("layout_settings_v11.json.broken-*"))
+    assert len(backups) == 1
+    warnings = consume_load_warnings()
+    assert any("layout_settings_v11.json" in msg for msg in warnings)
+
+
+def test_rules_load_backs_up_non_object_top_level_and_records_warning(tmp_path: Path):
+    path = tmp_path / "layout_rules_v11.json"
+    path.write_text("[]", encoding="utf-8")
+    consume_load_warnings()
+
+    rules = LayoutRulesV11.load(str(path))
+
+    assert rules == LayoutRulesV11()
+    backups = list(tmp_path.glob("layout_rules_v11.json.broken-*"))
+    assert len(backups) == 1
+    warnings = consume_load_warnings()
+    assert any("layout_rules_v11.json" in msg for msg in warnings)
+
+
+def test_rules_load_swaps_banner_bounds_and_records_warning(tmp_path: Path):
+    path = tmp_path / "layout_rules_v11.json"
+    path.write_text(
+        json.dumps(
+            {
+                "banner_min_height_px": 300,
+                "banner_max_height_px": 100,
+            }
+        ),
+        encoding="utf-8",
+    )
+    consume_load_warnings()
+
+    rules = LayoutRulesV11.load(str(path))
+
+    assert rules.banner_min_height_px == 100
+    assert rules.banner_max_height_px == 300
+    warnings = consume_load_warnings()
+    assert any("자동 교정" in msg for msg in warnings)

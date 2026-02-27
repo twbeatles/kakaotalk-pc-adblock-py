@@ -6,7 +6,7 @@ import sys
 from types import SimpleNamespace
 from typing import Any, Optional
 
-from .config import LayoutRulesV11, LayoutSettingsV11, VERSION, ensure_runtime_files
+from .config import LayoutRulesV11, LayoutSettingsV11, VERSION, consume_load_warnings, ensure_runtime_files
 from .event_engine import LayoutOnlyEngine
 from .logging_setup import setup_logging
 
@@ -46,8 +46,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     settings = LayoutSettingsV11.load()
     rules = LayoutRulesV11.load()
     logger = setup_logging(settings.log_level)
+    load_warnings = consume_load_warnings()
 
     engine = LayoutOnlyEngine(logger, settings, rules)
+    for warning in load_warnings:
+        logger.warning(warning)
+    if load_warnings:
+        engine.report_warning(load_warnings[0])
 
     if args.dump_tree:
         path = engine.dump_window_tree(out_dir=args.dump_dir)

@@ -15,6 +15,8 @@ hiddenimports = [
     "PIL.ImageDraw",
     "pystray",
     "kakao_adblocker.app",
+    "kakao_adblocker.config",
+    "kakao_adblocker.event_engine",
     "kakao_adblocker.ui",
 ]
 hiddenimports += collect_submodules("pystray")

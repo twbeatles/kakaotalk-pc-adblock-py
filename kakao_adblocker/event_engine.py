@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -15,6 +15,7 @@ from .services import ProcessInspector
 from .win32_api import SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, WM_CLOSE, Win32API
 
 Rect = Tuple[int, int, int, int]
+WindowIdentity = Tuple[int, int, str]
 
 
 @dataclass
@@ -45,6 +46,8 @@ class EngineState:
 class HiddenWindowSnapshot:
     was_visible: bool
     rect: Optional[Rect]
+    pid: int
+    class_name: str
 
 
 class LayoutOnlyEngine:
@@ -70,7 +73,6 @@ class LayoutOnlyEngine:
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
         self._watch_thread: Optional[threading.Thread] = None
-        self._apply_thread: Optional[threading.Thread] = None
 
         self._main_window_class_set = frozenset(self.rules.main_window_classes)
         self._ad_candidate_class_set = frozenset(self.rules.ad_candidate_classes)
@@ -81,11 +83,10 @@ class LayoutOnlyEngine:
         self._last_pid_scan: float = 0.0
         self._last_cache_cleanup: float = 0.0
         self._last_activity: float = 0.0
-        self._hidden_windows: Dict[int, HiddenWindowSnapshot] = {}
-        self._custom_scroll_cache: Dict[int, bool] = {}
+        self._hidden_windows: Dict[WindowIdentity, HiddenWindowSnapshot] = {}
+        self._custom_scroll_cache: Dict[WindowIdentity, bool] = {}
 
-        self._text_cache: Dict[int, Tuple[float, str]] = {}
-        self._class_cache: Dict[int, Tuple[float, str]] = {}
+        self._text_cache: Dict[WindowIdentity, Tuple[float, str]] = {}
         self._last_log: Dict[str, float] = {}
 
     @property
@@ -109,19 +110,14 @@ class LayoutOnlyEngine:
         self._stop_event.clear()
         self._wake_event.clear()
         self._watch_thread = threading.Thread(target=self._watch_loop, daemon=True)
-        self._apply_thread = threading.Thread(target=self._apply_loop, daemon=True)
         self._watch_thread.start()
-        self._apply_thread.start()
 
     def stop(self) -> None:
         self._stop_event.set()
         self._wake_event.set()
         if self._watch_thread and self._watch_thread.is_alive():
             self._watch_thread.join(timeout=2.0)
-        if self._apply_thread and self._apply_thread.is_alive():
-            self._apply_thread.join(timeout=2.0)
         self._watch_thread = None
-        self._apply_thread = None
         self._restore_hidden_windows(reason="stop")
         with self._state_lock:
             self._state.running = False
@@ -136,6 +132,14 @@ class LayoutOnlyEngine:
             self._restore_hidden_windows(reason="disabled")
         if enabled_value:
             self._wake_event.set()
+
+    def report_warning(self, message: str) -> None:
+        if not message:
+            return
+        now = time.time()
+        with self._state_lock:
+            self._state.last_error = message
+            self._state.last_tick = now
 
     def force_scan(self) -> None:
         self.scan_once()
@@ -211,19 +215,17 @@ class LayoutOnlyEngine:
         self._cleanup_caches()
 
     def _watch_loop(self) -> None:
+        # v11 keeps a single watch+apply loop to minimize race windows.
         while not self._stop_event.is_set():
             try:
                 self._watch_once()
             except Exception as e:
                 self._set_error(f"watch: {e}")
-            self._wait_next_tick(self._current_loop_interval_seconds())
-
-    def _apply_loop(self) -> None:
-        while not self._stop_event.is_set():
-            try:
-                self._apply_once()
-            except Exception as e:
-                self._set_error(f"apply: {e}")
+            else:
+                try:
+                    self._apply_once()
+                except Exception as e:
+                    self._set_error(f"apply: {e}")
             self._wait_next_tick(self._current_loop_interval_seconds())
 
     def _watch_once(self) -> None:
@@ -296,25 +298,29 @@ class LayoutOnlyEngine:
             parent_rect = self.api.get_window_rect(wnd)
             if not parent_rect:
                 continue
+            parent_class_name = self._get_class(wnd)
+            parent_identity = (wnd, pid, parent_class_name)
+
             children = self._enum_children(wnd)
             if not self._is_main_window(children):
                 continue
-            parent_text = self._get_text(wnd)
+            parent_text = self._get_text(wnd, pid, parent_class_name)
+
             for child in children:
                 if not self.api.is_window(child):
                     continue
                 if self.api.get_parent(child) != wnd:
                     continue
                 class_name = self._get_class(child)
-                window_text = self._get_text(child)
+                window_text = self._get_text(child, pid, class_name)
 
                 if class_name == self.rules.eva_child_class and window_text == "" and parent_text != "":
                     with self._cache_lock:
-                        has_custom_scroll = self._custom_scroll_cache.get(wnd)
+                        has_custom_scroll = self._custom_scroll_cache.get(parent_identity)
                     if has_custom_scroll is None:
                         has_custom_scroll = self._class_name_starts_with(wnd, self.rules.custom_scroll_prefix)
                         with self._cache_lock:
-                            self._custom_scroll_cache[wnd] = has_custom_scroll
+                            self._custom_scroll_cache[parent_identity] = has_custom_scroll
                     if self._layout.should_close_empty_eva_child(class_name, window_text, parent_text, has_custom_scroll):
                         self.api.send_message(child, WM_CLOSE, 0, 0)
                         closed += 1
@@ -326,7 +332,7 @@ class LayoutOnlyEngine:
                     continue
                 child_rect = self.api.get_window_rect(child)
                 if child_rect and self._layout.should_hide_aggressive(class_name, window_text, child_rect, parent_rect):
-                    if self._hide_window(child):
+                    if self._hide_window(child, pid, class_name):
                         hidden += 1
 
         for wnd in candidates:
@@ -335,8 +341,9 @@ class LayoutOnlyEngine:
             pid = self.api.get_window_thread_process_id(wnd)
             if pid not in kakao_pids:
                 continue
+            class_name = self._get_class(wnd)
             if self._has_window_text(wnd, self.rules.chrome_legacy_title, memo=legacy_text_memo):
-                if self._hide_window(wnd):
+                if self._hide_window(wnd, pid, class_name):
                     hidden += 1
 
         with self._state_lock:
@@ -347,7 +354,7 @@ class LayoutOnlyEngine:
 
         self._maybe_cleanup_caches(now)
 
-    def _collect_windows(self, pids: Set[int]) -> List[WindowInfo]:
+    def _collect_windows(self, pids: Set[int], include_geometry: bool = False) -> List[WindowInfo]:
         if not pids:
             return []
         result: List[WindowInfo] = []
@@ -356,15 +363,16 @@ class LayoutOnlyEngine:
             pid = self.api.get_window_thread_process_id(hwnd)
             if pid not in pids:
                 return True
+            class_name = self._get_class(hwnd)
             result.append(
                 WindowInfo(
                     hwnd=hwnd,
                     pid=pid,
-                    class_name=self._get_class(hwnd),
-                    text=self._get_text(hwnd),
+                    class_name=class_name,
+                    text=self._get_text(hwnd, pid, class_name),
                     parent_hwnd=self.api.get_parent(hwnd),
-                    rect=self.api.get_window_rect(hwnd),
-                    visible=self.api.is_window_visible(hwnd),
+                    rect=self.api.get_window_rect(hwnd) if include_geometry else None,
+                    visible=bool(self.api.is_window_visible(hwnd)) if include_geometry else False,
                 )
             )
             return True
@@ -379,9 +387,11 @@ class LayoutOnlyEngine:
 
     def _is_main_window(self, child_handles: List[int]) -> bool:
         for hwnd in child_handles:
-            if self._get_class(hwnd) != self.rules.eva_child_class:
+            class_name = self._get_class(hwnd)
+            if class_name != self.rules.eva_child_class:
                 continue
-            txt = self._get_text(hwnd)
+            pid = self.api.get_window_thread_process_id(hwnd)
+            txt = self._get_text(hwnd, pid, class_name)
             if txt.startswith(self.rules.main_view_prefix) or txt.startswith(self.rules.lock_view_prefix):
                 return True
         return False
@@ -410,31 +420,41 @@ class LayoutOnlyEngine:
             if memo is not None:
                 memo[cache_key] = False
             return False
-        if self._get_text(hwnd) == target:
+
+        pid = self.api.get_window_thread_process_id(hwnd)
+        class_name = self._get_class(hwnd)
+        if self._get_text(hwnd, pid, class_name) == target:
             if memo is not None:
                 memo[cache_key] = True
             return True
+
         for child in self._enum_children(hwnd):
             if self._has_window_text(child, target, max_depth - 1, memo=memo):
                 if memo is not None:
                     memo[cache_key] = True
                 return True
+
         if memo is not None:
             memo[cache_key] = False
         return False
 
-    def _hide_window(self, hwnd: int) -> bool:
-        if not self.api.is_window(hwnd):
+    def _hide_window(self, hwnd: int, pid: int, class_name: str) -> bool:
+        if pid <= 0 or not self.api.is_window(hwnd):
             return False
+        identity = (hwnd, pid, class_name)
         with self._cache_lock:
-            if hwnd not in self._hidden_windows:
-                self._hidden_windows[hwnd] = HiddenWindowSnapshot(
+            if identity not in self._hidden_windows:
+                self._hidden_windows[identity] = HiddenWindowSnapshot(
                     was_visible=bool(self.api.is_window_visible(hwnd)),
                     rect=self.api.get_window_rect(hwnd),
+                    pid=pid,
+                    class_name=class_name,
                 )
+
         self.api.show_window(hwnd, SW_HIDE)
         if not self.api.is_window_visible(hwnd):
             return True
+
         moved = bool(
             self.api.set_window_pos(
                 hwnd,
@@ -447,8 +467,9 @@ class LayoutOnlyEngine:
         )
         if moved:
             return True
+
         with self._cache_lock:
-            self._hidden_windows.pop(hwnd, None)
+            self._hidden_windows.pop(identity, None)
         return False
 
     def _restore_hidden_windows(self, reason: str) -> None:
@@ -457,9 +478,26 @@ class LayoutOnlyEngine:
             self._hidden_windows.clear()
         if not snapshots:
             return
-        for hwnd, snap in snapshots:
+
+        for identity, snap in snapshots:
+            hwnd, expected_pid, expected_class = identity
             if not self.api.is_window(hwnd):
                 continue
+
+            current_pid = self.api.get_window_thread_process_id(hwnd)
+            current_class = self._get_class(hwnd)
+            if current_pid != expected_pid or current_class != expected_class:
+                self.logger.debug(
+                    "Skip restore for recycled hwnd=%s reason=%s expected=(%s,%s) current=(%s,%s)",
+                    hwnd,
+                    reason,
+                    expected_pid,
+                    expected_class,
+                    current_pid,
+                    current_class,
+                )
+                continue
+
             restored = True
             if snap.rect:
                 left, top, right, bottom = snap.rect
@@ -477,10 +515,12 @@ class LayoutOnlyEngine:
                         restored = False
                 else:
                     restored = False
+
             if snap.was_visible:
                 self.api.show_window(hwnd, SW_SHOW)
                 if not self.api.is_window_visible(hwnd):
                     restored = False
+
             if not restored:
                 self.logger.warning("Failed to restore hidden window hwnd=%s reason=%s", hwnd, reason)
 
@@ -491,33 +531,60 @@ class LayoutOnlyEngine:
                 return True
         return False
 
-    def _get_cached(self, cache: Dict[int, Tuple[float, str]], hwnd: int, loader: Callable[[], str]) -> str:
+    def _get_cached(self, cache: Dict[WindowIdentity, Tuple[float, str]], key: WindowIdentity, loader: Callable[[], str]) -> str:
         now = time.time()
         with self._cache_lock:
-            hit = cache.get(hwnd)
+            hit = cache.get(key)
             if hit and (now - hit[0]) <= self.rules.cache_ttl_seconds:
                 return hit[1]
             value = loader() or ""
-            cache[hwnd] = (now, value)
+            cache[key] = (now, value)
             return value
 
-    def _get_text(self, hwnd: int) -> str:
-        return self._get_cached(self._text_cache, hwnd, lambda: self.api.get_window_text(hwnd))
+    def _window_identity(self, hwnd: int, pid: Optional[int] = None, class_name: Optional[str] = None) -> Optional[WindowIdentity]:
+        resolved_pid = pid if pid is not None else self.api.get_window_thread_process_id(hwnd)
+        if resolved_pid <= 0:
+            return None
+        resolved_class = class_name if class_name is not None else self._get_class(hwnd)
+        return (hwnd, resolved_pid, resolved_class)
+
+    def _get_text(self, hwnd: int, pid: Optional[int] = None, class_name: Optional[str] = None) -> str:
+        identity = self._window_identity(hwnd, pid, class_name)
+        if identity is None:
+            return self.api.get_window_text(hwnd) or ""
+        return self._get_cached(self._text_cache, identity, lambda: self.api.get_window_text(hwnd))
 
     def _get_class(self, hwnd: int) -> str:
-        return self._get_cached(self._class_cache, hwnd, lambda: self.api.get_class_name(hwnd))
+        return self.api.get_class_name(hwnd) or ""
+
+    def _is_identity_alive(self, identity: WindowIdentity) -> bool:
+        hwnd, pid, class_name = identity
+        if not self.api.is_window(hwnd):
+            return False
+        if self.api.get_window_thread_process_id(hwnd) != pid:
+            return False
+        if self._get_class(hwnd) != class_name:
+            return False
+        return True
 
     def _cleanup_caches(self) -> None:
         now = time.time()
         max_age = self.rules.cache_ttl_seconds
         with self._cache_lock:
-            for cache in (self._text_cache, self._class_cache):
-                stale = [hwnd for hwnd, (ts, _value) in cache.items() if now - ts > max_age or not self.api.is_window(hwnd)]
-                for hwnd in stale:
-                    cache.pop(hwnd, None)
+            stale_text = [
+                key
+                for key, (ts, _value) in self._text_cache.items()
+                if now - ts > max_age or not self._is_identity_alive(key)
+            ]
+            for key in stale_text:
+                self._text_cache.pop(key, None)
 
-            self._hidden_windows = {hwnd: snap for hwnd, snap in self._hidden_windows.items() if self.api.is_window(hwnd)}
-            self._custom_scroll_cache = {hwnd: val for hwnd, val in self._custom_scroll_cache.items() if self.api.is_window(hwnd)}
+            self._hidden_windows = {
+                key: snap for key, snap in self._hidden_windows.items() if self._is_identity_alive(key)
+            }
+            self._custom_scroll_cache = {
+                key: val for key, val in self._custom_scroll_cache.items() if self._is_identity_alive(key)
+            }
 
     def _set_error(self, message: str) -> None:
         now = time.time()
@@ -534,7 +601,7 @@ class LayoutOnlyEngine:
         if not pids:
             return None
 
-        roots = self._collect_windows(pids)
+        roots = self._collect_windows(pids, include_geometry=True)
         roots = [w for w in roots if w.parent_hwnd == 0]
         if not roots:
             return None
@@ -552,11 +619,13 @@ class LayoutOnlyEngine:
         return path
 
     def _dump_node(self, hwnd: int, depth: int, max_depth: int) -> Dict[str, object]:
+        class_name = self._get_class(hwnd)
+        pid = self.api.get_window_thread_process_id(hwnd)
         node: Dict[str, object] = {
             "hwnd": hwnd,
-            "class": self._get_class(hwnd),
-            "text": self._get_text(hwnd),
-            "pid": self.api.get_window_thread_process_id(hwnd),
+            "class": class_name,
+            "text": self._get_text(hwnd, pid, class_name),
+            "pid": pid,
             "visible": self.api.is_window_visible(hwnd),
             "rect": self.api.get_window_rect(hwnd),
             "depth": depth,
@@ -569,4 +638,4 @@ class LayoutOnlyEngine:
         return node
 
 
-__all__ = ["LayoutOnlyEngine", "EngineState", "WindowInfo", "HiddenWindowSnapshot"]
+__all__ = ["LayoutOnlyEngine", "EngineState", "WindowInfo", "HiddenWindowSnapshot", "WindowIdentity"]

@@ -7,7 +7,7 @@
 - Version line: `v11`
 - Scope: Layout-only ad blocking (no hosts, no DNS flush, no AdFit registry writes)
 - Non-Windows execution: fail-fast with message and exit code `2`
-- Polling model: adaptive (active 100ms / idle 500ms by default)
+- Polling model: adaptive (active 50ms / idle 500ms by default)
 
 ## Runtime Entry
 
@@ -24,14 +24,19 @@
   - advanced perf knobs: `idle_poll_interval_ms`, `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
   - missing new perf fields are backfilled with safe defaults
   - rules loader falls back `ad_candidate_classes` to `main_window_classes` when missing/invalid
+  - malformed/non-object JSON input is backed up as `*.broken-YYYYMMDD-HHMMSS` and recorded as load warning
+  - inverted banner bounds (`banner_min_height_px > banner_max_height_px`) are auto-normalized
+  - `consume_load_warnings()` exposes startup warnings to app layer
 - `event_engine.py`
-  - `LayoutOnlyEngine`: watch/apply polling loops
+  - `LayoutOnlyEngine`: single watch+apply polling loop
   - main window detection uses `main_window_classes` from rules
   - ad candidate filtering uses `ad_candidate_classes` (default: `EVA_Window_Dblclk`, `EVA_Window`) + `Chrome Legacy Window` signature
   - hidden/moved windows are restored when blocking is disabled or engine stops
-  - cache dictionaries are protected by a shared lock
+  - `WindowIdentity(hwnd,pid,class)` keyed caches protect against HWND reuse side effects
+  - watch scan path avoids geometry/visibility calls; dump-tree path still collects full geometry
   - process-id scan and cache cleanup are interval-throttled for idle CPU savings
   - default idle->active detection target is <= 500ms
+  - `report_warning()` allows startup warning propagation to tray status context
 - `layout_engine.py`
   - Main/lock view resize formulas
   - Aggressive bottom-banner heuristics
@@ -42,8 +47,10 @@
   - startup setting is synchronized from registry on app start
   - status text includes last error and last tick context
   - pystray/Pillow are loaded lazily when tray setup starts
+  - tray callbacks use `_safe_after` to avoid shutdown-race callback exceptions
 - `services.py`
   - process scan, startup registry, shell/open-url helpers
+  - psutil process scan uses per-process exception isolation
 
 ## Key Resize Rules
 

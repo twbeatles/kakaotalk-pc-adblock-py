@@ -4,7 +4,8 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+_SPEC_PATH = Path(globals().get("__file__", "kakaotalk_adblock.spec")).resolve()
+PROJECT_ROOT = _SPEC_PATH.parent
 
 # Keep lazy-imported runtime modules explicit so onefile packaging stays stable.
 hiddenimports = [

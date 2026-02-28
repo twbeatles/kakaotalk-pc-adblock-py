@@ -674,3 +674,54 @@ def test_engine_error_log_map_is_pruned_when_many_unique_errors():
     assert len(engine._last_log) >= 384
     assert "error-0" not in engine._last_log
     assert "error-599" in engine._last_log
+
+
+def test_engine_set_error_is_thread_safe_under_stress():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(log_rate_limit_seconds=0.0),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    errors = []
+
+    def worker(index):
+        try:
+            for i in range(4000):
+                engine._set_error(f"stress-{index}-{i}")
+        except Exception as exc:  # pragma: no cover - should never happen
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(6)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join(timeout=5.0)
+
+    assert errors == []
+    assert len(engine._last_log) <= 512
+
+
+def test_engine_can_reset_restore_failures_state():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    with engine._state_lock:
+        engine._state.restore_failures = 3
+        engine._state.last_restore_error = "restore failed"
+
+    engine.reset_restore_failures()
+    state = engine.state
+
+    assert state.restore_failures == 0
+    assert state.last_restore_error == ""

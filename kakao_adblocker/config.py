@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
@@ -100,6 +101,25 @@ def _coerce_str_list(value: Any, default: List[str]) -> List[str]:
         return list(default)
     out = [x for x in value if isinstance(x, str) and x.strip()]
     return out if out else list(default)
+
+
+def _atomic_write_text(path: str, text: str) -> None:
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    prefix = f".{os.path.basename(path)}."
+    fd, temp_path = tempfile.mkstemp(prefix=prefix, suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            os.unlink(temp_path)
+        except Exception:
+            pass
+        raise
 
 
 def _backup_broken_json(path: str, label: str, reason: str) -> None:
@@ -247,9 +267,8 @@ class LayoutSettingsV11:
         )
 
     def save(self, path: str = SETTINGS_FILE) -> None:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(asdict(self), f, indent=2, ensure_ascii=False)
+        payload = json.dumps(asdict(self), indent=2, ensure_ascii=False) + "\n"
+        _atomic_write_text(path, payload)
 
     @classmethod
     def default_json(cls) -> str:
@@ -327,9 +346,8 @@ class LayoutRulesV11:
         return rules
 
     def save(self, path: str = RULES_FILE) -> None:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(asdict(self), f, indent=2, ensure_ascii=False)
+        payload = json.dumps(asdict(self), indent=2, ensure_ascii=False) + "\n"
+        _atomic_write_text(path, payload)
 
     @classmethod
     def default_json(cls) -> str:

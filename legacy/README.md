@@ -14,6 +14,8 @@
   - `ad_patterns.json`, `adblock_settings.json`, `blocked_domains.txt`, `adblock.log`
 - `scripts/`
   - `카카오톡 광고제거 v8.0.py`
+- `카카오톡 광고제거 v10.0.py`
+  - v11 엔트리포인트(`kakaotalk_layout_adblock_v11.py`)로 마이그레이션 안내만 출력
 - `specs/`
   - `kakaotalk_adblock_v10.spec`
 

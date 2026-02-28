@@ -8,6 +8,7 @@ _SPEC_PATH = Path(globals().get("__file__", "kakaotalk_adblock.spec")).resolve()
 PROJECT_ROOT = _SPEC_PATH.parent
 
 # Keep lazy-imported core/runtime modules explicit so onefile packaging stays stable.
+# `--self-check` path also imports pystray/PIL via importlib for diagnostics.
 hiddenimports = [
     "psutil",
     "PIL",

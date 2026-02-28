@@ -29,6 +29,7 @@ class FakeEngine:
     def __init__(self):
         self.enabled = True
         self.stop_called = False
+        self.reset_called = 0
         self._state = type(
             "S",
             (),
@@ -55,6 +56,11 @@ class FakeEngine:
 
     def stop(self):
         self.stop_called = True
+
+    def reset_restore_failures(self):
+        self.reset_called += 1
+        self._state.restore_failures = 0
+        self._state.last_restore_error = ""
 
 
 def test_tray_controller_toggle_and_status(monkeypatch):
@@ -218,13 +224,18 @@ def test_toggle_startup_rolls_back_when_save_fails(monkeypatch):
         raise OSError("disk full")
 
     monkeypatch.setattr(settings, "save", broken_save)
+    calls = []
     monkeypatch.setattr("kakao_adblocker.ui.StartupManager.is_enabled", lambda: False)
-    monkeypatch.setattr("kakao_adblocker.ui.StartupManager.set_enabled", lambda _enable: True)
+    monkeypatch.setattr(
+        "kakao_adblocker.ui.StartupManager.set_enabled",
+        lambda enable: calls.append(enable) or True,
+    )
     controller = TrayController(root, engine, settings, logging.getLogger("test"))
 
     controller.toggle_startup()
 
     assert settings.run_on_startup is False
+    assert calls == [True, False]
 
 
 def test_toggle_aggressive_mode_rolls_back_when_save_fails(monkeypatch):
@@ -314,27 +325,52 @@ def test_status_update_skips_redundant_set(monkeypatch):
     assert calls["set"] == 1
 
 
-def test_tray_menu_callbacks_swallow_after_errors(monkeypatch):
+def test_queue_bridge_processes_callbacks_in_order(monkeypatch):
     monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
-
-    class FailingAfterRoot(FakeRoot):
-        def after(self, _ms, _fn):
-            raise RuntimeError("tk closed")
-
-    root = FailingAfterRoot()
+    root = FakeRoot()
     engine = FakeEngine()
     settings = LayoutSettingsV11(enabled=True)
     controller = TrayController(root, engine, settings, logging.getLogger("test"))
 
-    controller._menu_toggle_blocking(None, None)
-    controller._menu_toggle_startup(None, None)
-    controller._menu_toggle_aggressive_mode(None, None)
-    controller._menu_show_window(None, None)
-    controller._menu_open_logs(None, None)
-    controller._menu_open_release(None, None)
-    controller._menu_exit(None, None)
+    calls = []
+    controller._ui_queue_running = True
+    controller._safe_after(lambda: calls.append("a"))
+    controller._safe_after(lambda: calls.append("b"))
+    controller._safe_after(lambda: calls.append("c"))
+    controller._drain_ui_queue()
 
-    assert True
+    assert calls == ["a", "b", "c"]
+
+
+def test_menu_reset_restore_failures_calls_engine(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    engine._state.restore_failures = 4
+    engine._state.last_restore_error = "err"
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    controller._ui_queue_running = True
+
+    controller._menu_reset_restore_failures(None, None)
+    controller._drain_ui_queue()
+
+    assert engine.reset_called == 1
+    assert engine._state.restore_failures == 0
+    assert engine._state.last_restore_error == ""
+
+
+def test_safe_after_ignores_when_queue_not_running(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    controller._safe_after(lambda: (_ for _ in ()).throw(RuntimeError("should not run")))
+    controller._drain_ui_queue()
+
+    assert controller._ui_queue.empty()
 
 
 def test_tick_status_swallow_after_error(monkeypatch):
@@ -354,3 +390,56 @@ def test_tick_status_swallow_after_error(monkeypatch):
 
     controller._tick_status()
     assert True
+
+
+def test_load_tray_modules_retries_after_ttl(monkeypatch):
+    import kakao_adblocker.ui as ui
+
+    ui.pystray = None
+    ui.Image = None
+    ui.ImageDraw = None
+    ui.PYSTRAY_AVAILABLE = False
+    ui._LAST_TRAY_IMPORT_FAILURE_AT = None
+
+    calls = {"count": 0}
+
+    def failing_import(_name):
+        calls["count"] += 1
+        raise ImportError("missing")
+
+    monkeypatch.setattr(ui.importlib, "import_module", failing_import)
+    monkeypatch.setattr(ui.time, "time", lambda: 100.0)
+    assert ui._load_tray_modules() is False
+    first_calls = calls["count"]
+
+    monkeypatch.setattr(ui.time, "time", lambda: 110.0)
+    assert ui._load_tray_modules() is False
+    assert calls["count"] == first_calls
+
+    monkeypatch.setattr(ui.time, "time", lambda: 131.0)
+    assert ui._load_tray_modules() is False
+    assert calls["count"] > first_calls
+
+
+def test_load_tray_modules_resets_failure_timestamp_on_success(monkeypatch):
+    import types
+    import kakao_adblocker.ui as ui
+
+    ui.pystray = None
+    ui.Image = None
+    ui.ImageDraw = None
+    ui.PYSTRAY_AVAILABLE = False
+    ui._LAST_TRAY_IMPORT_FAILURE_AT = 10.0
+
+    modules = {
+        "pystray": types.SimpleNamespace(),
+        "PIL.Image": types.SimpleNamespace(new=lambda *_args, **_kwargs: None),
+        "PIL.ImageDraw": types.SimpleNamespace(Draw=lambda *_args, **_kwargs: None),
+    }
+
+    monkeypatch.setattr(ui.time, "time", lambda: 100.0)
+    monkeypatch.setattr(ui.importlib, "import_module", lambda name: modules[name])
+
+    assert ui._load_tray_modules() is True
+    assert ui.PYSTRAY_AVAILABLE is True
+    assert ui._LAST_TRAY_IMPORT_FAILURE_AT is None

@@ -10,7 +10,7 @@
 ## 엔트리포인트
 
 - 실행: `kakaotalk_layout_adblock_v11.py`
-- 기존 `카카오톡 광고제거 v10.0.py`는 사용중단 안내만 출력
+- 기존 `카카오톡 광고제거 v10.0.py`는 루트에서 제거되었고, `legacy/카카오톡 광고제거 v10.0.py`에서 사용중단 안내만 출력
 - 패키지 `kakao_adblocker`는 lazy export(`__getattr__`)를 사용해 초기 import 비용을 줄임
 
 ## 핵심 모듈
@@ -24,6 +24,7 @@
   - JSON 파손(파싱 실패/최상위 타입 불일치) 시 `*.broken-YYYYMMDD-HHMMSS` 백업 생성 후 경고 큐에 기록
   - rules 로드 시 `banner_min_height_px > banner_max_height_px` 역전값을 자동 교정(swap)하고 경고 기록
   - `*.broken-*` 백업 자동 정리(30일 초과 삭제 + 최신 10개 유지)
+  - settings/rules 저장은 원자적 교체(`os.replace`)로 파일 파손 리스크 완화
   - rules 문자열 무결성 self-check(mojibake 시그니처/`�`) 경고
   - 앱 계층 전달용 `consume_load_warnings()` 제공
 - `kakao_adblocker/event_engine.py`
@@ -36,6 +37,7 @@
   - `stop()` join timeout(2.0s) 시 상태/로그 경고 후 종료 절차 계속
   - 원복 실패 항목 스냅샷 보존으로 재시도 가능
   - `EngineState.restore_failures`, `EngineState.last_restore_error` 상태 노출
+  - `reset_restore_failures()`로 복원 실패 상태 수동 초기화 지원
   - `WindowIdentity(hwnd,pid,class)` 기반 text/custom-scroll/hidden-window 캐시로 HWND 재사용 오동작 방지
   - 스캔 경로는 경량 수집(`rect/visible` 미조회)으로 호출 부담 감소, `--dump-tree`만 상세 수집 사용
   - PID 스캔/캐시 정리 주기 스로틀 적용
@@ -46,18 +48,20 @@
   - 공격적 배너 휴리스틱, 짧은 ad 토큰 단어 경계 매칭
 - `kakao_adblocker/ui.py`
   - `TrayController`
-  - 트레이 메뉴: 상태/OnOff/공격 모드/시작프로그램/창 열기/로그/릴리스/종료
+  - 트레이 메뉴: 상태/OnOff/공격 모드/시작프로그램/복원실패초기화/창 열기/로그/릴리스/종료
   - 최소화 시작 시(`--minimized`/`start_minimized`) 시작 안내 팝업 생략
   - 시작 시 `run_on_startup` 값을 레지스트리 상태로 1회 동기화
   - 상태 문자열에 마지막 오류/갱신시각 표시
-  - pystray/Pillow 지연 로딩 및 상태 텍스트 중복 갱신 억제
+  - pystray/Pillow 지연 로딩 + 실패 TTL(30초) 자동 재시도
+  - 트레이 콜백은 queue 디스패치(`_safe_after` -> main-thread drain)로 처리
   - 설정 저장 실패 시 토글 값 롤백(`enabled`/`run_on_startup`/`aggressive_mode`)
-  - 트레이 콜백은 `_safe_after`를 통해 종료 경합 시 예외를 전파하지 않음
+  - startup 토글에서 저장 실패 시 레지스트리 역롤백
   - `_tick_status` 스케줄링(`root.after`)도 종료 경합 예외 비전파
 - `kakao_adblocker/services.py`
   - `ProcessInspector`, `StartupManager`, `ReleaseService`
   - `ProcessInspector.get_process_ids()`는 psutil 경로에서 per-process 예외 격리 처리
   - psutil 초기화/루프 실패 시 `tasklist` 폴백
+  - 진단용 `ProcessInspector.probe_tasklist()`, `StartupManager.probe_access()` 제공
 
 ## 빌드 메모
 
@@ -73,6 +77,7 @@
 6. 공격 모드에서 `Chrome_WidgetWin_* + ad token`/하단 배너 후보 숨김
 7. 시작프로그램 토글은 레지스트리 갱신 성공 시에만 설정 파일에 반영
 8. `--dump-tree`는 UI 모듈을 로딩하지 않는 경량 경로로 동작
+9. `--self-check`는 UI/엔진을 기동하지 않고 환경 진단만 수행
 
 ## 설정 파일
 
@@ -84,3 +89,4 @@
 
 - 구버전 자산은 `legacy/`로 이동됨
 - 원본 모놀리식: `legacy/kakao_adblocker/legacy.py`
+- deprecated 엔트리포인트: `legacy/카카오톡 광고제거 v10.0.py`

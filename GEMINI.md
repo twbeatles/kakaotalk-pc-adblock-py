@@ -12,8 +12,9 @@
 ## Runtime Entry
 
 - Main script: `kakaotalk_layout_adblock_v11.py`
-- Legacy script: `카카오톡 광고제거 v10.0.py` (deprecated notice only)
+- Legacy script: `legacy/카카오톡 광고제거 v10.0.py` (deprecated notice only)
 - `--dump-tree` runs in a lightweight path without UI/tray module import
+- `--self-check` runs diagnostics only (no UI/tray/engine start)
 - package `kakao_adblocker` exports are lazy-resolved via `__getattr__`
 
 ## Architecture
@@ -49,19 +50,21 @@
   - Aggressive bottom-banner heuristics
   - short ASCII ad tokens are word-boundary matched to reduce false positives
 - `ui.py`
-  - `TrayController` (status, toggle, aggressive mode, startup, logs, release page, exit)
+  - `TrayController` (status, toggle, aggressive mode, startup, restore-failure reset, logs, release page, exit)
   - startup notice is skipped when launching minimized
   - startup setting is synchronized from registry on app start
+  - startup toggle rolls registry back on settings-save failure
   - setting save failures roll back values (`enabled`, `run_on_startup`, `aggressive_mode`)
   - status text includes last error and last tick context
   - status text includes restore failure count/context when present
-  - pystray/Pillow are loaded lazily when tray setup starts
-  - tray callbacks use `_safe_after` to avoid shutdown-race callback exceptions
+  - pystray/Pillow are loaded lazily and retried after TTL (30s) when import fails
+  - tray callbacks are queued and drained on Tk main thread
   - status tick scheduling (`root.after`) also swallows shutdown-race errors
 - `services.py`
   - process scan, startup registry, shell/open-url helpers
   - psutil process scan uses per-process exception isolation
   - psutil init/loop failure falls back to `tasklist` scan
+  - diagnostics helpers: `ProcessInspector.probe_tasklist()`, `StartupManager.probe_access()`
 
 ## Key Resize Rules
 
@@ -94,3 +97,4 @@ Legacy code/assets were moved under `legacy/`:
 - `legacy/tools/*`
 - `legacy/configs/*`
 - `legacy/scripts/*`
+- `legacy/카카오톡 광고제거 v10.0.py`

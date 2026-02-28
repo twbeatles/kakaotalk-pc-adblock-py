@@ -7,7 +7,7 @@ import subprocess
 import sys
 import webbrowser
 from pathlib import Path
-from typing import Set
+from typing import Set, Tuple
 
 try:
     import psutil
@@ -84,6 +84,22 @@ class ProcessInspector:
             pass
         return pids
 
+    @staticmethod
+    def probe_tasklist() -> Tuple[bool, str]:
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                text=True,
+                creationflags=0x08000000,
+                timeout=3,
+            )
+            if result.returncode != 0:
+                return False, f"tasklist returncode={result.returncode}"
+            return True, "tasklist 실행 가능"
+        except Exception as exc:
+            return False, f"{exc.__class__.__name__}: {exc}"
+
 
 class StartupManager:
     KEY = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
@@ -127,6 +143,19 @@ class StartupManager:
             return True
         except Exception:
             return False
+
+    @staticmethod
+    def probe_access() -> Tuple[bool, str]:
+        if not WINREG_AVAILABLE:
+            return False, "winreg unavailable"
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, StartupManager.KEY, 0, winreg.KEY_READ)
+            try:
+                return True, "Run 레지스트리 읽기 가능"
+            finally:
+                winreg.CloseKey(key)
+        except Exception as exc:
+            return False, f"{exc.__class__.__name__}: {exc}"
 
 
 class ShellService:

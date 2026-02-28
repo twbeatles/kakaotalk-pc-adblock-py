@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import kakao_adblocker.config as config_module
 from kakao_adblocker.config import LayoutRulesV11, LayoutSettingsV11, consume_load_warnings
 
 
@@ -223,3 +224,46 @@ def test_settings_load_cleans_broken_backup_files_by_age_and_count(tmp_path: Pat
     backups = list(tmp_path.glob("layout_settings_v11.json.broken-*"))
     assert len(backups) <= 10
     assert not very_old.exists()
+
+
+def test_settings_save_writes_json_atomically(tmp_path: Path):
+    path = tmp_path / "layout_settings_v11.json"
+    settings = LayoutSettingsV11(enabled=False, start_minimized=False)
+
+    settings.save(str(path))
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["enabled"] is False
+    assert saved["start_minimized"] is False
+
+
+def test_rules_save_writes_json_atomically(tmp_path: Path):
+    path = tmp_path / "layout_rules_v11.json"
+    rules = LayoutRulesV11(main_window_titles=["CustomTitle"])
+
+    rules.save(str(path))
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["main_window_titles"] == ["CustomTitle"]
+
+
+def test_settings_save_preserves_existing_file_on_atomic_replace_failure(tmp_path: Path, monkeypatch):
+    path = tmp_path / "layout_settings_v11.json"
+    path.write_text('{"enabled": true}', encoding="utf-8")
+    settings = LayoutSettingsV11(enabled=False)
+
+    def broken_replace(_src, _dst):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(config_module.os, "replace", broken_replace)
+
+    try:
+        settings.save(str(path))
+    except OSError:
+        pass
+    else:
+        raise AssertionError("expected OSError")
+
+    assert path.read_text(encoding="utf-8") == '{"enabled": true}'
+    leftovers = list(tmp_path.glob(f".{path.name}*.tmp"))
+    assert leftovers == []

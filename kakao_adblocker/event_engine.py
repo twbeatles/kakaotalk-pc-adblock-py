@@ -74,6 +74,7 @@ class LayoutOnlyEngine:
         self._state_lock = threading.Lock()
         self._data_lock = threading.Lock()
         self._cache_lock = threading.Lock()
+        self._error_log_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
         self._watch_thread: Optional[threading.Thread] = None
@@ -158,6 +159,13 @@ class LayoutOnlyEngine:
         now = time.time()
         with self._state_lock:
             self._state.last_error = message
+            self._state.last_tick = now
+
+    def reset_restore_failures(self) -> None:
+        now = time.time()
+        with self._state_lock:
+            self._state.restore_failures = 0
+            self._state.last_restore_error = ""
             self._state.last_tick = now
 
     def force_scan(self) -> None:
@@ -628,16 +636,20 @@ class LayoutOnlyEngine:
 
     def _set_error(self, message: str) -> None:
         now = time.time()
-        last = self._last_log.get(message, 0.0)
-        if now - last >= self.rules.log_rate_limit_seconds:
-            self._last_log[message] = now
-            self._prune_error_log_keys()
+        should_log = False
+        with self._error_log_lock:
+            last = self._last_log.get(message, 0.0)
+            if now - last >= self.rules.log_rate_limit_seconds:
+                self._last_log[message] = now
+                self._prune_error_log_keys_locked()
+                should_log = True
+        if should_log:
             self.logger.error(message)
         with self._state_lock:
             self._state.last_error = message
             self._state.last_tick = now
 
-    def _prune_error_log_keys(self) -> None:
+    def _prune_error_log_keys_locked(self) -> None:
         size = len(self._last_log)
         if size <= MAX_ERROR_LOG_KEYS:
             return
@@ -647,6 +659,10 @@ class LayoutOnlyEngine:
         oldest = sorted(self._last_log.items(), key=lambda item: item[1])[:trim_count]
         for key, _timestamp in oldest:
             self._last_log.pop(key, None)
+
+    def _prune_error_log_keys(self) -> None:
+        with self._error_log_lock:
+            self._prune_error_log_keys_locked()
 
     def dump_window_tree(self, out_dir: Optional[str] = None) -> Optional[str]:
         pids = set(self._process_ids_provider("kakaotalk.exe"))

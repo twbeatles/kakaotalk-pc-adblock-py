@@ -17,11 +17,15 @@ class FakeEngine:
 
     def __init__(self, *_args, **_kwargs):
         self.started = False
+        self.stopped = False
         self.reported_warnings = []
         FakeEngine.last_instance = self
 
     def start(self):
         self.started = True
+
+    def stop(self):
+        self.stopped = True
 
     def report_warning(self, message):
         self.reported_warnings.append(message)
@@ -39,6 +43,7 @@ class FakeController:
         self.hidden_called = False
         self.shown_called = False
         self.started = False
+        self.stopped = False
         FakeController.last_instance = self
 
     def start(self):
@@ -52,6 +57,9 @@ class FakeController:
 
     def show_window(self):
         self.shown_called = True
+
+    def stop_tray(self):
+        self.stopped = True
 
 
 def _patch_main_dependencies(monkeypatch, settings, load_warnings=None):
@@ -137,3 +145,75 @@ def test_main_reports_first_load_warning_to_engine(monkeypatch):
     engine = FakeEngine.last_instance
     assert engine is not None
     assert engine.reported_warnings == ["설정 파일 손상"]
+
+
+def test_main_cleans_up_when_controller_start_fails(monkeypatch):
+    class BrokenController(FakeController):
+        def start(self):
+            raise RuntimeError("start failed")
+
+    settings = LayoutSettingsV11(start_minimized=True)
+    _patch_main_dependencies(monkeypatch, settings)
+    monkeypatch.setattr(app, "TrayController", BrokenController)
+
+    try:
+        app.main([])
+    except RuntimeError as exc:
+        assert str(exc) == "start failed"
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    engine = FakeEngine.last_instance
+    controller = FakeController.last_instance
+    assert engine is not None
+    assert engine.stopped is True
+    assert controller is not None
+    assert controller.stopped is True
+
+
+def test_main_cleans_up_when_mainloop_fails(monkeypatch):
+    class BrokenRoot(FakeRoot):
+        def mainloop(self):
+            raise RuntimeError("mainloop failed")
+
+    settings = LayoutSettingsV11(start_minimized=True)
+    _patch_main_dependencies(monkeypatch, settings)
+    monkeypatch.setattr(app.tk, "Tk", BrokenRoot)
+
+    try:
+        app.main([])
+    except RuntimeError as exc:
+        assert str(exc) == "mainloop failed"
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    engine = FakeEngine.last_instance
+    controller = FakeController.last_instance
+    assert engine is not None
+    assert engine.stopped is True
+    assert controller is not None
+    assert controller.stopped is True
+
+
+def test_self_check_path_skips_engine_and_ui(monkeypatch):
+    called = {"runtime": 0, "engine": 0, "ui_load": 0}
+
+    class NeverEngine:
+        def __init__(self, *_args, **_kwargs):
+            called["engine"] += 1
+
+    monkeypatch.setattr(app.os, "name", "nt")
+    monkeypatch.setattr(app, "ensure_runtime_files", lambda: called.__setitem__("runtime", called["runtime"] + 1))
+    monkeypatch.setattr(app, "LayoutOnlyEngine", NeverEngine)
+    monkeypatch.setattr(app, "_load_ui_dependencies", lambda: called.__setitem__("ui_load", called["ui_load"] + 1))
+    monkeypatch.setattr(app, "_check_appdata_writable", lambda: (True, "ok"))
+    monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app, "_check_tray_import", lambda: (True, "ok"))
+
+    rc = app.main(["--self-check"])
+
+    assert rc == 0
+    assert called["runtime"] == 0
+    assert called["engine"] == 0
+    assert called["ui_load"] == 0

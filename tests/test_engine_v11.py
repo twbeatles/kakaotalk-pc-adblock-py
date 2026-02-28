@@ -212,6 +212,32 @@ def test_engine_restores_hidden_windows_on_stop():
     assert api.windows[200]["visible"] is True
 
 
+def test_engine_stop_records_warning_when_watch_thread_join_times_out():
+    class HungThread:
+        def join(self, timeout=None):
+            return None
+
+        def is_alive(self):
+            return True
+
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    engine._watch_thread = HungThread()
+
+    engine.stop()
+
+    state = engine.state
+    assert state.running is False
+    assert state.last_error == "stop: watch thread did not terminate within 2.0s"
+
+
 def test_engine_cache_access_is_thread_safe_under_stress():
     api = FakeAPI()
     settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
@@ -593,3 +619,58 @@ def test_engine_skips_restore_for_recycled_hwnd():
 
     assert 200 not in api.show_calls
     assert api.windows[200]["visible"] is False
+
+
+def test_engine_restore_failures_are_retained_for_retry():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+    assert any(identity[0] == 200 for identity in engine._hidden_windows)
+
+    original_set_window_pos = api.set_window_pos
+
+    def failing_restore(hwnd, x, y, width, height, _flags):
+        if hwnd == 200 and x >= 0:
+            return False
+        return original_set_window_pos(hwnd, x, y, width, height, _flags)
+
+    api.set_window_pos = failing_restore
+    engine.set_enabled(False)
+
+    assert any(identity[0] == 200 for identity in engine._hidden_windows)
+    assert engine.state.restore_failures >= 1
+    assert "hwnd=200" in engine.state.last_restore_error
+
+    api.set_window_pos = original_set_window_pos
+    engine._restore_hidden_windows(reason="retry")
+
+    assert all(identity[0] != 200 for identity in engine._hidden_windows)
+
+
+def test_engine_error_log_map_is_pruned_when_many_unique_errors():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(log_rate_limit_seconds=0.0),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    for i in range(600):
+        engine._set_error(f"error-{i}")
+
+    assert len(engine._last_log) <= 512
+    assert len(engine._last_log) >= 384
+    assert "error-0" not in engine._last_log
+    assert "error-599" in engine._last_log

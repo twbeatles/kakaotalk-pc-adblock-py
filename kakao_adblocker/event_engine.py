@@ -16,6 +16,8 @@ from .win32_api import SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDE
 
 Rect = Tuple[int, int, int, int]
 WindowIdentity = Tuple[int, int, str]
+MAX_ERROR_LOG_KEYS = 512
+ERROR_LOG_PRUNE_TARGET = 384
 
 
 @dataclass
@@ -40,6 +42,8 @@ class EngineState:
     closed_windows: int = 0
     last_tick: float = 0.0
     last_error: str = ""
+    restore_failures: int = 0
+    last_restore_error: str = ""
 
 
 @dataclass
@@ -101,6 +105,8 @@ class LayoutOnlyEngine:
             self._state.running = True
             self._state.enabled = bool(self.settings.enabled)
             self._state.last_error = ""
+            self._state.restore_failures = 0
+            self._state.last_restore_error = ""
         with self._data_lock:
             self._pid_scan_cache = set()
             self._last_pid_scan = 0.0
@@ -122,8 +128,14 @@ class LayoutOnlyEngine:
     def stop(self) -> None:
         self._stop_event.set()
         self._wake_event.set()
-        if self._watch_thread and self._watch_thread.is_alive():
-            self._watch_thread.join(timeout=2.0)
+        watch_thread = self._watch_thread
+        timed_out = False
+        if watch_thread and watch_thread.is_alive():
+            watch_thread.join(timeout=2.0)
+            timed_out = watch_thread.is_alive()
+        if timed_out:
+            self._set_error("stop: watch thread did not terminate within 2.0s")
+            self.logger.warning("Watch thread join timed out during stop")
         self._watch_thread = None
         self._restore_hidden_windows(reason="stop")
         with self._state_lock:
@@ -480,13 +492,14 @@ class LayoutOnlyEngine:
     def _restore_hidden_windows(self, reason: str) -> None:
         with self._cache_lock:
             snapshots = list(self._hidden_windows.items())
-            self._hidden_windows.clear()
         if not snapshots:
             return
 
         for identity, snap in snapshots:
             hwnd, expected_pid, expected_class = identity
             if not self.api.is_window(hwnd):
+                with self._cache_lock:
+                    self._hidden_windows.pop(identity, None)
                 continue
 
             current_pid = self.api.get_window_thread_process_id(hwnd)
@@ -501,9 +514,12 @@ class LayoutOnlyEngine:
                     current_pid,
                     current_class,
                 )
+                with self._cache_lock:
+                    self._hidden_windows.pop(identity, None)
                 continue
 
             restored = True
+            failure_reason = ""
             if snap.rect:
                 left, top, right, bottom = snap.rect
                 width = right - left
@@ -518,16 +534,27 @@ class LayoutOnlyEngine:
                         SWP_NOZORDER | SWP_NOACTIVATE,
                     ):
                         restored = False
+                        failure_reason = "set_window_pos failed"
                 else:
                     restored = False
+                    failure_reason = "invalid rect size"
 
             if snap.was_visible:
                 self.api.show_window(hwnd, SW_SHOW)
                 if not self.api.is_window_visible(hwnd):
                     restored = False
+                    failure_reason = "show_window failed"
 
             if not restored:
                 self.logger.warning("Failed to restore hidden window hwnd=%s reason=%s", hwnd, reason)
+                with self._state_lock:
+                    self._state.restore_failures += 1
+                    self._state.last_restore_error = (
+                        f"hwnd={hwnd} restore failed ({failure_reason or 'unknown'})"
+                    )
+            else:
+                with self._cache_lock:
+                    self._hidden_windows.pop(identity, None)
 
     def _is_main_title(self, title: str) -> bool:
         title_lc = (title or "").lower()
@@ -604,10 +631,22 @@ class LayoutOnlyEngine:
         last = self._last_log.get(message, 0.0)
         if now - last >= self.rules.log_rate_limit_seconds:
             self._last_log[message] = now
+            self._prune_error_log_keys()
             self.logger.error(message)
         with self._state_lock:
             self._state.last_error = message
             self._state.last_tick = now
+
+    def _prune_error_log_keys(self) -> None:
+        size = len(self._last_log)
+        if size <= MAX_ERROR_LOG_KEYS:
+            return
+        trim_count = size - ERROR_LOG_PRUNE_TARGET
+        if trim_count <= 0:
+            return
+        oldest = sorted(self._last_log.items(), key=lambda item: item[1])[:trim_count]
+        for key, _timestamp in oldest:
+            self._last_log.pop(key, None)
 
     def dump_window_tree(self, out_dir: Optional[str] = None) -> Optional[str]:
         pids = set(self._process_ids_provider("kakaotalk.exe"))

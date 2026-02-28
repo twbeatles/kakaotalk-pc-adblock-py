@@ -23,6 +23,8 @@
   - rules 로드 시 `ad_candidate_classes`가 누락/비정상이면 `main_window_classes`로 폴백
   - JSON 파손(파싱 실패/최상위 타입 불일치) 시 `*.broken-YYYYMMDD-HHMMSS` 백업 생성 후 경고 큐에 기록
   - rules 로드 시 `banner_min_height_px > banner_max_height_px` 역전값을 자동 교정(swap)하고 경고 기록
+  - `*.broken-*` 백업 자동 정리(30일 초과 삭제 + 최신 10개 유지)
+  - rules 문자열 무결성 self-check(mojibake 시그니처/`�`) 경고
   - 앱 계층 전달용 `consume_load_warnings()` 제공
 - `kakao_adblocker/event_engine.py`
   - `LayoutOnlyEngine`, `EngineState`
@@ -31,6 +33,9 @@
   - 엔진 시작 시 동기 warm-up(scan+apply 1회)으로 초기 광고 깜빡임 완화
   - 빈 문자열 텍스트 캐시는 짧은 TTL로 재조회해 초기 UI 구성 구간 탐지 지연 완화
   - 차단 OFF/엔진 종료 시 숨김·이동 창 원복
+  - `stop()` join timeout(2.0s) 시 상태/로그 경고 후 종료 절차 계속
+  - 원복 실패 항목 스냅샷 보존으로 재시도 가능
+  - `EngineState.restore_failures`, `EngineState.last_restore_error` 상태 노출
   - `WindowIdentity(hwnd,pid,class)` 기반 text/custom-scroll/hidden-window 캐시로 HWND 재사용 오동작 방지
   - 스캔 경로는 경량 수집(`rect/visible` 미조회)으로 호출 부담 감소, `--dump-tree`만 상세 수집 사용
   - PID 스캔/캐시 정리 주기 스로틀 적용
@@ -46,14 +51,17 @@
   - 시작 시 `run_on_startup` 값을 레지스트리 상태로 1회 동기화
   - 상태 문자열에 마지막 오류/갱신시각 표시
   - pystray/Pillow 지연 로딩 및 상태 텍스트 중복 갱신 억제
+  - 설정 저장 실패 시 토글 값 롤백(`enabled`/`run_on_startup`/`aggressive_mode`)
   - 트레이 콜백은 `_safe_after`를 통해 종료 경합 시 예외를 전파하지 않음
+  - `_tick_status` 스케줄링(`root.after`)도 종료 경합 예외 비전파
 - `kakao_adblocker/services.py`
   - `ProcessInspector`, `StartupManager`, `ReleaseService`
   - `ProcessInspector.get_process_ids()`는 psutil 경로에서 per-process 예외 격리 처리
+  - psutil 초기화/루프 실패 시 `tasklist` 폴백
 
 ## 빌드 메모
 
-- `kakaotalk_adblock.spec`는 lazy-import 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.ui`, `pystray`, `PIL`)을 `hiddenimports`로 명시하고 `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 누락을 방지
+- `kakaotalk_adblock.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `pystray`, `PIL`)을 `hiddenimports`로 명시하고 `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 누락을 방지
 
 ## 동작 규칙
 

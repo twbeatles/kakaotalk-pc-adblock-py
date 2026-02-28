@@ -1,7 +1,7 @@
 ﻿# KakaoTalk Layout AdBlocker v11 광고차단 알고리즘 고정 사양
 
 작성일: 2026-02-27  
-최종 갱신: 2026-02-27  
+최종 갱신: 2026-02-28  
 목적: 현재 v11 광고차단 동작을 회귀 없이 유지하기 위한 기준선(Baseline) 정의
 
 ## 1) 고정 대상 범위
@@ -39,6 +39,8 @@
 3. 빈 문자열 텍스트 캐시는 짧은 TTL로 재조회하여 초기 UI 구성 구간의 탐지 지연을 줄인다.
 4. 원복 시 현재 `(pid,class)`가 스냅샷과 다르면 원복을 스킵한다(재사용 HWND 방어).
 5. 차단 OFF 또는 엔진 stop 시 숨김 창 원복을 즉시 수행한다.
+6. 원복 실패 항목은 스냅샷을 유지해 다음 사이클/종료 시 재시도 가능해야 한다.
+7. `EngineState.restore_failures`, `EngineState.last_restore_error`로 원복 실패 상태를 노출한다.
 
 ### 2.5 성능/루프 규칙
 
@@ -48,6 +50,7 @@
 4. PID 스캔/캐시 정리는 스로틀을 유지한다.
 5. 엔진 시작 시 watch/apply warm-up 1회를 동기 수행해 초기 깜빡임을 줄인다.
 6. 기본 목표 지연: active 50ms, idle 200ms.
+7. `stop()`에서 watch thread join timeout(2.0s) 발생 시 경고를 상태/로그에 기록하고 종료 절차를 계속한다.
 
 ### 2.6 설정/경고 규칙
 
@@ -57,12 +60,16 @@
    - load warning 큐에 경고 기록
 2. `banner_min_height_px > banner_max_height_px`면 자동 교정(swap) 후 경고를 기록한다.
 3. 앱 시작 시 load warning을 logger에 남기고, 첫 경고를 `engine.report_warning()`으로 상태에 노출한다.
+4. `*.broken-*` 백업 파일은 자동 정리 정책(30일 초과 삭제 + 최신 10개 유지)을 적용한다.
+5. rules 문자열 무결성 self-check를 수행하고(mojibake 시그니처/`�`) 이상 시 경고 큐에 기록한다.
 
 ### 2.7 UI/서비스 안전 규칙
 
 1. 트레이 메뉴 콜백은 `_safe_after` 경유로 예약한다.
 2. 종료 경합으로 `after`가 실패해도 예외를 전파하지 않는다.
-3. `ProcessInspector.get_process_ids()` psutil 경로는 per-process 예외 격리로 일부 프로세스 오류가 전체 스캔 실패로 번지지 않게 한다.
+3. 설정 저장 실패 시 트레이 토글/동기화는 값 롤백 후 계속 동작한다.
+4. `_tick_status` 스케줄링(`root.after`) 실패는 debug 로그만 남기고 예외를 전파하지 않는다.
+5. `ProcessInspector.get_process_ids()` psutil 경로는 per-process 예외 격리를 유지하고, psutil 초기화/루프 실패 시 `tasklist` 폴백을 사용한다.
 
 ## 3) 실행/UX 계약
 
@@ -73,11 +80,11 @@
 ## 4) 테스트 게이트 (변경 시 필수)
 
 - 리사이즈 공식/공격 토큰: `tests/test_layout_engine_v11.py`
-- 후보 시그니처/원복/스로틀/경량스캔/HWND 재사용 방어: `tests/test_engine_v11.py`
-- 설정 fallback 백업/배너 역전 교정: `tests/test_config_v11.py`
+- 후보 시그니처/원복/스로틀/경량스캔/HWND 재사용 방어/stop-timeout/로그맵 상한: `tests/test_engine_v11.py`
+- 설정 fallback 백업/배너 역전 교정/문자열 무결성/백업 정리 정책: `tests/test_config_v11.py`
 - load warning -> `report_warning` 전달: `tests/test_app_v11.py`
-- 트레이 `_safe_after` 레이스 방어: `tests/test_tray_controller_v11.py`
-- psutil per-process 예외 격리: `tests/test_services_v11.py`
+- 트레이 `_safe_after` 레이스 방어/설정 저장 롤백/status tick 예외 방어: `tests/test_tray_controller_v11.py`
+- psutil per-process 예외 격리 + tasklist 폴백: `tests/test_services_v11.py`
 
 ## 5) 변경 관리 규칙
 

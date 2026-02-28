@@ -40,6 +40,8 @@ class FakeEngine:
                 "resized_windows": 3,
                 "last_error": "",
                 "last_tick": 0.0,
+                "restore_failures": 0,
+                "last_restore_error": "",
             },
         )()
 
@@ -188,6 +190,78 @@ def test_toggle_aggressive_mode_persists_setting(monkeypatch):
     assert saved["called"] == 1
 
 
+def test_toggle_blocking_rolls_back_when_save_fails(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+
+    def broken_save(_path=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(settings, "save", broken_save)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    controller.toggle_blocking()
+
+    assert settings.enabled is True
+    assert engine.enabled is True
+
+
+def test_toggle_startup_rolls_back_when_save_fails(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True, run_on_startup=False)
+
+    def broken_save(_path=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(settings, "save", broken_save)
+    monkeypatch.setattr("kakao_adblocker.ui.StartupManager.is_enabled", lambda: False)
+    monkeypatch.setattr("kakao_adblocker.ui.StartupManager.set_enabled", lambda _enable: True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    controller.toggle_startup()
+
+    assert settings.run_on_startup is False
+
+
+def test_toggle_aggressive_mode_rolls_back_when_save_fails(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True, aggressive_mode=True)
+
+    def broken_save(_path=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(settings, "save", broken_save)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    controller.toggle_aggressive_mode()
+
+    assert settings.aggressive_mode is True
+
+
+def test_sync_startup_setting_rolls_back_when_save_fails(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True, run_on_startup=False)
+
+    def broken_save(_path=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(settings, "save", broken_save)
+    monkeypatch.setattr("kakao_adblocker.ui.StartupManager.is_enabled", lambda: True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    controller._sync_startup_setting()
+
+    assert settings.run_on_startup is False
+
+
 def test_status_text_shows_compact_error_context(monkeypatch):
     monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
     root = FakeRoot()
@@ -201,6 +275,21 @@ def test_status_text_shows_compact_error_context(monkeypatch):
 
     assert "오류" in text
     assert "..." in text
+
+
+def test_status_text_shows_restore_failure_context(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    engine._state.restore_failures = 2
+    engine._state.last_restore_error = "restore failed due to set_window_pos"
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    text = controller.status_text()
+
+    assert "복원실패 2" in text
+    assert "restore failed" in text
 
 
 def test_status_update_skips_redundant_set(monkeypatch):
@@ -245,4 +334,23 @@ def test_tray_menu_callbacks_swallow_after_errors(monkeypatch):
     controller._menu_open_release(None, None)
     controller._menu_exit(None, None)
 
+    assert True
+
+
+def test_tick_status_swallow_after_error(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+
+    class TickFailRoot(FakeRoot):
+        def winfo_exists(self):
+            return True
+
+        def after(self, _ms, _fn):
+            raise RuntimeError("tk closed")
+
+    root = TickFailRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    controller._tick_status()
     assert True

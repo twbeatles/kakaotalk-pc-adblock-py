@@ -45,16 +45,21 @@ class ProcessInspector:
             try:
                 proc_iter = psutil.process_iter(["pid", "name"])
             except Exception:
-                proc_iter = []
-            for proc in proc_iter:
+                proc_iter = None
+            if proc_iter is not None:
                 try:
-                    proc_info = proc.info or {}
-                    proc_name = (proc_info.get("name") or "").strip().lower()
-                    if proc_name == normalized:
-                        pids.add(int(proc_info["pid"]))
+                    for proc in proc_iter:
+                        try:
+                            proc_info = proc.info or {}
+                            proc_name = (proc_info.get("name") or "").strip().lower()
+                            if proc_name == normalized:
+                                pids.add(int(proc_info["pid"]))
+                        except Exception:
+                            continue
+                    return pids
                 except Exception:
-                    continue
-            return pids
+                    # Fall through to tasklist fallback on psutil loop failure.
+                    pass
 
         try:
             result = subprocess.run(

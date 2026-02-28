@@ -26,6 +26,8 @@
   - rules loader falls back `ad_candidate_classes` to `main_window_classes` when missing/invalid
   - malformed/non-object JSON input is backed up as `*.broken-YYYYMMDD-HHMMSS` and recorded as load warning
   - inverted banner bounds (`banner_min_height_px > banner_max_height_px`) are auto-normalized
+  - broken-backup cleanup policy is enforced (`>30 days` purge + keep latest `10`)
+  - rules string integrity self-check warns on mojibake signatures / replacement char (`�`)
   - `consume_load_warnings()` exposes startup warnings to app layer
 - `event_engine.py`
   - `LayoutOnlyEngine`: single watch+apply polling loop
@@ -34,6 +36,9 @@
   - synchronous warm-up scan/apply on engine start reduces first-run ad flash
   - empty-string text cache uses short TTL refresh to reduce startup detection lag
   - hidden/moved windows are restored when blocking is disabled or engine stops
+  - stop join timeout (`2.0s`) emits state/log warning and proceeds with shutdown flow
+  - restore failures keep snapshots for retry on next restore cycle
+  - `EngineState` includes `restore_failures` / `last_restore_error`
   - `WindowIdentity(hwnd,pid,class)` keyed caches protect against HWND reuse side effects
   - watch scan path avoids geometry/visibility calls; dump-tree path still collects full geometry
   - process-id scan and cache cleanup are interval-throttled for idle CPU savings
@@ -47,12 +52,16 @@
   - `TrayController` (status, toggle, aggressive mode, startup, logs, release page, exit)
   - startup notice is skipped when launching minimized
   - startup setting is synchronized from registry on app start
+  - setting save failures roll back values (`enabled`, `run_on_startup`, `aggressive_mode`)
   - status text includes last error and last tick context
+  - status text includes restore failure count/context when present
   - pystray/Pillow are loaded lazily when tray setup starts
   - tray callbacks use `_safe_after` to avoid shutdown-race callback exceptions
+  - status tick scheduling (`root.after`) also swallows shutdown-race errors
 - `services.py`
   - process scan, startup registry, shell/open-url helpers
   - psutil process scan uses per-process exception isolation
+  - psutil init/loop failure falls back to `tasklist` scan
 
 ## Key Resize Rules
 
@@ -73,7 +82,7 @@
 ## Build Notes
 
 - `kakaotalk_adblock.spec` resolves entry script and data files from project-root absolute paths for stable `pyinstaller` invocation.
-- `kakaotalk_adblock.spec` explicitly includes lazy-import modules (`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.ui`, `pystray`, `PIL`) in `hiddenimports`.
+- `kakaotalk_adblock.spec` explicitly includes runtime modules (`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `pystray`, `PIL`) in `hiddenimports`.
 - `kakaotalk_adblock.spec` also includes `collect_submodules("pystray")` and `collect_submodules("PIL")` to avoid onefile runtime import misses.
 
 ## Legacy Archive

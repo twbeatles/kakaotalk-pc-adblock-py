@@ -97,8 +97,13 @@ class TrayController:
 
     def _tick_status(self) -> None:
         self._update_status()
-        if hasattr(self.root, "after"):
-            self.root.after(1000, self._tick_status)
+        try:
+            if hasattr(self.root, "winfo_exists") and not bool(self.root.winfo_exists()):
+                return
+            if hasattr(self.root, "after"):
+                self.root.after(1000, self._tick_status)
+        except Exception:
+            self.logger.debug("Status tick scheduling skipped")
 
     def _update_status(self, force: bool = False) -> None:
         text = self.status_text()
@@ -106,6 +111,18 @@ class TrayController:
             return
         self._status_var.set(text)
         self._last_status_text = text
+
+    def _save_setting_attr(self, attr_name: str, new_value) -> bool:
+        previous = getattr(self.settings, attr_name)
+        setattr(self.settings, attr_name, new_value)
+        try:
+            self.settings.save(SETTINGS_FILE)
+            return True
+        except Exception:
+            setattr(self.settings, attr_name, previous)
+            self.logger.warning("Failed to save setting '%s'; rolled back", attr_name)
+            self._update_status(force=True)
+            return False
 
     def status_text(self) -> str:
         state = self.engine.state
@@ -117,6 +134,13 @@ class TrayController:
             f"상태: {mode} | PID {state.kakao_pid_count} | 메인윈도우 {state.main_window_count} | "
             f"숨김 {state.hidden_windows} | 리사이즈 {state.resized_windows}"
         )
+        restore_failures = int(getattr(state, "restore_failures", 0) or 0)
+        if restore_failures > 0:
+            restore_error = str(getattr(state, "last_restore_error", "") or "")
+            compact_restore_error = restore_error if len(restore_error) <= 80 else f"{restore_error[:77]}..."
+            base = f"{base} | 복원실패 {restore_failures}"
+            if compact_restore_error:
+                base = f"{base} {compact_restore_error}"
         if state.last_error:
             compact_error = state.last_error if len(state.last_error) <= 80 else f"{state.last_error[:77]}..."
             return f"{base} | 오류 {tick_text} {compact_error}"
@@ -124,8 +148,8 @@ class TrayController:
 
     def toggle_blocking(self) -> None:
         new_value = not self.settings.enabled
-        self.settings.enabled = new_value
-        self.settings.save(SETTINGS_FILE)
+        if not self._save_setting_attr("enabled", new_value):
+            return
         self.engine.set_enabled(new_value)
         self.logger.info("Blocking toggled: %s", "ON" if new_value else "OFF")
         self._update_status(force=True)
@@ -136,13 +160,14 @@ class TrayController:
         if not StartupManager.set_enabled(target):
             self.logger.warning("Failed to update startup registration")
             return
-        self.settings.run_on_startup = target
-        self.settings.save(SETTINGS_FILE)
+        if not self._save_setting_attr("run_on_startup", target):
+            return
         self.logger.info("Startup registration toggled: %s", "ON" if target else "OFF")
 
     def toggle_aggressive_mode(self) -> None:
-        self.settings.aggressive_mode = not self.settings.aggressive_mode
-        self.settings.save(SETTINGS_FILE)
+        target = not self.settings.aggressive_mode
+        if not self._save_setting_attr("aggressive_mode", target):
+            return
         self.logger.info("Aggressive mode toggled: %s", "ON" if self.settings.aggressive_mode else "OFF")
         self._update_status(force=True)
 
@@ -262,8 +287,8 @@ class TrayController:
         actual = StartupManager.is_enabled()
         if self.settings.run_on_startup == actual:
             return
-        self.settings.run_on_startup = actual
-        self.settings.save(SETTINGS_FILE)
+        if not self._save_setting_attr("run_on_startup", actual):
+            return
         self.logger.info("Startup setting synchronized from registry: %s", "ON" if actual else "OFF")
 
 

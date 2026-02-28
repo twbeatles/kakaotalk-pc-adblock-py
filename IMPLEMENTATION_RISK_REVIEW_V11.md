@@ -1,84 +1,84 @@
-﻿# KakaoTalk Layout AdBlocker v11 구현 리스크 점검 (업데이트)
+# KakaoTalk Layout AdBlocker v11 구현 리스크 점검 (최신)
 
 작성일: 2026-02-27  
-최종 갱신: 2026-02-27  
+최종 갱신: 2026-02-28  
 기준: 현재 코드베이스(`kakao_adblocker/*`, `tests/*`, `kakaotalk_adblock.spec`, `README.md`)
 
 ## 1) 반영 완료 항목
 
 ### P1-1. HWND 재사용 오동작 방어
 
-- 조치: `WindowIdentity(hwnd,pid,class)` 기반 캐시/숨김 스냅샷 키 적용
+- 조치: `WindowIdentity(hwnd,pid,class)` 기반 캐시/숨김 스냅샷 키 적용 유지
 - 조치: 원복 시 `(pid,class)` 불일치면 원복 스킵
 - 근거 파일: `kakao_adblocker/event_engine.py`
-- 검증 테스트: `tests/test_engine_v11.py`의 캐시 식별자/재사용 HWND 원복 스킵 케이스
+- 검증 테스트: `tests/test_engine_v11.py` 재사용 HWND 원복 스킵 케이스
 
-### P1-2. 스캔 경로 경량화
+### P1-2. stop timeout 방어
 
-- 조치: watch 스캔 경로에서 `rect/visible` 미조회
-- 조치: 상세 수집은 `dump_window_tree` 경로에서만 수행
+- 조치: `stop()`에서 watch thread `join(timeout=2.0)` 후 생존 여부 재검사
+- 조치: timeout 시 고정 메시지(`stop: watch thread did not terminate within 2.0s`)를 상태/로그에 반영
+- 조치: timeout이어도 종료 절차(원복/running=False)는 계속 진행
 - 근거 파일: `kakao_adblocker/event_engine.py`
-- 검증 테스트: `tests/test_engine_v11.py`의 scan 경량화 호출 횟수 검증
+- 검증 테스트: `tests/test_engine_v11.py` stop timeout 경고 케이스
 
-### P1-3. 초기 광고 깜빡임 완화
+### P1-3. 원복 스냅샷 재시도 가능화
 
-- 조치: 엔진 시작 시 background thread 기동 전 동기 warm-up(`watch_once + apply_once`) 수행
-- 조치: 시작 직후 active 구간 진입을 위해 `last_activity`를 현재 시각으로 초기화
-- 조치: 빈 문자열 텍스트 캐시는 짧은 TTL로 재조회하도록 보정
-- 조치: `Chrome Legacy Window` 시그니처 판별은 실시간 `get_window_text` 경로 사용
-- 근거 파일: `kakao_adblocker/event_engine.py`
-- 검증 테스트: `tests/test_engine_v11.py`의 warm-up 선적용/빈 텍스트 캐시 재조회 케이스
+- 조치: `_restore_hidden_windows()`를 선삭제 방식에서 성공 제거/실패 보존 방식으로 변경
+- 조치: 복원 실패 상태 누적(`restore_failures`, `last_restore_error`) 노출
+- 근거 파일: `kakao_adblocker/event_engine.py`, `kakao_adblocker/ui.py`
+- 검증 테스트: `tests/test_engine_v11.py` 원복 실패 재시도 케이스, `tests/test_tray_controller_v11.py` 상태 문자열 노출 케이스
 
-### P2-1. JSON fallback 가시화
+### P2-1. 설정 저장 실패 롤백
 
-- 조치: settings/rules JSON 파손 시 `*.broken-YYYYMMDD-HHMMSS` 백업 생성
-- 조치: 경고 큐 기록 + 앱 시작 시 logger 출력 + 첫 경고 상태 노출(`report_warning`)
-- 근거 파일: `kakao_adblocker/config.py`, `kakao_adblocker/app.py`, `kakao_adblocker/event_engine.py`
-- 검증 테스트: `tests/test_config_v11.py`, `tests/test_app_v11.py`
-
-### P2-2. 배너 규칙 일관성
-
-- 조치: `banner_min_height_px > banner_max_height_px` 자동 교정(swap)
-- 조치: 교정 경고 큐 기록
-- 근거 파일: `kakao_adblocker/config.py`
-- 검증 테스트: `tests/test_config_v11.py`
-
-### P2-3. PID 스캔 예외 격리
-
-- 조치: psutil 경로를 per-process 예외 처리로 분리
-- 근거 파일: `kakao_adblocker/services.py`
-- 검증 테스트: `tests/test_services_v11.py`
-
-### P3-1. 미사용 apply thread 경로 정리
-
-- 조치: `_apply_thread`/`_apply_loop` 제거
-- 조치: 단일 watch+apply 루프 모델 고정
-- 근거 파일: `kakao_adblocker/event_engine.py`
-- 검증 테스트: 기존 watch+apply same-cycle 테스트 유지
-
-### P3-2. 트레이 종료 레이스 완화
-
-- 조치: `_safe_after` 도입, 모든 트레이 콜백 적용
-- 조치: 종료/after 실패 예외 비전파(debug 로그)
+- 조치: UI 설정 저장 공통 helper 도입(`_save_setting_attr`)
+- 조치: `toggle_blocking`, `toggle_startup`, `toggle_aggressive_mode`, `_sync_startup_setting`에 롤백 적용
+- 조치: `toggle_blocking`은 저장 성공 시에만 `engine.set_enabled` 수행
 - 근거 파일: `kakao_adblocker/ui.py`
-- 검증 테스트: `tests/test_tray_controller_v11.py`
+- 검증 테스트: `tests/test_tray_controller_v11.py` 저장 실패 롤백 케이스
 
-## 2) 문서/빌드 정합성 반영
+### P2-2. JSON fallback + 백업 정리
 
-- `README.md` 안정성 항목 갱신(파손 백업/경고 노출, identity 캐시, 스캔 경량화, safe-after)
-- `README.md`에 warm-up/빈 텍스트 캐시 갱신 및 spec hiddenimports 설명 최신화 반영
-- `CLAUDE.md`, `GEMINI.md`를 현재 코드 동작(active 50ms 포함) 기준으로 갱신
-- `ADBLOCK_ALGORITHM_BASELINE_V11.md`를 최신 알고리즘 계약 기준으로 재정리
-- `kakaotalk_adblock.spec` hiddenimports 보강(`kakao_adblocker.config`, `kakao_adblocker.event_engine`)
+- 조치: JSON 파손 시 `*.broken-YYYYMMDD-HHMMSS` 백업/경고 유지
+- 조치: 백업 자동 정리 정책 반영(30일 초과 삭제 + 최신 10개 유지)
+- 조치: rules 문자열 무결성 self-check(mojibake/`�`) 경고 추가
+- 근거 파일: `kakao_adblocker/config.py`
+- 검증 테스트: `tests/test_config_v11.py` 백업 정리/문자열 무결성 케이스
+
+### P2-3. PID 스캔 폴백
+
+- 조치: psutil 초기화/루프 실패 시 `tasklist` 폴백
+- 조치: psutil per-process 예외 격리 유지
+- 근거 파일: `kakao_adblocker/services.py`
+- 검증 테스트: `tests/test_services_v11.py` 폴백 케이스
+
+### P2-4. 에러 로그 맵 상한
+
+- 조치: `_last_log` 크기 상한 도입(`MAX_ERROR_LOG_KEYS=512`, prune target `384`)
+- 근거 파일: `kakao_adblocker/event_engine.py`
+- 검증 테스트: `tests/test_engine_v11.py` 로그맵 prune 케이스
+
+### P3-1. 상태 tick 종료 레이스 방어
+
+- 조치: `_tick_status`의 `root.after` 스케줄링에 `winfo_exists` 체크/예외 흡수 적용
+- 근거 파일: `kakao_adblocker/ui.py`
+- 검증 테스트: `tests/test_tray_controller_v11.py` tick 예외 비전파 케이스
+
+## 2) .spec/문서 정합성 반영
+
+- `kakaotalk_adblock.spec` hiddenimports 보강:
+  - `kakao_adblocker.logging_setup`
+  - `kakao_adblocker.services`
+- `README.md`, `CLAUDE.md`, `GEMINI.md`, `ADBLOCK_ALGORITHM_BASELINE_V11.md`를 최신 코드 동작 기준으로 동기화
+- `ADBLOCK_POTENTIAL_ISSUES_DEEP_CHECK_2026-02-27.md`를 조치 완료 문서로 갱신
 
 ## 3) 현재 잔여 리스크
 
-1. 실환경 장시간 성능 지표(CPU 상한)는 단위테스트로 대체되어 있으며, 정량 벤치마크 자동화는 별도 과제
-2. `*.broken-*` 백업 누적 정리 정책(보존 개수/기간)은 아직 미정
+1. 장시간 실환경 성능(메모리/CPU) 자동 벤치마크 체계는 별도 과제
+2. 카카오톡 UI 구조 급변 시 rules 튜닝 필요성은 상시 존재
 
 ## 4) 회귀 방지 가이드
 
-1. 엔진 캐시 키를 다시 hwnd 단일 키로 되돌리지 않는다.
-2. watch 스캔 경로에 geometry/visibility 조회를 다시 추가하지 않는다(필요 시 dump-tree 경로로 분리).
-3. 설정 로더 fallback은 반드시 "백업 + 경고 기록"을 유지한다.
-4. 트레이 콜백은 `_safe_after`를 우회하지 않는다.
+1. 엔진 캐시/숨김 스냅샷 키를 hwnd 단일 키로 되돌리지 않는다.
+2. `_restore_hidden_windows`를 선삭제 방식으로 되돌리지 않는다.
+3. stop timeout 경고 정책(경고 후 종료 계속)을 변경할 때는 테스트를 함께 갱신한다.
+4. 백업 정리 정책(30일/10개) 변경 시 README 및 baseline 문서를 동시 갱신한다.

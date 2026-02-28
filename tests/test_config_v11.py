@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from kakao_adblocker.config import LayoutRulesV11, LayoutSettingsV11, consume_load_warnings
@@ -174,3 +175,51 @@ def test_rules_load_swaps_banner_bounds_and_records_warning(tmp_path: Path):
     assert rules.banner_max_height_px == 300
     warnings = consume_load_warnings()
     assert any("자동 교정" in msg for msg in warnings)
+
+
+def test_rules_default_strings_are_utf8_intact():
+    rules = LayoutRulesV11()
+
+    assert "카카오톡" in rules.main_window_titles
+    assert "광고" in rules.aggressive_ad_tokens
+
+
+def test_rules_load_warns_when_mojibake_signatures_detected(tmp_path: Path):
+    path = tmp_path / "layout_rules_v11.json"
+    path.write_text(
+        json.dumps(
+            {
+                "main_window_titles": ["移댁뭅?ㅽ넚"],
+                "aggressive_ad_tokens": ["愿묎퀬"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    consume_load_warnings()
+
+    rules = LayoutRulesV11.load(str(path))
+
+    assert rules.main_window_titles == ["移댁뭅?ㅽ넚"]
+    warnings = consume_load_warnings()
+    assert any("문자열 무결성 경고" in msg for msg in warnings)
+
+
+def test_settings_load_cleans_broken_backup_files_by_age_and_count(tmp_path: Path):
+    path = tmp_path / "layout_settings_v11.json"
+    path.write_text("{ not-json", encoding="utf-8")
+    now = datetime.now()
+
+    for days_ago in range(1, 13):
+        stamp = (now - timedelta(days=days_ago)).strftime("%Y%m%d-%H%M%S")
+        (tmp_path / f"{path.name}.broken-{stamp}").write_text("recent", encoding="utf-8")
+
+    very_old_stamp = (now - timedelta(days=45)).strftime("%Y%m%d-%H%M%S")
+    very_old = tmp_path / f"{path.name}.broken-{very_old_stamp}"
+    very_old.write_text("old", encoding="utf-8")
+    consume_load_warnings()
+
+    LayoutSettingsV11.load(str(path))
+
+    backups = list(tmp_path.glob("layout_settings_v11.json.broken-*"))
+    assert len(backups) <= 10
+    assert not very_old.exists()

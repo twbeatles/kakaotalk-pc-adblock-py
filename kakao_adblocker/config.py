@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, List
 
@@ -55,6 +56,11 @@ LEGACY_FILES = (
     "ad_patterns.json",
     "blocked_domains.txt",
 )
+
+BROKEN_BACKUP_KEEP_COUNT = 10
+BROKEN_BACKUP_MAX_AGE_DAYS = 30
+_BROKEN_SUFFIX_RE = re.compile(r"\.broken-(\d{8}-\d{6})$")
+_MOJIBAKE_SIGNATURES = ("移댁뭅?ㅽ넚", "愿묎퀬")
 
 
 def _coerce_bool(value: Any, default: bool) -> bool:
@@ -109,6 +115,74 @@ def _backup_broken_json(path: str, label: str, reason: str) -> None:
     except Exception as exc:
         _push_load_warning(
             f"{label} 손상 감지: {reason}. 백업 실패({exc.__class__.__name__}). 기본값으로 동작합니다."
+        )
+    _cleanup_broken_backups(path, label)
+
+
+def _backup_timestamp(path: Path) -> datetime:
+    match = _BROKEN_SUFFIX_RE.search(path.name)
+    if match:
+        try:
+            return datetime.strptime(match.group(1), "%Y%m%d-%H%M%S")
+        except Exception:
+            pass
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime)
+    except Exception:
+        return datetime.min
+
+
+def _cleanup_broken_backups(path: str, label: str) -> None:
+    base_path = Path(path)
+    parent = base_path.parent
+    pattern = f"{base_path.name}.broken-*"
+    now = datetime.now()
+    max_age = timedelta(days=BROKEN_BACKUP_MAX_AGE_DAYS)
+
+    try:
+        backups = list(parent.glob(pattern))
+    except Exception as exc:
+        _push_load_warning(f"{label} 백업 정리 실패({exc.__class__.__name__}).")
+        return
+
+    for backup in backups:
+        backup_time = _backup_timestamp(backup)
+        if now - backup_time <= max_age:
+            continue
+        try:
+            backup.unlink()
+        except Exception as exc:
+            _push_load_warning(f"{label} 백업 정리 실패: {backup.name} ({exc.__class__.__name__})")
+
+    keep = sorted(
+        [p for p in parent.glob(pattern) if p.exists()],
+        key=_backup_timestamp,
+        reverse=True,
+    )
+    for old in keep[BROKEN_BACKUP_KEEP_COUNT:]:
+        try:
+            old.unlink()
+        except Exception as exc:
+            _push_load_warning(f"{label} 백업 정리 실패: {old.name} ({exc.__class__.__name__})")
+
+
+def _is_mojibake_text(value: str) -> bool:
+    if not value:
+        return False
+    if "\ufffd" in value:
+        return True
+    return any(signature in value for signature in _MOJIBAKE_SIGNATURES)
+
+
+def _warn_if_rules_text_corrupted(rules: "LayoutRulesV11", source_label: str) -> None:
+    corrupted = []
+    if any(_is_mojibake_text(token) for token in rules.main_window_titles):
+        corrupted.append("main_window_titles")
+    if any(_is_mojibake_text(token) for token in rules.aggressive_ad_tokens):
+        corrupted.append("aggressive_ad_tokens")
+    if corrupted:
+        _push_load_warning(
+            f"{source_label} 문자열 무결성 경고: {', '.join(corrupted)}에 인코딩 이상 징후가 있습니다."
         )
 
 
@@ -212,6 +286,7 @@ class LayoutRulesV11:
         defaults = cls()
         raw = _load_json_object(path, "layout_rules_v11.json")
         if raw is None:
+            _warn_if_rules_text_corrupted(defaults, "layout_rules_v11.json")
             return defaults
         main_window_classes = _coerce_str_list(raw.get("main_window_classes"), defaults.main_window_classes)
         raw_ad_candidate_classes = raw.get("ad_candidate_classes")
@@ -228,7 +303,7 @@ class LayoutRulesV11:
                 "layout_rules_v11.json banner 높이 범위(min/max)가 역전되어 자동 교정했습니다."
             )
 
-        return cls(
+        rules = cls(
             main_window_classes=main_window_classes,
             ad_candidate_classes=ad_candidate_classes,
             main_window_titles=_coerce_str_list(raw.get("main_window_titles"), defaults.main_window_titles),
@@ -248,6 +323,8 @@ class LayoutRulesV11:
             cache_ttl_seconds=_coerce_float(raw.get("cache_ttl_seconds"), defaults.cache_ttl_seconds, minimum=0.1),
             log_rate_limit_seconds=_coerce_float(raw.get("log_rate_limit_seconds"), defaults.log_rate_limit_seconds, minimum=0.1),
         )
+        _warn_if_rules_text_corrupted(rules, "layout_rules_v11.json")
+        return rules
 
     def save(self, path: str = RULES_FILE) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)

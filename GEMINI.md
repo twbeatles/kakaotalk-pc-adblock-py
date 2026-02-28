@@ -33,7 +33,8 @@
 - `event_engine.py`
   - `LayoutOnlyEngine`: single watch+apply polling loop
   - main window detection uses `main_window_classes` from rules
-  - ad candidate filtering uses `ad_candidate_classes` (default: `EVA_Window_Dblclk`, `EVA_Window`) + `Chrome Legacy Window` signature
+  - ad candidate filtering uses `ad_candidate_classes` (default: `EVA_Window_Dblclk`, `EVA_Window`) + legacy exact/substring signatures
+  - empty-title main windows can still be detected via child signature fallback (`OnlineMainView` / `LockModeView`)
   - synchronous warm-up scan/apply on engine start reduces first-run ad flash
   - empty-string text cache uses short TTL refresh to reduce startup detection lag
   - hidden/moved windows are restored when blocking is disabled or engine stops
@@ -43,6 +44,7 @@
   - `WindowIdentity(hwnd,pid,class)` keyed caches protect against HWND reuse side effects
   - watch scan path avoids geometry/visibility calls; dump-tree path still collects full geometry
   - process-id scan and cache cleanup are interval-throttled for idle CPU savings
+  - process scan warnings (psutil failure, tasklist fallback/failure) are propagated to status/log (`last_error`)
   - default idle->active detection target is <= 200ms
   - `report_warning()` allows startup warning propagation to tray status context
 - `layout_engine.py`
@@ -52,6 +54,8 @@
 - `ui.py`
   - `TrayController` (status, toggle, aggressive mode, startup, restore-failure reset, logs, release page, exit)
   - startup notice is skipped when launching minimized
+  - minimized-start requests are ignored when tray modules are unavailable
+  - window close action switches from hide to shutdown when tray is unavailable
   - startup setting is synchronized from registry on app start
   - startup toggle rolls registry back on settings-save failure
   - setting save failures roll back values (`enabled`, `run_on_startup`, `aggressive_mode`)
@@ -64,7 +68,12 @@
   - process scan, startup registry, shell/open-url helpers
   - psutil process scan uses per-process exception isolation
   - psutil init/loop failure falls back to `tasklist` scan
+  - `ProcessInspector.consume_last_warning()` provides scan diagnostics to the engine
+  - `StartupManager.probe_access()` validates both Run-registry read and write access
   - diagnostics helpers: `ProcessInspector.probe_tasklist()`, `StartupManager.probe_access()`
+- `win32_api.py`
+  - user32 API bindings explicitly define `argtypes/restype`
+  - exposes `get_last_error()` for debug telemetry on ShowWindow/SetWindowPos failures
 
 ## Key Resize Rules
 
@@ -85,7 +94,7 @@
 ## Build Notes
 
 - `kakaotalk_adblock.spec` resolves entry script and data files from project-root absolute paths for stable `pyinstaller` invocation.
-- `kakaotalk_adblock.spec` explicitly includes runtime modules (`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `pystray`, `PIL`) in `hiddenimports`.
+- `kakaotalk_adblock.spec` explicitly includes runtime modules (`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`) in `hiddenimports`.
 - `kakaotalk_adblock.spec` also includes `collect_submodules("pystray")` and `collect_submodules("PIL")` to avoid onefile runtime import misses.
 
 ## Legacy Archive

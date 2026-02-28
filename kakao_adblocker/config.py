@@ -200,6 +200,8 @@ def _warn_if_rules_text_corrupted(rules: "LayoutRulesV11", source_label: str) ->
         corrupted.append("main_window_titles")
     if any(_is_mojibake_text(token) for token in rules.aggressive_ad_tokens):
         corrupted.append("aggressive_ad_tokens")
+    if any(_is_mojibake_text(token) for token in rules.chrome_legacy_title_contains):
+        corrupted.append("chrome_legacy_title_contains")
     if corrupted:
         _push_load_warning(
             f"{source_label} 문자열 무결성 경고: {', '.join(corrupted)}에 인코딩 이상 징후가 있습니다."
@@ -285,6 +287,7 @@ class LayoutRulesV11:
     eva_child_class: str = "EVA_ChildWindow"
     custom_scroll_prefix: str = "_EVA_"
     chrome_legacy_title: str = "Chrome Legacy Window"
+    chrome_legacy_title_contains: List[str] = field(default_factory=lambda: ["Chrome Legacy Window"])
     chrome_widget_prefixes: List[str] = field(default_factory=lambda: ["Chrome_WidgetWin_"])
     aggressive_ad_tokens: List[str] = field(default_factory=lambda: ["Ad", "AdFit", "Advertisement", "광고"])
     banner_min_height_px: int = 40
@@ -331,6 +334,10 @@ class LayoutRulesV11:
             eva_child_class=_coerce_str(raw.get("eva_child_class"), defaults.eva_child_class),
             custom_scroll_prefix=_coerce_str(raw.get("custom_scroll_prefix"), defaults.custom_scroll_prefix),
             chrome_legacy_title=_coerce_str(raw.get("chrome_legacy_title"), defaults.chrome_legacy_title),
+            chrome_legacy_title_contains=_coerce_str_list(
+                raw.get("chrome_legacy_title_contains"),
+                defaults.chrome_legacy_title_contains,
+            ),
             chrome_widget_prefixes=_coerce_str_list(raw.get("chrome_widget_prefixes"), defaults.chrome_widget_prefixes),
             aggressive_ad_tokens=_coerce_str_list(raw.get("aggressive_ad_tokens"), defaults.aggressive_ad_tokens),
             banner_min_height_px=banner_min_height_px,

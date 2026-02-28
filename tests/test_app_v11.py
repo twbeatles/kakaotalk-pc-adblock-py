@@ -33,6 +33,7 @@ class FakeEngine:
 
 class FakeController:
     last_instance = None
+    tray_available_default = True
 
     def __init__(self, root, engine, settings, logger):
         self.root = root
@@ -44,6 +45,7 @@ class FakeController:
         self.shown_called = False
         self.started = False
         self.stopped = False
+        self._tray_available = FakeController.tray_available_default
         FakeController.last_instance = self
 
     def start(self):
@@ -61,6 +63,9 @@ class FakeController:
     def stop_tray(self):
         self.stopped = True
 
+    def is_tray_available(self):
+        return self._tray_available
+
 
 def _patch_main_dependencies(monkeypatch, settings, load_warnings=None):
     monkeypatch.setattr(app.os, "name", "nt")
@@ -72,6 +77,7 @@ def _patch_main_dependencies(monkeypatch, settings, load_warnings=None):
     monkeypatch.setattr(app, "LayoutOnlyEngine", FakeEngine)
     monkeypatch.setattr(app.tk, "Tk", FakeRoot)
     monkeypatch.setattr(app, "TrayController", FakeController)
+    FakeController.tray_available_default = True
 
 
 def test_main_skips_startup_notice_when_minimized(monkeypatch):
@@ -96,6 +102,23 @@ def test_main_shows_startup_notice_when_not_minimized(monkeypatch):
     assert controller is not None
     assert controller.notice_called is True
     assert controller.shown_called is True
+
+
+def test_main_ignores_minimized_when_tray_unavailable(monkeypatch):
+    settings = LayoutSettingsV11(start_minimized=True)
+    _patch_main_dependencies(monkeypatch, settings)
+    FakeController.tray_available_default = False
+
+    rc = app.main(["--minimized"])
+
+    assert rc == 0
+    controller = FakeController.last_instance
+    engine = FakeEngine.last_instance
+    assert controller is not None
+    assert engine is not None
+    assert controller.hidden_called is False
+    assert controller.shown_called is True
+    assert engine.reported_warnings[-1] == "tray unavailable, minimized ignored"
 
 
 def test_main_fail_fast_on_non_windows(monkeypatch, capsys):

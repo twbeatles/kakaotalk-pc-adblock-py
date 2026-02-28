@@ -5,6 +5,7 @@ import io
 import os
 import subprocess
 import sys
+import threading
 import webbrowser
 from pathlib import Path
 from typing import Set, Tuple
@@ -27,6 +28,21 @@ except Exception:
 
 
 class ProcessInspector:
+    _warning_lock = threading.Lock()
+    _last_warning = ""
+
+    @staticmethod
+    def _set_warning(message: str) -> None:
+        with ProcessInspector._warning_lock:
+            ProcessInspector._last_warning = message or ""
+
+    @staticmethod
+    def consume_last_warning() -> str:
+        with ProcessInspector._warning_lock:
+            message = ProcessInspector._last_warning
+            ProcessInspector._last_warning = ""
+            return message
+
     @staticmethod
     def _normalize_image_name(image_name: str) -> str:
         name = (image_name or "").strip().lower()
@@ -38,14 +54,17 @@ class ProcessInspector:
     def get_process_ids(image_name: str = "kakaotalk.exe") -> Set[int]:
         normalized = ProcessInspector._normalize_image_name(image_name)
         if not normalized:
+            ProcessInspector._set_warning("")
             return set()
 
         pids: Set[int] = set()
+        warning_messages: list[str] = []
         if PSUTIL_AVAILABLE:
             try:
                 proc_iter = psutil.process_iter(["pid", "name"])
-            except Exception:
+            except Exception as exc:
                 proc_iter = None
+                warning_messages.append(f"psutil init failed ({exc.__class__.__name__})")
             if proc_iter is not None:
                 try:
                     for proc in proc_iter:
@@ -56,10 +75,13 @@ class ProcessInspector:
                                 pids.add(int(proc_info["pid"]))
                         except Exception:
                             continue
+                    ProcessInspector._set_warning("")
                     return pids
-                except Exception:
+                except Exception as exc:
                     # Fall through to tasklist fallback on psutil loop failure.
-                    pass
+                    warning_messages.append(f"psutil loop failed ({exc.__class__.__name__})")
+            if warning_messages:
+                warning_messages.append("using tasklist fallback")
 
         try:
             result = subprocess.run(
@@ -69,6 +91,8 @@ class ProcessInspector:
                 creationflags=0x08000000,
                 timeout=3,
             )
+            if result.returncode != 0:
+                warning_messages.append(f"tasklist returncode={result.returncode}")
             parser = csv.reader(io.StringIO(result.stdout))
             for row in parser:
                 if len(row) < 2:
@@ -80,8 +104,10 @@ class ProcessInspector:
                     pids.add(int(row[1]))
                 except Exception:
                     continue
-        except Exception:
-            pass
+        except Exception as exc:
+            warning_messages.append(f"tasklist failed ({exc.__class__.__name__})")
+
+        ProcessInspector._set_warning("; ".join(warning_messages) if warning_messages else "")
         return pids
 
     @staticmethod
@@ -151,11 +177,19 @@ class StartupManager:
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, StartupManager.KEY, 0, winreg.KEY_READ)
             try:
-                return True, "Run 레지스트리 읽기 가능"
+                pass
             finally:
                 winreg.CloseKey(key)
         except Exception as exc:
-            return False, f"{exc.__class__.__name__}: {exc}"
+            return False, f"read failed ({exc.__class__.__name__}: {exc})"
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, StartupManager.KEY, 0, winreg.KEY_SET_VALUE)
+            try:
+                return True, "Run 레지스트리 읽기/쓰기 가능"
+            finally:
+                winreg.CloseKey(key)
+        except Exception as exc:
+            return False, f"write failed ({exc.__class__.__name__}: {exc})"
 
 
 class ShellService:

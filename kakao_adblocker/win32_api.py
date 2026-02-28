@@ -21,12 +21,78 @@ class Win32API:
         if not self.available:
             return
 
-        self.user32 = ctypes.windll.user32
+        self.user32 = ctypes.WinDLL("user32", use_last_error=True)
         self.WNDENUMPROC = ctypes.WINFUNCTYPE(
             ctypes.c_bool,
             ctypes.wintypes.HWND,
             ctypes.wintypes.LPARAM,
         )
+        self._bind_signatures()
+
+    def _bind_signatures(self) -> None:
+        hwnd_t = ctypes.wintypes.HWND
+        lparam_t = ctypes.wintypes.LPARAM
+        bool_t = ctypes.wintypes.BOOL
+        uint_t = ctypes.wintypes.UINT
+        dword_t = ctypes.wintypes.DWORD
+        lresult_t = getattr(ctypes.wintypes, "LRESULT", ctypes.c_long)
+        rect_ptr_t = ctypes.POINTER(ctypes.wintypes.RECT)
+        dword_ptr_t = ctypes.POINTER(ctypes.wintypes.DWORD)
+
+        self.user32.EnumWindows.argtypes = [self.WNDENUMPROC, lparam_t]
+        self.user32.EnumWindows.restype = bool_t
+
+        self.user32.EnumChildWindows.argtypes = [hwnd_t, self.WNDENUMPROC, lparam_t]
+        self.user32.EnumChildWindows.restype = bool_t
+
+        self.user32.GetWindowThreadProcessId.argtypes = [hwnd_t, dword_ptr_t]
+        self.user32.GetWindowThreadProcessId.restype = dword_t
+
+        self.user32.GetClassNameW.argtypes = [hwnd_t, ctypes.wintypes.LPWSTR, ctypes.c_int]
+        self.user32.GetClassNameW.restype = ctypes.c_int
+
+        self.user32.GetWindowTextW.argtypes = [hwnd_t, ctypes.wintypes.LPWSTR, ctypes.c_int]
+        self.user32.GetWindowTextW.restype = ctypes.c_int
+
+        self.user32.GetParent.argtypes = [hwnd_t]
+        self.user32.GetParent.restype = hwnd_t
+
+        self.user32.GetWindowRect.argtypes = [hwnd_t, rect_ptr_t]
+        self.user32.GetWindowRect.restype = bool_t
+
+        self.user32.GetClientRect.argtypes = [hwnd_t, rect_ptr_t]
+        self.user32.GetClientRect.restype = bool_t
+
+        self.user32.IsWindow.argtypes = [hwnd_t]
+        self.user32.IsWindow.restype = bool_t
+
+        self.user32.IsWindowVisible.argtypes = [hwnd_t]
+        self.user32.IsWindowVisible.restype = bool_t
+
+        self.user32.ShowWindow.argtypes = [hwnd_t, ctypes.c_int]
+        self.user32.ShowWindow.restype = bool_t
+
+        self.user32.SetWindowPos.argtypes = [
+            hwnd_t,
+            hwnd_t,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            uint_t,
+        ]
+        self.user32.SetWindowPos.restype = bool_t
+
+        self.user32.SendMessageW.argtypes = [
+            hwnd_t,
+            uint_t,
+            ctypes.wintypes.WPARAM,
+            ctypes.wintypes.LPARAM,
+        ]
+        self.user32.SendMessageW.restype = lresult_t
+
+        self.user32.UpdateWindow.argtypes = [hwnd_t]
+        self.user32.UpdateWindow.restype = bool_t
 
     def enum_windows(self, callback: Callable[[int], bool]) -> bool:
         if not self.available:
@@ -144,6 +210,11 @@ class Win32API:
         if not self.available:
             return False
         return bool(self.user32.UpdateWindow(hwnd))
+
+    def get_last_error(self) -> int:
+        if not self.available:
+            return 0
+        return int(ctypes.get_last_error())
 
 
 __all__ = [

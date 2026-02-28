@@ -79,6 +79,7 @@ def test_rules_load_with_bounds(tmp_path: Path):
     assert rules.banner_max_height_px >= 1
     assert 0.1 <= rules.banner_min_width_ratio <= 1.0
     assert rules.cache_ttl_seconds >= 0.1
+    assert rules.chrome_legacy_title_contains == ["Chrome Legacy Window"]
 
 
 def test_rules_load_falls_back_ad_candidate_classes_to_main_window_classes(tmp_path: Path):
@@ -127,6 +128,22 @@ def test_rules_load_coerces_ad_candidate_classes(tmp_path: Path):
 
     rules = LayoutRulesV11.load(str(path))
     assert rules.ad_candidate_classes == ["AdCandidateWin", "PopupCandidate"]
+
+
+def test_rules_load_coerces_chrome_legacy_title_contains(tmp_path: Path):
+    path = tmp_path / "layout_rules_v11.json"
+    path.write_text(
+        json.dumps(
+            {
+                "chrome_legacy_title_contains": ["Legacy Window", "", 123],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rules = LayoutRulesV11.load(str(path))
+
+    assert rules.chrome_legacy_title_contains == ["Legacy Window"]
 
 
 def test_settings_load_backs_up_malformed_json_and_records_warning(tmp_path: Path):
@@ -183,6 +200,7 @@ def test_rules_default_strings_are_utf8_intact():
 
     assert "카카오톡" in rules.main_window_titles
     assert "광고" in rules.aggressive_ad_tokens
+    assert "Chrome Legacy Window" in rules.chrome_legacy_title_contains
 
 
 def test_rules_load_warns_when_mojibake_signatures_detected(tmp_path: Path):

@@ -30,9 +30,10 @@
 - `kakao_adblocker/event_engine.py`
   - `LayoutOnlyEngine`, `EngineState`
   - 단일 watch+apply 루프(적응형 폴링), `main_window_classes` 기반 메인 윈도우 식별
-  - 광고 후보는 `ad_candidate_classes`(기본: `EVA_Window_Dblclk`, `EVA_Window`)와 레거시 시그니처(`Chrome Legacy Window`)를 함께 사용해 필터링
+  - 광고 후보는 `ad_candidate_classes`(기본: `EVA_Window_Dblclk`, `EVA_Window`)와 레거시 시그니처(exact + substring)를 함께 사용해 필터링
   - 엔진 시작 시 동기 warm-up(scan+apply 1회)으로 초기 광고 깜빡임 완화
   - 빈 문자열 텍스트 캐시는 짧은 TTL로 재조회해 초기 UI 구성 구간 탐지 지연 완화
+  - 메인 윈도우 제목이 빈 경우 자식 시그니처(`OnlineMainView`/`LockModeView`) 기반 fallback 탐지 지원
   - 차단 OFF/엔진 종료 시 숨김·이동 창 원복
   - `stop()` join timeout(2.0s) 시 상태/로그 경고 후 종료 절차 계속
   - 원복 실패 항목 스냅샷 보존으로 재시도 가능
@@ -41,6 +42,7 @@
   - `WindowIdentity(hwnd,pid,class)` 기반 text/custom-scroll/hidden-window 캐시로 HWND 재사용 오동작 방지
   - 스캔 경로는 경량 수집(`rect/visible` 미조회)으로 호출 부담 감소, `--dump-tree`만 상세 수집 사용
   - PID 스캔/캐시 정리 주기 스로틀 적용
+  - PID 스캔 경고(psutil 실패, tasklist fallback/실패)를 상태(`last_error`)와 로그에 반영
   - 기본 설정 기준 idle->active 복귀 목표 지연 약 200ms
   - `report_warning()`로 시작 시점 경고를 상태(`last_error`)에 반영 가능
 - `kakao_adblocker/layout_engine.py`
@@ -50,6 +52,8 @@
   - `TrayController`
   - 트레이 메뉴: 상태/OnOff/공격 모드/시작프로그램/복원실패초기화/창 열기/로그/릴리스/종료
   - 최소화 시작 시(`--minimized`/`start_minimized`) 시작 안내 팝업 생략
+  - 트레이 비가용 시 최소화 시작 요청을 무시하고 창을 강제 표시
+  - 트레이 비가용 시 창 닫기(X)는 숨김이 아니라 종료로 처리
   - 시작 시 `run_on_startup` 값을 레지스트리 상태로 1회 동기화
   - 상태 문자열에 마지막 오류/갱신시각 표시
   - pystray/Pillow 지연 로딩 + 실패 TTL(30초) 자동 재시도
@@ -61,11 +65,13 @@
   - `ProcessInspector`, `StartupManager`, `ReleaseService`
   - `ProcessInspector.get_process_ids()`는 psutil 경로에서 per-process 예외 격리 처리
   - psutil 초기화/루프 실패 시 `tasklist` 폴백
+  - `ProcessInspector.consume_last_warning()`로 PID 탐지 경고를 엔진 계층에서 소비 가능
+  - `StartupManager.probe_access()`는 Run 레지스트리 읽기/쓰기 접근을 함께 점검
   - 진단용 `ProcessInspector.probe_tasklist()`, `StartupManager.probe_access()` 제공
 
 ## 빌드 메모
 
-- `kakaotalk_adblock.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `pystray`, `PIL`)을 `hiddenimports`로 명시하고 `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 누락을 방지
+- `kakaotalk_adblock.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`)을 `hiddenimports`로 명시하고 `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 누락을 방지
 
 ## 동작 규칙
 

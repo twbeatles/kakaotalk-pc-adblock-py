@@ -18,9 +18,11 @@ hiddenimports = [
     "kakao_adblocker.app",
     "kakao_adblocker.config",
     "kakao_adblocker.event_engine",
+    "kakao_adblocker.layout_engine",
     "kakao_adblocker.logging_setup",
     "kakao_adblocker.services",
     "kakao_adblocker.ui",
+    "kakao_adblocker.win32_api",
 ]
 hiddenimports += collect_submodules("pystray")
 hiddenimports += collect_submodules("PIL")

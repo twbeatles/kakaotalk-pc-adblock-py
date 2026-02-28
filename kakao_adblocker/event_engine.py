@@ -227,6 +227,9 @@ class LayoutOnlyEngine:
                 return set(self._pid_scan_cache)
 
         pids = set(self._process_ids_provider("kakaotalk.exe"))
+        pid_warning = ProcessInspector.consume_last_warning()
+        if pid_warning:
+            self._set_error(f"pid-scan: {pid_warning}")
         with self._data_lock:
             self._pid_scan_cache = set(pids)
             self._last_pid_scan = now
@@ -263,26 +266,32 @@ class LayoutOnlyEngine:
         main_handles: Set[int] = set()
         candidates: Set[int] = set()
         legacy_text_memo: Dict[Tuple[int, str, int], bool] = {}
+        legacy_contains_memo: Dict[Tuple[int, str, int], bool] = {}
 
         for item in windows:
             if item.class_name not in self._main_window_class_set:
                 continue
-            if item.parent_hwnd != 0 or not item.text:
+            if item.parent_hwnd != 0:
                 continue
-            if item.class_name == "EVA_Window" and not self._is_main_title(item.text):
-                continue
+            if item.text:
+                if item.class_name == "EVA_Window" and not self._is_main_title(item.text):
+                    continue
+            else:
+                if not self._has_main_view_signature(item.hwnd):
+                    continue
             main_handles.add(item.hwnd)
 
         for item in windows:
-            if item.class_name not in self._ad_candidate_class_set or item.text != "":
+            if item.class_name not in self._ad_candidate_class_set:
                 continue
             if item.parent_hwnd in main_handles:
-                candidates.add(item.hwnd)
+                if item.text == "":
+                    candidates.add(item.hwnd)
                 continue
-            if item.parent_hwnd == 0 and self._has_window_text(
+            if item.parent_hwnd == 0 and self._matches_legacy_signature(
                 item.hwnd,
-                self.rules.chrome_legacy_title,
-                memo=legacy_text_memo,
+                memo_exact=legacy_text_memo,
+                memo_contains=legacy_contains_memo,
             ):
                 candidates.add(item.hwnd)
 
@@ -315,6 +324,7 @@ class LayoutOnlyEngine:
         closed = 0
         now = time.time()
         legacy_text_memo: Dict[Tuple[int, str, int], bool] = {}
+        legacy_contains_memo: Dict[Tuple[int, str, int], bool] = {}
 
         for wnd in main_handles:
             if not self.api.is_window(wnd):
@@ -369,7 +379,11 @@ class LayoutOnlyEngine:
             if pid not in kakao_pids:
                 continue
             class_name = self._get_class(wnd)
-            if self._has_window_text(wnd, self.rules.chrome_legacy_title, memo=legacy_text_memo):
+            if self._matches_legacy_signature(
+                wnd,
+                memo_exact=legacy_text_memo,
+                memo_contains=legacy_contains_memo,
+            ):
                 if self._hide_window(wnd, pid, class_name):
                     hidden += 1
 
@@ -423,6 +437,11 @@ class LayoutOnlyEngine:
                 return True
         return False
 
+    def _has_main_view_signature(self, parent_hwnd: int) -> bool:
+        if not self.api.is_window(parent_hwnd):
+            return False
+        return self._is_main_window(self._enum_children(parent_hwnd))
+
     def _class_name_starts_with(self, hwnd: int, prefix: str, max_depth: int = 8) -> bool:
         if max_depth < 0 or not self.api.is_window(hwnd):
             return False
@@ -463,6 +482,55 @@ class LayoutOnlyEngine:
             memo[cache_key] = False
         return False
 
+    def _has_window_text_contains(
+        self,
+        hwnd: int,
+        target: str,
+        max_depth: int = 8,
+        memo: Optional[Dict[Tuple[int, str, int], bool]] = None,
+    ) -> bool:
+        needle = (target or "").lower()
+        if not needle:
+            return False
+        cache_key = (hwnd, needle, max_depth)
+        if memo is not None and cache_key in memo:
+            return memo[cache_key]
+        if max_depth < 0 or not self.api.is_window(hwnd):
+            if memo is not None:
+                memo[cache_key] = False
+            return False
+
+        text = (self.api.get_window_text(hwnd) or "").lower()
+        if needle in text:
+            if memo is not None:
+                memo[cache_key] = True
+            return True
+
+        for child in self._enum_children(hwnd):
+            if self._has_window_text_contains(child, needle, max_depth - 1, memo=memo):
+                if memo is not None:
+                    memo[cache_key] = True
+                return True
+
+        if memo is not None:
+            memo[cache_key] = False
+        return False
+
+    def _matches_legacy_signature(
+        self,
+        hwnd: int,
+        memo_exact: Optional[Dict[Tuple[int, str, int], bool]] = None,
+        memo_contains: Optional[Dict[Tuple[int, str, int], bool]] = None,
+    ) -> bool:
+        if self._has_window_text(hwnd, self.rules.chrome_legacy_title, memo=memo_exact):
+            return True
+        for token in self.rules.chrome_legacy_title_contains:
+            if not token:
+                continue
+            if self._has_window_text_contains(hwnd, token, memo=memo_contains):
+                return True
+        return False
+
     def _hide_window(self, hwnd: int, pid: int, class_name: str) -> bool:
         if pid <= 0 or not self.api.is_window(hwnd):
             return False
@@ -476,7 +544,9 @@ class LayoutOnlyEngine:
                     class_name=class_name,
                 )
 
-        self.api.show_window(hwnd, SW_HIDE)
+        hide_ok = self.api.show_window(hwnd, SW_HIDE)
+        if not hide_ok:
+            self.logger.debug("show_window(SW_HIDE) failed hwnd=%s win32err=%s", hwnd, self._api_last_error())
         if not self.api.is_window_visible(hwnd):
             return True
 
@@ -492,6 +562,7 @@ class LayoutOnlyEngine:
         )
         if moved:
             return True
+        self.logger.debug("set_window_pos(offscreen) failed hwnd=%s win32err=%s", hwnd, self._api_last_error())
 
         with self._cache_lock:
             self._hidden_windows.pop(identity, None)
@@ -543,6 +614,11 @@ class LayoutOnlyEngine:
                     ):
                         restored = False
                         failure_reason = "set_window_pos failed"
+                        self.logger.debug(
+                            "set_window_pos(restore) failed hwnd=%s win32err=%s",
+                            hwnd,
+                            self._api_last_error(),
+                        )
                 else:
                     restored = False
                     failure_reason = "invalid rect size"
@@ -552,6 +628,7 @@ class LayoutOnlyEngine:
                 if not self.api.is_window_visible(hwnd):
                     restored = False
                     failure_reason = "show_window failed"
+                    self.logger.debug("show_window(SW_SHOW) failed hwnd=%s win32err=%s", hwnd, self._api_last_error())
 
             if not restored:
                 self.logger.warning("Failed to restore hidden window hwnd=%s reason=%s", hwnd, reason)
@@ -648,6 +725,15 @@ class LayoutOnlyEngine:
         with self._state_lock:
             self._state.last_error = message
             self._state.last_tick = now
+
+    def _api_last_error(self) -> int:
+        getter = getattr(self.api, "get_last_error", None)
+        if not callable(getter):
+            return 0
+        try:
+            return int(getter())
+        except Exception:
+            return 0
 
     def _prune_error_log_keys_locked(self) -> None:
         size = len(self._last_log)

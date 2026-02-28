@@ -373,6 +373,35 @@ def test_safe_after_ignores_when_queue_not_running(monkeypatch):
     assert controller._ui_queue.empty()
 
 
+def test_close_request_shuts_down_when_tray_unavailable(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    controller._tray_available = False
+
+    controller._on_close_requested()
+
+    assert engine.stop_called is True
+    assert root.quitted is True
+    assert root.destroyed is True
+
+
+def test_close_request_hides_window_when_tray_available(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    controller._tray_available = True
+
+    controller._on_close_requested()
+
+    assert getattr(root, "withdrawn", False) is True
+    assert engine.stop_called is False
+
+
 def test_tick_status_swallow_after_error(monkeypatch):
     monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
 

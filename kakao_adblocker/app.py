@@ -64,7 +64,7 @@ def _run_self_check() -> int:
     checks: list[Tuple[str, Callable[[], Tuple[bool, str]]]] = [
         ("APPDATA 접근/쓰기", _check_appdata_writable),
         ("tasklist 실행", ProcessInspector.probe_tasklist),
-        ("Run 레지스트리 접근", StartupManager.probe_access),
+        ("Run 레지스트리 읽기/쓰기 접근", StartupManager.probe_access),
         ("트레이 모듈 import", _check_tray_import),
     ]
     passed = 0
@@ -114,8 +114,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         engine.start()
         engine_started = True
         controller.start()
-        should_start_minimized = bool(args.minimized or settings.start_minimized)
-        if not should_start_minimized:
+        requested_minimized = bool(args.minimized or settings.start_minimized)
+        should_start_minimized = requested_minimized
+        if requested_minimized and not controller.is_tray_available():
+            warning = "tray unavailable, minimized ignored"
+            logger.warning(warning)
+            engine.report_warning(warning)
+            should_start_minimized = False
+
+        if not requested_minimized:
             controller.show_startup_notice()
 
         if should_start_minimized:

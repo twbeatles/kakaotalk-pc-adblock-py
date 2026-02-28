@@ -166,6 +166,27 @@ def test_engine_uses_rules_main_window_classes():
     assert 101 in resized_handles
 
 
+def test_engine_detects_main_window_with_empty_title_using_child_signature():
+    api = FakeAPI()
+    api.windows[100]["text"] = ""
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    rules = LayoutRulesV11()
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    assert engine.state.main_window_count == 1
+
+    engine.apply_once()
+    resized_handles = [x[0] for x in api.set_pos_calls]
+    assert 101 in resized_handles
+
+
 def test_engine_restores_hidden_windows_when_disabled():
     api = FakeAPI()
     settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
@@ -307,6 +328,45 @@ def test_engine_candidate_detection_requires_class_and_legacy_signature():
 
     assert 200 in api.hide_calls
     assert 210 not in api.hide_calls
+
+
+def test_engine_candidate_detection_supports_legacy_substring_signature():
+    api = FakeAPI()
+    api.windows[230] = {
+        "pid": 42,
+        "class": "AdCandidateWin",
+        "text": "legacy host",
+        "parent": 0,
+        "rect": (20, 20, 320, 320),
+        "visible": True,
+    }
+    api.windows[231] = {
+        "pid": 42,
+        "class": "Chrome_WidgetWin_1",
+        "text": "Kakao Legacy Surface v2",
+        "parent": 230,
+        "rect": (20, 20, 320, 320),
+        "visible": True,
+    }
+    api.children[230] = [231]
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    rules = LayoutRulesV11(
+        ad_candidate_classes=["AdCandidateWin"],
+        chrome_legacy_title="Chrome Legacy Window",
+        chrome_legacy_title_contains=["Legacy Surface"],
+    )
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert 230 in api.hide_calls
 
 
 def test_engine_hides_eva_window_dblclk_legacy_candidate_with_default_rules():
@@ -703,6 +763,26 @@ def test_engine_set_error_is_thread_safe_under_stress():
 
     assert errors == []
     assert len(engine._last_log) <= 512
+
+
+def test_engine_reports_pid_scan_warning_into_state(monkeypatch):
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: set(),
+    )
+    monkeypatch.setattr(
+        "kakao_adblocker.event_engine.ProcessInspector.consume_last_warning",
+        staticmethod(lambda: "tasklist failed"),
+    )
+
+    engine.scan_once()
+
+    assert "pid-scan: tasklist failed" in engine.state.last_error
 
 
 def test_engine_can_reset_restore_failures_state():

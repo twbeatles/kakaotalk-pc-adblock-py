@@ -56,6 +56,7 @@ class TrayController:
         self.logger = logger.getChild("TrayController")
         self.icon = None
         self._tray_running = False
+        self._tray_available = False
         self._startup_notice_shown = False
         self._last_status_text: Optional[str] = None
         self._ui_queue: "queue.Queue[Callable[[], None]]" = queue.Queue()
@@ -73,7 +74,7 @@ class TrayController:
         self.root.title(APP_NAME)
         self.root.geometry("460x260")
         self.root.resizable(False, False)
-        self.root.protocol("WM_DELETE_WINDOW", self.hide_window)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close_requested)
 
         wrapper = ttk.Frame(self.root, padding=16)
         wrapper.pack(fill="both", expand=True)
@@ -98,11 +99,17 @@ class TrayController:
         self._ui_queue_running = True
         self._schedule_ui_queue_drain()
         self._sync_startup_setting()
+        self._tray_available = False
         if _load_tray_modules():
             self._setup_tray()
+            self._tray_available = bool(self._tray_running)
         else:
             self.logger.warning("pystray is unavailable; tray mode disabled")
+        self._configure_close_behavior()
         self._tick_status()
+
+    def is_tray_available(self) -> bool:
+        return bool(self._tray_available)
 
     def _schedule_ui_queue_drain(self) -> None:
         if not self._ui_queue_running:
@@ -233,6 +240,20 @@ class TrayController:
         if hasattr(self.root, "withdraw"):
             self.root.withdraw()
 
+    def _on_close_requested(self) -> None:
+        if self.is_tray_available():
+            self.hide_window()
+            return
+        self.shutdown()
+
+    def _configure_close_behavior(self) -> None:
+        if not hasattr(self.root, "protocol"):
+            return
+        try:
+            self.root.protocol("WM_DELETE_WINDOW", self._on_close_requested)
+        except Exception:
+            self.logger.debug("Close behavior update skipped")
+
     def shutdown(self) -> None:
         self._ui_queue_running = False
         self.stop_tray()
@@ -272,6 +293,7 @@ class TrayController:
             except Exception:
                 pass
         self._tray_running = False
+        self._tray_available = False
 
     def _create_icon(self):
         if not _load_tray_modules():

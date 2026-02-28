@@ -12,8 +12,11 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 ## 최근 안정성 개선 (v11.0.x)
 
 - `--minimized` 또는 `start_minimized=true`로 시작할 때는 시작 안내 팝업을 띄우지 않습니다.
+- 트레이(pystray/Pillow) 모듈을 사용할 수 없는 환경에서는 `--minimized`/`start_minimized` 요청을 무시하고 창을 강제로 표시합니다.
+- 트레이를 사용할 수 없는 상태에서 창 닫기(X)는 숨김이 아니라 앱 종료로 동작합니다.
 - 엔진이 `layout_rules_v11.json`의 `main_window_classes`를 실제 메인 윈도우 탐지에 반영합니다.
 - 광고 후보 탐지는 `ad_candidate_classes`를 분리 적용하고, 최상위 후보는 `Chrome Legacy Window` 시그니처를 만족할 때만 처리합니다.
+- 레거시 광고 시그니처는 exact(`chrome_legacy_title`)와 substring(`chrome_legacy_title_contains`)을 함께 지원합니다.
 - 기본 광고 후보 클래스는 `EVA_Window_Dblclk`, `EVA_Window`이며, 구버전 rules에서 `ad_candidate_classes`가 누락/비정상이면 `main_window_classes`로 폴백합니다.
 - 공격 모드에서 짧은 토큰(예: `Ad`)은 단어 경계 기준으로 매칭하여 오탐(`ReadLater`, `Header` 등)을 줄였습니다.
 - 시작프로그램 토글 시 레지스트리 갱신 실패가 발생하면 설정 파일(`run_on_startup`)을 잘못 저장하지 않습니다.
@@ -28,8 +31,10 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 상태 표시에 마지막 오류(`last_error`)와 마지막 갱신 시각(`last_tick`)이 함께 표시됩니다.
 - PID 스캔/캐시 정리는 주기 스로틀이 적용되어 유휴 상태 CPU 사용량을 줄였습니다.
 - psutil 스캔 초기화/루프 실패 시 `tasklist` 폴백 경로로 PID 탐지를 이어갑니다.
+- PID 탐지 경고(예: psutil 실패, tasklist fallback/실패)는 상태 문자열(`last_error`)과 로그에 반영됩니다.
 - `--dump-tree` 경로는 UI/트레이 모듈을 지연 로딩하여 시작 오버헤드를 최소화합니다.
 - `--self-check` 경로는 UI/엔진을 기동하지 않고 환경 진단(APPDATA, tasklist, 레지스트리, 트레이 모듈 import)만 수행합니다.
+- `--self-check`의 시작프로그램 진단은 Run 레지스트리 `읽기/쓰기` 접근을 함께 점검합니다.
 - UI 실행 경로는 `try/finally` cleanup으로 예외 발생 시에도 `stop_tray()/engine.stop()`를 보장합니다.
 - 기본 설정(`idle_poll_interval_ms=200`) 기준으로 유휴 복귀 지연은 최대 약 200ms를 목표로 합니다.
 - `layout_settings_v11.json`, `layout_rules_v11.json` 파손(파싱 실패/최상위 타입 오류) 시 `*.broken-YYYYMMDD-HHMMSS` 백업을 생성하고 경고를 상태/로그에 노출합니다.
@@ -105,6 +110,7 @@ pyinstaller kakaotalk_adblock.spec
 `kakaotalk_adblock.spec`는 **onefile** 빌드 설정이며, 결과물은 `dist/KakaoTalkLayoutAdBlocker_v11.exe`로 생성됩니다.
 - `.spec`는 프로젝트 루트 기준 절대 경로를 사용하도록 보강되어, 빌드 실행 위치에 덜 민감합니다.
 - `.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `pystray`, `PIL`)를 `hiddenimports`로 명시하고, `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 패키징 누락을 방지합니다.
+- `.spec`는 레이아웃/Win32 핵심 모듈(`kakao_adblocker.layout_engine`, `kakao_adblocker.win32_api`)도 `hiddenimports`에 명시해 패키징 안정성을 보강했습니다.
 - `--self-check` 진단 경로도 동일 hiddenimports 집합으로 별도 수정 없이 동작합니다.
 
 `uac_admin`은 제거되어 관리자 권한 없이 실행됩니다.

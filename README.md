@@ -111,9 +111,40 @@ pyinstaller kakaotalk_adblock.spec
 - `.spec`는 프로젝트 루트 기준 절대 경로를 사용하도록 보강되어, 빌드 실행 위치에 덜 민감합니다.
 - `.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `pystray`, `PIL`)를 `hiddenimports`로 명시하고, `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 패키징 누락을 방지합니다.
 - `.spec`는 레이아웃/Win32 핵심 모듈(`kakao_adblocker.layout_engine`, `kakao_adblocker.win32_api`)도 `hiddenimports`에 명시해 패키징 안정성을 보강했습니다.
+- `.spec`는 `packaging/windows_version_info.txt`를 버전 리소스로 포함해 `CompanyName/ProductName/FileVersion` 등 PE 메타데이터를 채웁니다.
 - `--self-check` 진단 경로도 동일 hiddenimports 집합으로 별도 수정 없이 동작합니다.
 
 `uac_admin`은 제거되어 관리자 권한 없이 실행됩니다.
+
+### 빌드 + 서명 파이프라인 (signtool)
+
+PowerShell 스크립트(`scripts/build_release.ps1`)로 onefile 빌드 후 `signtool` 서명을 연속 수행할 수 있습니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign
+```
+
+서명을 켜려면 아래 둘 중 하나를 설정하세요.
+
+1. PFX 파일 서명:
+   - `SIGN_PFX_PATH`: PFX 파일 절대 경로
+   - `SIGN_PFX_PASSWORD`: PFX 비밀번호(선택)
+2. 인증서 저장소 서명:
+   - `SIGN_CERT_SHA1`: 인증서 thumbprint(SHA-1)
+   - `SIGN_CERT_STORE`: 저장소 이름(선택, 예: `My`)
+   - `SIGN_CERT_SUBJECT`: 인증서 Subject CN(선택)
+
+공통 옵션:
+- `SIGN_TIMESTAMP_URL` (선택, 기본값: `http://timestamp.digicert.com`)
+
+예시:
+
+```powershell
+$env:SIGN_CERT_SHA1="YOUR_CERT_THUMBPRINT"
+$env:SIGN_CERT_STORE="My"
+$env:SIGN_TIMESTAMP_URL="http://timestamp.digicert.com"
+powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1
+```
 
 ## 패키징 실행 오류 대응
 

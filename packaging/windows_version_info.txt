@@ -1,0 +1,40 @@
+# UTF-8
+#
+# PyInstaller version resource metadata.
+# Keep this file in sync with release versioning.
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(11, 0, 0, 0),
+    prodvers=(11, 0, 0, 0),
+    mask=0x3F,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0),
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          u"040904B0",
+          [
+            StringStruct(u"CompanyName", u"twbeatles"),
+            StringStruct(u"FileDescription", u"KakaoTalk Layout AdBlocker"),
+            StringStruct(u"FileVersion", u"11.0.0.0"),
+            StringStruct(u"InternalName", u"KakaoTalkLayoutAdBlocker_v11"),
+            StringStruct(
+              u"LegalCopyright", u"Copyright (c) 2026 twbeatles"
+            ),
+            StringStruct(
+              u"OriginalFilename", u"KakaoTalkLayoutAdBlocker_v11.exe"
+            ),
+            StringStruct(u"ProductName", u"KakaoTalk Layout AdBlocker"),
+            StringStruct(u"ProductVersion", u"11.0.0.0"),
+          ],
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct(u"Translation", [1033, 1200])]),
+  ],
+)

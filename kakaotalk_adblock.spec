@@ -12,6 +12,7 @@ if not WINDOWS_VERSION_INFO.exists():
 
 # Keep lazy-imported core/runtime modules explicit so onefile packaging stays stable.
 # `--self-check` path also imports pystray/PIL via importlib for diagnostics.
+# Tray readiness/JSON self-heal changes are stdlib-only; existing hiddenimports set remains valid.
 hiddenimports = [
     "psutil",
     "PIL",

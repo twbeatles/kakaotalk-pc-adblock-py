@@ -20,6 +20,7 @@ ImageDraw = None
 PYSTRAY_AVAILABLE = False
 _LAST_TRAY_IMPORT_FAILURE_AT: Optional[float] = None
 _TRAY_IMPORT_RETRY_TTL_SECONDS = 30.0
+_TRAY_READY_TIMEOUT_SECONDS = 1.5
 
 
 def _load_tray_modules() -> bool:
@@ -57,6 +58,10 @@ class TrayController:
         self.icon = None
         self._tray_running = False
         self._tray_available = False
+        self._tray_thread: Optional[threading.Thread] = None
+        self._tray_ready_event = threading.Event()
+        self._tray_start_error = ""
+        self._tray_stopping = False
         self._startup_notice_shown = False
         self._last_status_text: Optional[str] = None
         self._ui_queue: "queue.Queue[Callable[[], None]]" = queue.Queue()
@@ -100,9 +105,15 @@ class TrayController:
         self._schedule_ui_queue_drain()
         self._sync_startup_setting()
         self._tray_available = False
+        self._tray_start_error = ""
+        self._tray_stopping = False
         if _load_tray_modules():
             self._setup_tray()
-            self._tray_available = bool(self._tray_running)
+            if not self._tray_available:
+                if self._tray_start_error:
+                    self.logger.warning("tray mode disabled: %s", self._tray_start_error)
+                else:
+                    self.logger.warning("tray mode disabled: tray startup timeout")
         else:
             self.logger.warning("pystray is unavailable; tray mode disabled")
         self._configure_close_behavior()
@@ -267,6 +278,9 @@ class TrayController:
     def _setup_tray(self) -> None:
         if not _load_tray_modules():
             return
+        self._tray_ready_event.clear()
+        self._tray_start_error = ""
+        self._tray_stopping = False
         self.icon = pystray.Icon(
             "KakaoTalkLayoutAdBlocker",
             self._create_icon(),
@@ -283,17 +297,62 @@ class TrayController:
                 pystray.MenuItem("종료", self._menu_exit),
             ),
         )
-        self._tray_running = True
-        threading.Thread(target=self.icon.run, daemon=True).start()
 
-    def stop_tray(self) -> None:
-        if self._tray_running and self.icon:
+        def _setup_callback(_icon) -> None:
+            self._tray_running = True
+            self._tray_available = True
+            self._tray_ready_event.set()
+
+        def _runner() -> None:
+            try:
+                self.icon.run(setup=_setup_callback)
+            except Exception as exc:
+                self._tray_start_error = f"{exc.__class__.__name__}: {exc}"
+            finally:
+                self._tray_running = False
+                self._tray_available = False
+                self._tray_ready_event.set()
+                if not self._tray_stopping:
+                    self._safe_after(self._on_tray_unexpected_exit)
+
+        self._tray_thread = threading.Thread(target=_runner, daemon=True)
+        self._tray_thread.start()
+        ready = self._tray_ready_event.wait(_TRAY_READY_TIMEOUT_SECONDS)
+        if not ready or not self._tray_running or self._tray_start_error:
+            if not ready and not self._tray_start_error:
+                self._tray_start_error = "startup timeout"
+            self._tray_available = False
+            self._tray_stopping = True
             try:
                 self.icon.stop()
             except Exception:
                 pass
+            if self._tray_thread and self._tray_thread.is_alive():
+                self._tray_thread.join(timeout=0.3)
+            self._tray_running = False
+            if not self._tray_thread or not self._tray_thread.is_alive():
+                self._tray_stopping = False
+
+    def stop_tray(self) -> None:
+        self._tray_stopping = True
+        if self.icon:
+            try:
+                self.icon.stop()
+            except Exception:
+                pass
+        thread = self._tray_thread
+        timed_out = False
+        if thread and thread.is_alive():
+            thread.join(timeout=0.5)
+            timed_out = thread.is_alive()
+        if timed_out:
+            self.logger.debug("Tray thread did not terminate within timeout")
+        else:
+            self._tray_stopping = False
+        self._tray_thread = None
         self._tray_running = False
         self._tray_available = False
+        self._tray_ready_event.clear()
 
     def _create_icon(self):
         if not _load_tray_modules():
@@ -319,6 +378,28 @@ class TrayController:
             self._ui_queue.put_nowait(callback)
         except Exception:
             self.logger.debug("Tray callback queueing skipped")
+
+    def _is_window_visible(self) -> bool:
+        if hasattr(self.root, "winfo_viewable"):
+            try:
+                return bool(self.root.winfo_viewable())
+            except Exception:
+                pass
+        if hasattr(self.root, "state"):
+            try:
+                state = str(self.root.state()).lower()
+                return state not in {"withdrawn", "iconic"}
+            except Exception:
+                pass
+        return True
+
+    def _on_tray_unexpected_exit(self) -> None:
+        if self._tray_stopping:
+            return
+        self._tray_available = False
+        self.logger.warning("Tray runtime stopped unexpectedly; forcing main window visible")
+        if not self._is_window_visible():
+            self.show_window()
 
     def _menu_toggle_blocking(self, _icon, _item) -> None:
         self._safe_after(self.toggle_blocking)

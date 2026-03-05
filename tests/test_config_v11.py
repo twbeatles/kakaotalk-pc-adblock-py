@@ -160,6 +160,21 @@ def test_settings_load_backs_up_malformed_json_and_records_warning(tmp_path: Pat
     assert any("layout_settings_v11.json" in msg for msg in warnings)
 
 
+def test_settings_load_self_heals_malformed_json_file(tmp_path: Path):
+    path = tmp_path / "layout_settings_v11.json"
+    path.write_text("{ malformed", encoding="utf-8")
+    consume_load_warnings()
+
+    cfg = LayoutSettingsV11.load(str(path))
+
+    assert cfg == LayoutSettingsV11()
+    healed = json.loads(path.read_text(encoding="utf-8"))
+    assert healed["enabled"] is True
+    warnings = consume_load_warnings()
+    assert any("손상 감지" in msg for msg in warnings)
+    assert any("자동 복구 성공" in msg for msg in warnings)
+
+
 def test_rules_load_backs_up_non_object_top_level_and_records_warning(tmp_path: Path):
     path = tmp_path / "layout_rules_v11.json"
     path.write_text("[]", encoding="utf-8")
@@ -172,6 +187,34 @@ def test_rules_load_backs_up_non_object_top_level_and_records_warning(tmp_path: 
     assert len(backups) == 1
     warnings = consume_load_warnings()
     assert any("layout_rules_v11.json" in msg for msg in warnings)
+
+
+def test_rules_load_self_heals_invalid_top_level_file(tmp_path: Path):
+    path = tmp_path / "layout_rules_v11.json"
+    path.write_text("[]", encoding="utf-8")
+    consume_load_warnings()
+
+    rules = LayoutRulesV11.load(str(path))
+
+    assert rules == LayoutRulesV11()
+    healed = json.loads(path.read_text(encoding="utf-8"))
+    assert healed["chrome_legacy_title_contains"] == ["Chrome Legacy Window"]
+    warnings = consume_load_warnings()
+    assert any("손상 감지" in msg for msg in warnings)
+    assert any("자동 복구 성공" in msg for msg in warnings)
+
+
+def test_settings_load_reports_self_heal_failure_and_keeps_defaults(tmp_path: Path, monkeypatch):
+    path = tmp_path / "layout_settings_v11.json"
+    path.write_text("{ malformed", encoding="utf-8")
+    consume_load_warnings()
+    monkeypatch.setattr(config_module, "_atomic_write_text", lambda _path, _text: (_ for _ in ()).throw(OSError("disk full")))
+
+    cfg = LayoutSettingsV11.load(str(path))
+
+    assert cfg == LayoutSettingsV11()
+    warnings = consume_load_warnings()
+    assert any("자동 복구 실패" in msg for msg in warnings)
 
 
 def test_rules_load_swaps_banner_bounds_and_records_warning(tmp_path: Path):
@@ -239,6 +282,27 @@ def test_settings_load_cleans_broken_backup_files_by_age_and_count(tmp_path: Pat
 
     LayoutSettingsV11.load(str(path))
 
+    backups = list(tmp_path.glob("layout_settings_v11.json.broken-*"))
+    assert len(backups) <= 10
+    assert not very_old.exists()
+
+
+def test_settings_load_cleans_broken_backups_even_without_new_corruption(tmp_path: Path):
+    path = tmp_path / "layout_settings_v11.json"
+    path.write_text(LayoutSettingsV11.default_json(), encoding="utf-8")
+    now = datetime.now()
+
+    for days_ago in range(1, 14):
+        stamp = (now - timedelta(days=days_ago)).strftime("%Y%m%d-%H%M%S")
+        (tmp_path / f"{path.name}.broken-{stamp}").write_text("recent", encoding="utf-8")
+
+    very_old_stamp = (now - timedelta(days=60)).strftime("%Y%m%d-%H%M%S")
+    very_old = tmp_path / f"{path.name}.broken-{very_old_stamp}"
+    very_old.write_text("old", encoding="utf-8")
+
+    cfg = LayoutSettingsV11.load(str(path))
+
+    assert cfg.enabled is True
     backups = list(tmp_path.glob("layout_settings_v11.json.broken-*"))
     assert len(backups) <= 10
     assert not very_old.exists()

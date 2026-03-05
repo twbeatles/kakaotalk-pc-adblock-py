@@ -14,6 +14,7 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - `--minimized` 또는 `start_minimized=true`로 시작할 때는 시작 안내 팝업을 띄우지 않습니다.
 - 트레이(pystray/Pillow) 모듈을 사용할 수 없는 환경에서는 `--minimized`/`start_minimized` 요청을 무시하고 창을 강제로 표시합니다.
 - 트레이를 사용할 수 없는 상태에서 창 닫기(X)는 숨김이 아니라 앱 종료로 동작합니다.
+- 트레이 가용성은 준비 신호 기반으로 판정되며, 시작 타임아웃/런타임 비정상 종료 시 트레이 모드를 비활성화하고 창 접근 경로를 복구합니다.
 - 엔진이 `layout_rules_v11.json`의 `main_window_classes`를 실제 메인 윈도우 탐지에 반영합니다.
 - 광고 후보 탐지는 `ad_candidate_classes`를 분리 적용하고, 최상위 후보는 `Chrome Legacy Window` 시그니처를 만족할 때만 처리합니다.
 - 레거시 광고 시그니처는 exact(`chrome_legacy_title`)와 substring(`chrome_legacy_title_contains`)을 함께 지원합니다.
@@ -25,6 +26,7 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 앱 시작 시 `run_on_startup`은 레지스트리 상태를 기준으로 1회 동기화됩니다.
 - 시작 시 `run_on_startup` 동기화 저장이 실패해도 값 롤백 후 예외 없이 계속 동작합니다.
 - 차단 OFF 전환 또는 앱 종료 시, 이전에 숨김/이동한 광고 창은 즉시 원복됩니다.
+- 차단 OFF 상태에서는 watch/apply 루프를 모두 일시중단하고, ON 전환 시 즉시 재개합니다.
 - 원복 실패 창은 스냅샷을 유지해 재시도하며, 상태 문자열에 `복원실패 N` 및 마지막 실패 사유를 노출합니다.
 - 트레이 메뉴에서 `복원 실패 초기화`를 실행해 `restore_failures` 상태를 수동 초기화할 수 있습니다.
 - `stop()`에서 watch thread join timeout(2초) 발생 시 경고를 상태/로그에 기록하고 종료 절차를 계속 진행합니다.
@@ -37,10 +39,11 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - `--self-check`의 시작프로그램 진단은 Run 레지스트리 `읽기/쓰기` 접근을 함께 점검합니다.
 - UI 실행 경로는 `try/finally` cleanup으로 예외 발생 시에도 `stop_tray()/engine.stop()`를 보장합니다.
 - 기본 설정(`idle_poll_interval_ms=200`) 기준으로 유휴 복귀 지연은 최대 약 200ms를 목표로 합니다.
-- `layout_settings_v11.json`, `layout_rules_v11.json` 파손(파싱 실패/최상위 타입 오류) 시 `*.broken-YYYYMMDD-HHMMSS` 백업을 생성하고 경고를 상태/로그에 노출합니다.
-- `*.broken-*` 백업은 자동 정리 정책(30일 초과 삭제 + 최신 10개 유지)을 적용해 누적을 제어합니다.
+- `layout_settings_v11.json`, `layout_rules_v11.json` 파손(파싱 실패/최상위 타입 오류) 시 `*.broken-YYYYMMDD-HHMMSS` 백업을 생성하고, 기본값 JSON으로 자동 복구(self-heal)합니다.
+- `*.broken-*` 백업은 로드 시 자동 정리 정책(30일 초과 삭제 + 최신 10개 유지)을 적용해 누적을 제어합니다.
+- 시작 시 다중 경고가 존재하면 상태 문자열(`last_error`)에는 우선순위 1건(`복구 실패 > 자동 복구 > 기타`)만 노출합니다.
 - `layout_settings_v11.json`, `layout_rules_v11.json` 저장은 원자적 교체(`os.replace`) 방식으로 처리해 파손 가능성을 낮췄습니다.
-- rules 문자열(`main_window_titles`, `aggressive_ad_tokens`)에 인코딩 이상 징후(mojibake/`�`)가 있으면 시작 시 경고를 기록합니다.
+- rules 문자열(`main_window_titles`, `aggressive_ad_tokens`, `chrome_legacy_title_contains`)에 인코딩 이상 징후(mojibake/`�`)가 있으면 시작 시 경고를 기록합니다.
 - 엔진 내부 캐시/숨김 스냅샷 키를 `WindowIdentity(hwnd,pid,class)`로 강화해 HWND 재사용 시 오동작 가능성을 낮췄습니다.
 - 스캔 경로는 경량 수집(`rect/visible` 미조회)으로 최적화되고, 상세 수집은 `--dump-tree` 경로에만 적용됩니다.
 - 트레이 메뉴 콜백은 큐 디스패치(`_safe_after` -> main-thread drain)로 처리해 스레드 경합을 줄입니다.
@@ -61,6 +64,20 @@ python kakaotalk_layout_adblock_v11.py --self-check
 
 - 이 도구는 Windows 전용입니다. 비Windows 환경에서는 `This application only supports Windows.` 메시지와 함께 종료 코드 `2`로 종료됩니다.
 
+## 설치
+
+런타임만 설치:
+
+```bash
+pip install -r requirements.txt
+```
+
+개발/테스트/빌드 포함 설치:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 ## 설정/로그 경로
 
 - `%APPDATA%\KakaoTalkAdBlockerLayout\layout_settings_v11.json`
@@ -75,6 +92,7 @@ python kakaotalk_layout_adblock_v11.py --self-check
 
 신규 성능 필드가 없는 구버전 설정 파일도 기본값으로 자동 보완되어 그대로 동작합니다.
 구버전 rules 파일에서 `ad_candidate_classes` 키가 없거나 타입이 잘못된 경우에도 `main_window_classes` 기반 폴백으로 무중단 호환됩니다.
+`layout_rules_v11.json` 기본 템플릿에는 `chrome_legacy_title_contains` 키가 포함되어 substring 시그니처 조정이 가능합니다.
 
 기존 `adblock_settings.json`, `ad_patterns.json`, `blocked_domains.txt`는 읽지 않습니다.
 
@@ -115,6 +133,20 @@ pyinstaller kakaotalk_adblock.spec
 - `--self-check` 진단 경로도 동일 hiddenimports 집합으로 별도 수정 없이 동작합니다.
 
 `uac_admin`은 제거되어 관리자 권한 없이 실행됩니다.
+
+## 스모크 체크
+
+기본(self-check만):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke_check.ps1
+```
+
+self-check + 테스트:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke_check.ps1 -RunTests
+```
 
 ### 빌드 + 서명 파이프라인 (signtool)
 

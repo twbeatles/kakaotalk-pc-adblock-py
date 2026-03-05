@@ -25,17 +25,18 @@
   - advanced perf knobs: `idle_poll_interval_ms`, `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
   - missing new perf fields are backfilled with safe defaults
   - rules loader falls back `ad_candidate_classes` to `main_window_classes` when missing/invalid
-  - malformed/non-object JSON input is backed up as `*.broken-YYYYMMDD-HHMMSS` and recorded as load warning
+  - malformed/non-object JSON input is backed up as `*.broken-YYYYMMDD-HHMMSS` and then self-healed with default JSON
   - inverted banner bounds (`banner_min_height_px > banner_max_height_px`) are auto-normalized
-  - broken-backup cleanup policy is enforced (`>30 days` purge + keep latest `10`)
+  - broken-backup cleanup policy is enforced on every load (`>30 days` purge + keep latest `10`)
   - rules string integrity self-check warns on mojibake signatures / replacement char (`�`)
   - `consume_load_warnings()` exposes startup warnings to app layer
 - `event_engine.py`
   - `LayoutOnlyEngine`: single watch+apply polling loop
+  - when blocking is OFF, watch/apply both pause and loop waits in low-cost mode (`1.0s`)
   - main window detection uses `main_window_classes` from rules
   - ad candidate filtering uses `ad_candidate_classes` (default: `EVA_Window_Dblclk`, `EVA_Window`) + legacy exact/substring signatures
   - empty-title main windows can still be detected via child signature fallback (`OnlineMainView` / `LockModeView`)
-  - synchronous warm-up scan/apply on engine start reduces first-run ad flash
+  - synchronous warm-up scan/apply on engine start runs only when enabled
   - empty-string text cache uses short TTL refresh to reduce startup detection lag
   - hidden/moved windows are restored when blocking is disabled or engine stops
   - stop join timeout (`2.0s`) emits state/log warning and proceeds with shutdown flow
@@ -55,6 +56,8 @@
   - `TrayController` (status, toggle, aggressive mode, startup, restore-failure reset, logs, release page, exit)
   - startup notice is skipped when launching minimized
   - minimized-start requests are ignored when tray modules are unavailable
+  - tray readiness is confirmed via startup signal; startup timeout (`1.5s`) disables tray mode
+  - unexpected tray runtime exit disables tray mode and restores main window visibility
   - window close action switches from hide to shutdown when tray is unavailable
   - startup setting is synchronized from registry on app start
   - startup toggle rolls registry back on settings-save failure
@@ -64,6 +67,7 @@
   - pystray/Pillow are loaded lazily and retried after TTL (30s) when import fails
   - tray callbacks are queued and drained on Tk main thread
   - status tick scheduling (`root.after`) also swallows shutdown-race errors
+  - startup load-warning propagation uses priority (`heal failure > auto-heal > others`)
 - `services.py`
   - process scan, startup registry, shell/open-url helpers
   - psutil process scan uses per-process exception isolation

@@ -21,17 +21,18 @@
   - 성능 설정: `idle_poll_interval_ms`, `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
   - 신규 필드 누락 시 기본값 자동 보완(무중단 호환)
   - rules 로드 시 `ad_candidate_classes`가 누락/비정상이면 `main_window_classes`로 폴백
-  - JSON 파손(파싱 실패/최상위 타입 불일치) 시 `*.broken-YYYYMMDD-HHMMSS` 백업 생성 후 경고 큐에 기록
+  - JSON 파손(파싱 실패/최상위 타입 불일치) 시 `*.broken-YYYYMMDD-HHMMSS` 백업 생성 후 기본값 JSON으로 self-heal
   - rules 로드 시 `banner_min_height_px > banner_max_height_px` 역전값을 자동 교정(swap)하고 경고 기록
-  - `*.broken-*` 백업 자동 정리(30일 초과 삭제 + 최신 10개 유지)
+  - `*.broken-*` 백업 자동 정리(30일 초과 삭제 + 최신 10개 유지)를 로드 시마다 적용
   - settings/rules 저장은 원자적 교체(`os.replace`)로 파일 파손 리스크 완화
   - rules 문자열 무결성 self-check(mojibake 시그니처/`�`) 경고
   - 앱 계층 전달용 `consume_load_warnings()` 제공
 - `kakao_adblocker/event_engine.py`
   - `LayoutOnlyEngine`, `EngineState`
   - 단일 watch+apply 루프(적응형 폴링), `main_window_classes` 기반 메인 윈도우 식별
+  - 차단 OFF 상태에서는 watch/apply를 모두 일시중단하고 1.0초 저비용 대기
   - 광고 후보는 `ad_candidate_classes`(기본: `EVA_Window_Dblclk`, `EVA_Window`)와 레거시 시그니처(exact + substring)를 함께 사용해 필터링
-  - 엔진 시작 시 동기 warm-up(scan+apply 1회)으로 초기 광고 깜빡임 완화
+  - 엔진 시작 시 enabled인 경우에만 동기 warm-up(scan+apply 1회)으로 초기 광고 깜빡임 완화
   - 빈 문자열 텍스트 캐시는 짧은 TTL로 재조회해 초기 UI 구성 구간 탐지 지연 완화
   - 메인 윈도우 제목이 빈 경우 자식 시그니처(`OnlineMainView`/`LockModeView`) 기반 fallback 탐지 지원
   - 차단 OFF/엔진 종료 시 숨김·이동 창 원복
@@ -53,6 +54,8 @@
   - 트레이 메뉴: 상태/OnOff/공격 모드/시작프로그램/복원실패초기화/창 열기/로그/릴리스/종료
   - 최소화 시작 시(`--minimized`/`start_minimized`) 시작 안내 팝업 생략
   - 트레이 비가용 시 최소화 시작 요청을 무시하고 창을 강제 표시
+  - 트레이 시작은 준비 신호 기반으로 판정하며 시작 타임아웃(1.5초) 시 비활성화
+  - 트레이 런타임 비정상 종료 시 트레이를 비활성화하고 메인 창 복구
   - 트레이 비가용 시 창 닫기(X)는 숨김이 아니라 종료로 처리
   - 시작 시 `run_on_startup` 값을 레지스트리 상태로 1회 동기화
   - 상태 문자열에 마지막 오류/갱신시각 표시
@@ -84,6 +87,7 @@
 7. 시작프로그램 토글은 레지스트리 갱신 성공 시에만 설정 파일에 반영
 8. `--dump-tree`는 UI 모듈을 로딩하지 않는 경량 경로로 동작
 9. `--self-check`는 UI/엔진을 기동하지 않고 환경 진단만 수행
+10. 시작 경고 상태 반영은 `복구 실패 > 자동 복구 > 기타` 우선순위로 1건 노출
 
 ## 설정 파일
 

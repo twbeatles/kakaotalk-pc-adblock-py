@@ -122,21 +122,33 @@ def _atomic_write_text(path: str, text: str) -> None:
         raise
 
 
-def _backup_broken_json(path: str, label: str, reason: str) -> None:
+def _json_with_trailing_newline(text: str) -> str:
+    return text if text.endswith("\n") else f"{text}\n"
+
+
+def _backup_broken_json(path: str, label: str, reason: str) -> bool:
     if not os.path.exists(path):
-        return
+        _push_load_warning(f"{label} 손상 감지: {reason}. 원본 파일이 없어 백업을 건너뜁니다.")
+        return False
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_path = f"{path}.broken-{timestamp}"
     try:
         shutil.copy2(path, backup_path)
-        _push_load_warning(
-            f"{label} 손상 감지: {reason}. 백업 생성: {backup_path}. 기본값으로 동작합니다."
-        )
+        _push_load_warning(f"{label} 손상 감지: {reason}. 백업 생성: {backup_path}.")
+        _cleanup_broken_backups(path, label)
+        return True
     except Exception as exc:
-        _push_load_warning(
-            f"{label} 손상 감지: {reason}. 백업 실패({exc.__class__.__name__}). 기본값으로 동작합니다."
-        )
-    _cleanup_broken_backups(path, label)
+        _push_load_warning(f"{label} 손상 감지: {reason}. 백업 실패({exc.__class__.__name__}).")
+        _cleanup_broken_backups(path, label)
+        return False
+
+
+def _self_heal_broken_json(path: str, label: str, default_text: str) -> None:
+    try:
+        _atomic_write_text(path, _json_with_trailing_newline(default_text))
+        _push_load_warning(f"{label} 자동 복구 성공: 기본값 JSON으로 재생성했습니다.")
+    except Exception as exc:
+        _push_load_warning(f"{label} 자동 복구 실패({exc.__class__.__name__}). 기본값으로 동작합니다.")
 
 
 def _backup_timestamp(path: Path) -> datetime:
@@ -208,7 +220,7 @@ def _warn_if_rules_text_corrupted(rules: "LayoutRulesV11", source_label: str) ->
         )
 
 
-def _load_json_object(path: str, label: str) -> dict[str, Any] | None:
+def _load_json_object(path: str, label: str, default_text: str | None = None) -> dict[str, Any] | None:
     try:
         with open(path, "r", encoding="utf-8") as f:
             raw = json.load(f)
@@ -216,9 +228,13 @@ def _load_json_object(path: str, label: str) -> dict[str, Any] | None:
         return None
     except Exception as exc:
         _backup_broken_json(path, label, f"JSON 파싱 실패({exc.__class__.__name__})")
+        if default_text is not None:
+            _self_heal_broken_json(path, label, default_text)
         return None
     if not isinstance(raw, dict):
         _backup_broken_json(path, label, "최상위 타입이 object(dict)가 아님")
+        if default_text is not None:
+            _self_heal_broken_json(path, label, default_text)
         return None
     return raw
 
@@ -238,7 +254,9 @@ class LayoutSettingsV11:
     @classmethod
     def load(cls, path: str = SETTINGS_FILE) -> "LayoutSettingsV11":
         defaults = cls()
-        raw = _load_json_object(path, "layout_settings_v11.json")
+        label = "layout_settings_v11.json"
+        _cleanup_broken_backups(path, label)
+        raw = _load_json_object(path, label, default_text=defaults.default_json())
         if raw is None:
             return defaults
         return cls(
@@ -306,9 +324,11 @@ class LayoutRulesV11:
     @classmethod
     def load(cls, path: str = RULES_FILE) -> "LayoutRulesV11":
         defaults = cls()
-        raw = _load_json_object(path, "layout_rules_v11.json")
+        label = "layout_rules_v11.json"
+        _cleanup_broken_backups(path, label)
+        raw = _load_json_object(path, label, default_text=defaults.default_json())
         if raw is None:
-            _warn_if_rules_text_corrupted(defaults, "layout_rules_v11.json")
+            _warn_if_rules_text_corrupted(defaults, label)
             return defaults
         main_window_classes = _coerce_str_list(raw.get("main_window_classes"), defaults.main_window_classes)
         raw_ad_candidate_classes = raw.get("ad_candidate_classes")

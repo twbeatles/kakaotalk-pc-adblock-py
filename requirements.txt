@@ -2,4 +2,3 @@ psutil
 pystray
 Pillow
 pywin32
-pytest

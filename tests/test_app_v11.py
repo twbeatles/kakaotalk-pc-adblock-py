@@ -170,6 +170,26 @@ def test_main_reports_first_load_warning_to_engine(monkeypatch):
     assert engine.reported_warnings == ["설정 파일 손상"]
 
 
+def test_main_reports_priority_load_warning_to_engine(monkeypatch):
+    settings = LayoutSettingsV11(start_minimized=True)
+    _patch_main_dependencies(
+        monkeypatch,
+        settings,
+        load_warnings=[
+            "일반 경고",
+            "layout_rules_v11.json 자동 복구 성공: 기본값 JSON으로 재생성했습니다.",
+            "layout_settings_v11.json 자동 복구 실패(OSError). 기본값으로 동작합니다.",
+        ],
+    )
+
+    rc = app.main([])
+
+    assert rc == 0
+    engine = FakeEngine.last_instance
+    assert engine is not None
+    assert engine.reported_warnings == ["layout_settings_v11.json 자동 복구 실패(OSError). 기본값으로 동작합니다."]
+
+
 def test_main_cleans_up_when_controller_start_fails(monkeypatch):
     class BrokenController(FakeController):
         def start(self):

@@ -77,6 +77,18 @@ def _run_self_check() -> int:
     return 0 if passed == len(checks) else 1
 
 
+def _pick_priority_warning(warnings: list[str]) -> str | None:
+    if not warnings:
+        return None
+    for message in warnings:
+        if "복구 실패" in message:
+            return message
+    for message in warnings:
+        if "자동 복구" in message:
+            return message
+    return warnings[0]
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     if os.name != "nt":
         print("This application only supports Windows.", file=sys.stderr)
@@ -95,8 +107,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     engine = LayoutOnlyEngine(logger, settings, rules)
     for warning in load_warnings:
         logger.warning(warning)
-    if load_warnings:
-        engine.report_warning(load_warnings[0])
+    priority_warning = _pick_priority_warning(load_warnings)
+    if priority_warning:
+        engine.report_warning(priority_warning)
 
     if args.dump_tree:
         path = engine.dump_window_tree(out_dir=args.dump_dir)

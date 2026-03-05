@@ -18,6 +18,7 @@ Rect = Tuple[int, int, int, int]
 WindowIdentity = Tuple[int, int, str]
 MAX_ERROR_LOG_KEYS = 512
 ERROR_LOG_PRUNE_TARGET = 384
+DISABLED_LOOP_WAIT_SECONDS = 1.0
 
 
 @dataclass
@@ -108,6 +109,7 @@ class LayoutOnlyEngine:
             self._state.last_error = ""
             self._state.restore_failures = 0
             self._state.last_restore_error = ""
+            enabled_on_start = self._state.enabled
         with self._data_lock:
             self._pid_scan_cache = set()
             self._last_pid_scan = 0.0
@@ -115,11 +117,12 @@ class LayoutOnlyEngine:
             self._last_activity = time.time()
 
         # Warm-up immediately in caller thread to reduce first-run ad flash.
-        try:
-            self._watch_once()
-            self._apply_once()
-        except Exception as e:
-            self._set_error(f"warmup: {e}")
+        if enabled_on_start:
+            try:
+                self._watch_once()
+                self._apply_once()
+            except Exception as e:
+                self._set_error(f"warmup: {e}")
 
         self._stop_event.clear()
         self._wake_event.clear()
@@ -150,8 +153,8 @@ class LayoutOnlyEngine:
             self._state.enabled = enabled_value
         if was_enabled and not enabled_value:
             self._restore_hidden_windows(reason="disabled")
-        if enabled_value:
-            self._wake_event.set()
+            self._clear_scan_state()
+        self._wake_event.set()
 
     def report_warning(self, message: str) -> None:
         if not message:
@@ -247,6 +250,9 @@ class LayoutOnlyEngine:
     def _watch_loop(self) -> None:
         # v11 keeps a single watch+apply loop to minimize race windows.
         while not self._stop_event.is_set():
+            if not self._is_enabled():
+                self._wait_next_tick(DISABLED_LOOP_WAIT_SECONDS)
+                continue
             try:
                 self._watch_once()
             except Exception as e:
@@ -544,11 +550,10 @@ class LayoutOnlyEngine:
                     class_name=class_name,
                 )
 
-        hide_ok = self.api.show_window(hwnd, SW_HIDE)
-        if not hide_ok:
-            self.logger.debug("show_window(SW_HIDE) failed hwnd=%s win32err=%s", hwnd, self._api_last_error())
+        self.api.show_window(hwnd, SW_HIDE)
         if not self.api.is_window_visible(hwnd):
             return True
+        self.logger.debug("window still visible after SW_HIDE hwnd=%s win32err=%s", hwnd, self._api_last_error())
 
         moved = bool(
             self.api.set_window_pos(
@@ -627,8 +632,12 @@ class LayoutOnlyEngine:
                 self.api.show_window(hwnd, SW_SHOW)
                 if not self.api.is_window_visible(hwnd):
                     restored = False
-                    failure_reason = "show_window failed"
-                    self.logger.debug("show_window(SW_SHOW) failed hwnd=%s win32err=%s", hwnd, self._api_last_error())
+                    failure_reason = "window still hidden after SW_SHOW"
+                    self.logger.debug(
+                        "window still hidden after SW_SHOW hwnd=%s win32err=%s",
+                        hwnd,
+                        self._api_last_error(),
+                    )
 
             if not restored:
                 self.logger.warning("Failed to restore hidden window hwnd=%s reason=%s", hwnd, reason)
@@ -640,6 +649,20 @@ class LayoutOnlyEngine:
             else:
                 with self._cache_lock:
                     self._hidden_windows.pop(identity, None)
+
+    def _clear_scan_state(self) -> None:
+        now = time.time()
+        with self._data_lock:
+            self._kakao_pids.clear()
+            self._main_window_handles.clear()
+            self._ad_subwindow_candidates.clear()
+            self._pid_scan_cache.clear()
+            self._last_pid_scan = 0.0
+            self._last_activity = 0.0
+        with self._state_lock:
+            self._state.kakao_pid_count = 0
+            self._state.main_window_count = 0
+            self._state.last_tick = now
 
     def _is_main_title(self, title: str) -> bool:
         title_lc = (title or "").lower()

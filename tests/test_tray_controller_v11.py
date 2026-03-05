@@ -1,22 +1,38 @@
 import logging
 import time
+import types
+import threading
 
 from kakao_adblocker.config import LayoutSettingsV11
 from kakao_adblocker.ui import TrayController
 
 
 class FakeRoot:
+    def __init__(self):
+        self._visible = True
+
     def after(self, _ms, fn):
         self._last_after = fn
 
     def deiconify(self):
+        self._visible = True
         self.deiconified = True
 
     def lift(self):
         self.lifted = True
 
     def withdraw(self):
+        self._visible = False
         self.withdrawn = True
+
+    def winfo_viewable(self):
+        return self._visible
+
+    def state(self):
+        return "normal" if self._visible else "withdrawn"
+
+    def winfo_exists(self):
+        return True
 
     def quit(self):
         self.quitted = True
@@ -472,3 +488,90 @@ def test_load_tray_modules_resets_failure_timestamp_on_success(monkeypatch):
     assert ui._load_tray_modules() is True
     assert ui.PYSTRAY_AVAILABLE is True
     assert ui._LAST_TRAY_IMPORT_FAILURE_AT is None
+
+
+def test_setup_tray_marks_available_when_ready(monkeypatch):
+    import kakao_adblocker.ui as ui
+
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    monkeypatch.setattr(ui, "_load_tray_modules", lambda: True)
+
+    class ReadyIcon:
+        def __init__(self, *_args, **_kwargs):
+            self._stop = threading.Event()
+
+        def run(self, setup=None):
+            if setup is not None:
+                setup(self)
+            self._stop.wait(1.0)
+
+        def stop(self):
+            self._stop.set()
+
+    ui.pystray = types.SimpleNamespace(
+        Icon=ReadyIcon,
+        Menu=lambda *items: tuple(items),
+        MenuItem=lambda *args, **kwargs: (args, kwargs),
+    )
+
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    monkeypatch.setattr(controller, "_create_icon", lambda: object())
+
+    controller._setup_tray()
+
+    assert controller.is_tray_available() is True
+    controller.stop_tray()
+
+
+def test_setup_tray_marks_unavailable_on_ready_timeout(monkeypatch):
+    import kakao_adblocker.ui as ui
+
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    monkeypatch.setattr(ui, "_load_tray_modules", lambda: True)
+
+    class SlowIcon:
+        def __init__(self, *_args, **_kwargs):
+            self._stop = threading.Event()
+
+        def run(self, setup=None):
+            self._stop.wait(1.0)
+
+        def stop(self):
+            self._stop.set()
+
+    ui.pystray = types.SimpleNamespace(
+        Icon=SlowIcon,
+        Menu=lambda *items: tuple(items),
+        MenuItem=lambda *args, **kwargs: (args, kwargs),
+    )
+
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    monkeypatch.setattr(controller, "_create_icon", lambda: object())
+    monkeypatch.setattr(ui, "_TRAY_READY_TIMEOUT_SECONDS", 0.05)
+
+    controller._setup_tray()
+
+    assert controller.is_tray_available() is False
+    controller.stop_tray()
+
+
+def test_tray_unexpected_exit_forces_window_visible(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    controller.hide_window()
+    controller._tray_available = True
+    controller._tray_stopping = False
+
+    controller._on_tray_unexpected_exit()
+
+    assert controller.is_tray_available() is False
+    assert getattr(root, "deiconified", False) is True

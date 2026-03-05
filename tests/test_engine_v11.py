@@ -523,6 +523,33 @@ def test_engine_watch_loop_runs_apply_in_same_cycle(monkeypatch):
     assert calls == ["watch", "apply"]
 
 
+def test_engine_watch_loop_pauses_when_disabled(monkeypatch):
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=False, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    calls = []
+
+    monkeypatch.setattr(engine, "_watch_once", lambda: calls.append("watch"))
+    monkeypatch.setattr(engine, "_apply_once", lambda: calls.append("apply"))
+
+    def _wait_once(timeout):
+        calls.append(f"wait:{timeout}")
+        engine._stop_event.set()
+
+    monkeypatch.setattr(engine, "_wait_next_tick", _wait_once)
+    engine._stop_event.clear()
+
+    engine._watch_loop()
+
+    assert calls == ["wait:1.0"]
+
+
 def test_engine_start_runs_warmup_before_background_thread(monkeypatch):
     api = FakeAPI()
     settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
@@ -561,6 +588,46 @@ def test_engine_start_runs_warmup_before_background_thread(monkeypatch):
     assert "thread_start" in calls
     assert engine.state.running is True
     assert abs(engine._current_loop_interval_seconds(now=10.1) - 0.1) < 1e-9
+
+
+def test_engine_start_skips_warmup_when_disabled(monkeypatch):
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=False, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    calls = []
+
+    monkeypatch.setattr(engine, "_watch_once", lambda: calls.append("warmup_watch"))
+    monkeypatch.setattr(engine, "_apply_once", lambda: calls.append("warmup_apply"))
+
+    class DummyThread:
+        def __init__(self, target, daemon):
+            self.target = target
+            self.daemon = daemon
+
+        def start(self):
+            calls.append("thread_start")
+
+        def is_alive(self):
+            return False
+
+        def join(self, timeout=None):
+            return None
+
+    monkeypatch.setattr("kakao_adblocker.event_engine.threading.Thread", DummyThread)
+
+    engine.start()
+
+    assert "warmup_watch" not in calls
+    assert "warmup_apply" not in calls
+    assert "thread_start" in calls
+    assert engine.state.enabled is False
+    assert engine.state.running is True
 
 
 def test_engine_default_idle_settings_meet_200ms_target():
@@ -681,6 +748,32 @@ def test_engine_skips_restore_for_recycled_hwnd():
     assert api.windows[200]["visible"] is False
 
 
+def test_engine_set_enabled_false_clears_scan_state():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    assert engine.state.kakao_pid_count == 1
+    assert engine.state.main_window_count == 1
+
+    engine.set_enabled(False)
+
+    assert engine.state.enabled is False
+    assert engine.state.kakao_pid_count == 0
+    assert engine.state.main_window_count == 0
+    with engine._data_lock:
+        assert engine._kakao_pids == set()
+        assert engine._main_window_handles == set()
+        assert engine._ad_subwindow_candidates == set()
+
+
 def test_engine_restore_failures_are_retained_for_retry():
     api = FakeAPI()
     settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
@@ -714,6 +807,71 @@ def test_engine_restore_failures_are_retained_for_retry():
     engine._restore_hidden_windows(reason="retry")
 
     assert all(identity[0] != 200 for identity in engine._hidden_windows)
+
+
+def test_engine_hide_window_uses_visibility_not_show_window_return():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    def show_window_false_but_effective(hwnd, cmd):
+        if cmd == SW_HIDE:
+            api.hide_calls.append(hwnd)
+            api.windows[hwnd]["visible"] = False
+            return False
+        if cmd == SW_SHOW:
+            api.show_calls.append(hwnd)
+            api.windows[hwnd]["visible"] = True
+            return False
+        return False
+
+    api.show_window = show_window_false_but_effective
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert 102 in api.hide_calls
+    assert api.windows[102]["visible"] is False
+    assert engine.state.hidden_windows >= 1
+
+
+def test_engine_restore_uses_visibility_not_show_window_return():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+    assert api.windows[102]["visible"] is False
+
+    def show_window_false_but_effective(hwnd, cmd):
+        if cmd == SW_HIDE:
+            api.hide_calls.append(hwnd)
+            api.windows[hwnd]["visible"] = False
+            return False
+        if cmd == SW_SHOW:
+            api.show_calls.append(hwnd)
+            api.windows[hwnd]["visible"] = True
+            return False
+        return False
+
+    api.show_window = show_window_false_but_effective
+    engine.set_enabled(False)
+
+    assert api.windows[102]["visible"] is True
+    assert engine.state.restore_failures == 0
 
 
 def test_engine_error_log_map_is_pruned_when_many_unique_errors():

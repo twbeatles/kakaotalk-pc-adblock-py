@@ -108,8 +108,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     for warning in load_warnings:
         logger.warning(warning)
     priority_warning = _pick_priority_warning(load_warnings)
-    if priority_warning:
-        engine.report_warning(priority_warning)
 
     if args.dump_tree:
         path = engine.dump_window_tree(out_dir=args.dump_dir)
@@ -126,6 +124,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         engine.start()
         engine_started = True
+        if priority_warning:
+            engine.report_warning(priority_warning)
         controller.start()
         requested_minimized = bool(args.minimized or settings.start_minimized)
         should_start_minimized = requested_minimized

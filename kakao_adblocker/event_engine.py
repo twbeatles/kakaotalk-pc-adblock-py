@@ -19,6 +19,8 @@ WindowIdentity = Tuple[int, int, str]
 MAX_ERROR_LOG_KEYS = 512
 ERROR_LOG_PRUNE_TARGET = 384
 DISABLED_LOOP_WAIT_SECONDS = 1.0
+HIDE_REASON_LEGACY = "legacy"
+HIDE_REASON_AGGRESSIVE = "aggressive"
 
 
 @dataclass
@@ -53,6 +55,7 @@ class HiddenWindowSnapshot:
     rect: Optional[Rect]
     pid: int
     class_name: str
+    hide_reason: str
 
 
 class LayoutOnlyEngine:
@@ -107,6 +110,9 @@ class LayoutOnlyEngine:
             self._state.running = True
             self._state.enabled = bool(self.settings.enabled)
             self._state.last_error = ""
+            self._state.resized_windows = 0
+            self._state.hidden_windows = 0
+            self._state.closed_windows = 0
             self._state.restore_failures = 0
             self._state.last_restore_error = ""
             enabled_on_start = self._state.enabled
@@ -155,6 +161,18 @@ class LayoutOnlyEngine:
             self._restore_hidden_windows(reason="disabled")
             self._clear_scan_state()
         self._wake_event.set()
+
+    def set_aggressive_mode(self, enabled: bool) -> None:
+        enabled_value = bool(enabled)
+        self.settings.aggressive_mode = enabled_value
+        if not enabled_value:
+            self._restore_hidden_windows(
+                reason="aggressive-disabled",
+                target_hide_reasons={HIDE_REASON_AGGRESSIVE},
+            )
+        if self._is_enabled():
+            self.force_scan()
+            self._wake_event.set()
 
     def report_warning(self, message: str) -> None:
         if not message:
@@ -329,6 +347,7 @@ class LayoutOnlyEngine:
         hidden = 0
         closed = 0
         now = time.time()
+        matched_hidden_identities: Set[WindowIdentity] = set()
         legacy_text_memo: Dict[Tuple[int, str, int], bool] = {}
         legacy_contains_memo: Dict[Tuple[int, str, int], bool] = {}
 
@@ -375,7 +394,8 @@ class LayoutOnlyEngine:
                     continue
                 child_rect = self.api.get_window_rect(child)
                 if child_rect and self._layout.should_hide_aggressive(class_name, window_text, child_rect, parent_rect):
-                    if self._hide_window(child, pid, class_name):
+                    if self._hide_window(child, pid, class_name, hide_reason=HIDE_REASON_AGGRESSIVE):
+                        matched_hidden_identities.add((child, pid, class_name))
                         hidden += 1
 
         for wnd in candidates:
@@ -390,8 +410,11 @@ class LayoutOnlyEngine:
                 memo_exact=legacy_text_memo,
                 memo_contains=legacy_contains_memo,
             ):
-                if self._hide_window(wnd, pid, class_name):
+                if self._hide_window(wnd, pid, class_name, hide_reason=HIDE_REASON_LEGACY):
+                    matched_hidden_identities.add((wnd, pid, class_name))
                     hidden += 1
+
+        self._restore_no_longer_matched_hidden_windows(matched_hidden_identities)
 
         with self._state_lock:
             self._state.resized_windows += resized
@@ -537,7 +560,7 @@ class LayoutOnlyEngine:
                 return True
         return False
 
-    def _hide_window(self, hwnd: int, pid: int, class_name: str) -> bool:
+    def _hide_window(self, hwnd: int, pid: int, class_name: str, hide_reason: str) -> bool:
         if pid <= 0 or not self.api.is_window(hwnd):
             return False
         identity = (hwnd, pid, class_name)
@@ -548,6 +571,7 @@ class LayoutOnlyEngine:
                     rect=self.api.get_window_rect(hwnd),
                     pid=pid,
                     class_name=class_name,
+                    hide_reason=hide_reason,
                 )
 
         self.api.show_window(hwnd, SW_HIDE)
@@ -573,9 +597,27 @@ class LayoutOnlyEngine:
             self._hidden_windows.pop(identity, None)
         return False
 
-    def _restore_hidden_windows(self, reason: str) -> None:
+    def _restore_no_longer_matched_hidden_windows(self, matched_identities: Set[WindowIdentity]) -> None:
         with self._cache_lock:
-            snapshots = list(self._hidden_windows.items())
+            stale_identities = {
+                identity for identity in self._hidden_windows.keys() if identity not in matched_identities
+            }
+        if stale_identities:
+            self._restore_hidden_windows(reason="stale-mismatch", target_identities=stale_identities)
+
+    def _restore_hidden_windows(
+        self,
+        reason: str,
+        target_identities: Optional[Set[WindowIdentity]] = None,
+        target_hide_reasons: Optional[Set[str]] = None,
+    ) -> None:
+        with self._cache_lock:
+            snapshots = [
+                (identity, snap)
+                for identity, snap in self._hidden_windows.items()
+                if (target_identities is None or identity in target_identities)
+                and (target_hide_reasons is None or snap.hide_reason in target_hide_reasons)
+            ]
         if not snapshots:
             return
 

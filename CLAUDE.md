@@ -36,6 +36,8 @@
   - 빈 문자열 텍스트 캐시는 짧은 TTL로 재조회해 초기 UI 구성 구간 탐지 지연 완화
   - 메인 윈도우 제목이 빈 경우 자식 시그니처(`OnlineMainView`/`LockModeView`) 기반 fallback 탐지 지원
   - 차단 OFF/엔진 종료 시 숨김·이동 창 원복
+  - aggressive hide 창은 공격 모드 OFF 시 즉시 원복 후 재스캔/재적용
+  - 숨김 창은 aggressive/legacy 시그니처에서 벗어나면 stale 상태로 남지 않고 자동 원복
   - `stop()` join timeout(2.0s) 시 상태/로그 경고 후 종료 절차 계속
   - 원복 실패 항목 스냅샷 보존으로 재시도 가능
   - `EngineState.restore_failures`, `EngineState.last_restore_error` 상태 노출
@@ -45,7 +47,7 @@
   - PID 스캔/캐시 정리 주기 스로틀 적용
   - PID 스캔 경고(psutil 실패, tasklist fallback/실패)를 상태(`last_error`)와 로그에 반영
   - 기본 설정 기준 idle->active 복귀 목표 지연 약 200ms
-  - `report_warning()`로 시작 시점 경고를 상태(`last_error`)에 반영 가능
+  - `report_warning()`로 시작 시점 경고를 상태(`last_error`)에 반영하며, 엔진 시작 이후에도 우선순위 경고 1건 유지
 - `kakao_adblocker/layout_engine.py`
   - `OnlineMainView` / `LockModeView` 리사이즈 규칙
   - 공격적 배너 휴리스틱, 짧은 ad 토큰 단어 경계 매칭
@@ -59,10 +61,12 @@
   - 트레이 비가용 시 창 닫기(X)는 숨김이 아니라 종료로 처리
   - 시작 시 `run_on_startup` 값을 레지스트리 상태로 1회 동기화
   - 상태 문자열에 마지막 오류/갱신시각 표시
+  - 상태 문자열의 `누적 숨김`/`누적 리사이즈` 라벨로 누적 카운터 의미를 명시
   - pystray/Pillow 지연 로딩 + 실패 TTL(30초) 자동 재시도
   - 트레이 콜백은 queue 디스패치(`_safe_after` -> main-thread drain)로 처리
   - 설정 저장 실패 시 토글 값 롤백(`enabled`/`run_on_startup`/`aggressive_mode`)
   - startup 토글에서 저장 실패 시 레지스트리 역롤백
+  - aggressive mode 토글은 저장 성공 후 엔진에 즉시 반영
   - `_tick_status` 스케줄링(`root.after`)도 종료 경합 예외 비전파
 - `kakao_adblocker/services.py`
   - `ProcessInspector`, `StartupManager`, `ReleaseService`

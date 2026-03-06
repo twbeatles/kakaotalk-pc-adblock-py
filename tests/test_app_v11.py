@@ -19,16 +19,19 @@ class FakeEngine:
         self.started = False
         self.stopped = False
         self.reported_warnings = []
+        self.events = []
         FakeEngine.last_instance = self
 
     def start(self):
         self.started = True
+        self.events.append("start")
 
     def stop(self):
         self.stopped = True
 
     def report_warning(self, message):
         self.reported_warnings.append(message)
+        self.events.append(f"warning:{message}")
 
 
 class FakeController:
@@ -188,6 +191,10 @@ def test_main_reports_priority_load_warning_to_engine(monkeypatch):
     engine = FakeEngine.last_instance
     assert engine is not None
     assert engine.reported_warnings == ["layout_settings_v11.json 자동 복구 실패(OSError). 기본값으로 동작합니다."]
+    assert engine.events[:2] == [
+        "start",
+        "warning:layout_settings_v11.json 자동 복구 실패(OSError). 기본값으로 동작합니다.",
+    ]
 
 
 def test_main_cleans_up_when_controller_start_fails(monkeypatch):

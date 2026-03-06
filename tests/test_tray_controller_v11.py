@@ -46,6 +46,7 @@ class FakeEngine:
         self.enabled = True
         self.stop_called = False
         self.reset_called = 0
+        self.aggressive_mode_calls = []
         self._state = type(
             "S",
             (),
@@ -77,6 +78,9 @@ class FakeEngine:
         self.reset_called += 1
         self._state.restore_failures = 0
         self._state.last_restore_error = ""
+
+    def set_aggressive_mode(self, enabled):
+        self.aggressive_mode_calls.append(bool(enabled))
 
 
 def test_tray_controller_toggle_and_status(monkeypatch):
@@ -210,6 +214,7 @@ def test_toggle_aggressive_mode_persists_setting(monkeypatch):
 
     assert settings.aggressive_mode is False
     assert saved["called"] == 1
+    assert engine.aggressive_mode_calls == [False]
 
 
 def test_toggle_blocking_rolls_back_when_save_fails(monkeypatch):
@@ -269,6 +274,7 @@ def test_toggle_aggressive_mode_rolls_back_when_save_fails(monkeypatch):
     controller.toggle_aggressive_mode()
 
     assert settings.aggressive_mode is True
+    assert engine.aggressive_mode_calls == []
 
 
 def test_sync_startup_setting_rolls_back_when_save_fails(monkeypatch):

@@ -874,6 +874,56 @@ def test_engine_restore_uses_visibility_not_show_window_return():
     assert engine.state.restore_failures == 0
 
 
+def test_engine_set_aggressive_mode_false_restores_aggressive_windows_immediately():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert api.windows[102]["visible"] is False
+    assert api.windows[200]["visible"] is False
+
+    engine.set_aggressive_mode(False)
+
+    assert settings.aggressive_mode is False
+    assert api.windows[102]["visible"] is True
+    assert api.windows[200]["visible"] is False
+    assert 102 in api.show_calls
+
+
+def test_engine_restores_stale_hidden_legacy_window_when_signature_disappears():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert api.windows[200]["visible"] is False
+
+    api.windows[201]["text"] = "Settings Panel"
+    engine.scan_once()
+    engine.apply_once()
+
+    assert api.windows[200]["visible"] is True
+    assert 200 in api.show_calls
+    assert all(identity[0] != 200 for identity in engine._hidden_windows)
+
+
 def test_engine_error_log_map_is_pruned_when_many_unique_errors():
     api = FakeAPI()
     settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)

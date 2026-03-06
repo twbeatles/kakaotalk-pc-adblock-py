@@ -39,6 +39,8 @@
   - synchronous warm-up scan/apply on engine start runs only when enabled
   - empty-string text cache uses short TTL refresh to reduce startup detection lag
   - hidden/moved windows are restored when blocking is disabled or engine stops
+  - aggressive-hide windows are restored immediately when aggressive mode is turned OFF, followed by an immediate rescan/reapply
+  - hidden windows are automatically restored when they no longer match aggressive/legacy signatures, preventing stale hides
   - stop join timeout (`2.0s`) emits state/log warning and proceeds with shutdown flow
   - restore failures keep snapshots for retry on next restore cycle
   - `EngineState` includes `restore_failures` / `last_restore_error`
@@ -47,7 +49,7 @@
   - process-id scan and cache cleanup are interval-throttled for idle CPU savings
   - process scan warnings (psutil failure, tasklist fallback/failure) are propagated to status/log (`last_error`)
   - default idle->active detection target is <= 200ms
-  - `report_warning()` allows startup warning propagation to tray status context
+  - `report_warning()` allows startup warning propagation to tray status context, and the prioritized startup warning is applied after engine start so it remains visible
 - `layout_engine.py`
   - Main/lock view resize formulas
   - Aggressive bottom-banner heuristics
@@ -62,7 +64,9 @@
   - startup setting is synchronized from registry on app start
   - startup toggle rolls registry back on settings-save failure
   - setting save failures roll back values (`enabled`, `run_on_startup`, `aggressive_mode`)
+  - aggressive mode toggle is pushed into the engine immediately after a successful save
   - status text includes last error and last tick context
+  - status text labels cumulative counters explicitly (`누적 숨김`, `누적 리사이즈`)
   - status text includes restore failure count/context when present
   - pystray/Pillow are loaded lazily and retried after TTL (30s) when import fails
   - tray callbacks are queued and drained on Tk main thread
@@ -100,6 +104,7 @@
 - `kakaotalk_adblock.spec` resolves entry script and data files from project-root absolute paths for stable `pyinstaller` invocation.
 - `kakaotalk_adblock.spec` explicitly includes runtime modules (`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`) in `hiddenimports`.
 - `kakaotalk_adblock.spec` also includes `collect_submodules("pystray")` and `collect_submodules("PIL")` to avoid onefile runtime import misses.
+- recent startup-warning / stale-hide recovery changes are stdlib-only and do not require extra hidden imports.
 
 ## Legacy Archive
 

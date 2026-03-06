@@ -42,6 +42,7 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - `layout_settings_v11.json`, `layout_rules_v11.json` 파손(파싱 실패/최상위 타입 오류) 시 `*.broken-YYYYMMDD-HHMMSS` 백업을 생성하고, 기본값 JSON으로 자동 복구(self-heal)합니다.
 - `*.broken-*` 백업은 로드 시 자동 정리 정책(30일 초과 삭제 + 최신 10개 유지)을 적용해 누적을 제어합니다.
 - 시작 시 다중 경고가 존재하면 상태 문자열(`last_error`)에는 우선순위 1건(`복구 실패 > 자동 복구 > 기타`)만 노출합니다.
+- 시작 경고 상태 반영은 엔진 시작 이후 적용되어, 우선순위 경고 1건이 실제 상태 문자열에도 유지됩니다.
 - `layout_settings_v11.json`, `layout_rules_v11.json` 저장은 원자적 교체(`os.replace`) 방식으로 처리해 파손 가능성을 낮췄습니다.
 - rules 문자열(`main_window_titles`, `aggressive_ad_tokens`, `chrome_legacy_title_contains`)에 인코딩 이상 징후(mojibake/`�`)가 있으면 시작 시 경고를 기록합니다.
 - 엔진 내부 캐시/숨김 스냅샷 키를 `WindowIdentity(hwnd,pid,class)`로 강화해 HWND 재사용 시 오동작 가능성을 낮췄습니다.
@@ -51,6 +52,9 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 상태 갱신 타이머(`_tick_status`)도 종료 경합에서 스케줄링 실패 예외를 전파하지 않습니다.
 - 엔진 시작 시 동기 warm-up(scan+apply 1회)을 먼저 수행해 초기 광고 깜빡임을 줄였습니다.
 - 빈 텍스트 캐시는 짧은 TTL로 빠르게 재조회해 초기 UI 구성 구간의 탐지 지연을 줄였습니다.
+- 공격 모드를 끄면 aggressive hide로 숨긴 창은 즉시 복구되고, 즉시 재스캔/재적용이 수행됩니다.
+- 한 번 숨긴 창도 이후 aggressive/legacy 시그니처에서 벗어나면 자동 복구되어 stale hide가 누적되지 않습니다.
+- 상태 문자열의 `숨김`/`리사이즈` 수치는 누적값이며, UI 라벨도 `누적 숨김`/`누적 리사이즈`로 명시됩니다.
 
 ## 실행
 

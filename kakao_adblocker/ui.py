@@ -184,7 +184,7 @@ class TrayController:
             tick_text = datetime.fromtimestamp(state.last_tick).strftime("%H:%M:%S")
         base = (
             f"상태: {mode} | PID {state.kakao_pid_count} | 메인윈도우 {state.main_window_count} | "
-            f"숨김 {state.hidden_windows} | 리사이즈 {state.resized_windows}"
+            f"누적 숨김 {state.hidden_windows} | 누적 리사이즈 {state.resized_windows}"
         )
         restore_failures = int(getattr(state, "restore_failures", 0) or 0)
         if restore_failures > 0:
@@ -227,6 +227,9 @@ class TrayController:
         target = not self.settings.aggressive_mode
         if not self._save_setting_attr("aggressive_mode", target):
             return
+        apply_change = getattr(self.engine, "set_aggressive_mode", None)
+        if callable(apply_change):
+            apply_change(target)
         self.logger.info("Aggressive mode toggled: %s", "ON" if self.settings.aggressive_mode else "OFF")
         self._update_status(force=True)
 

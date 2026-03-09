@@ -16,6 +16,7 @@
 - `--dump-tree` runs in a lightweight path without UI/tray module import
 - `--self-check` runs diagnostics only (no UI/tray/engine start)
 - package `kakao_adblocker` exports are lazy-resolved via `__getattr__`
+- static analysis baseline is fixed by root `pyrightconfig.json`; `requirements-dev.txt` includes `pyright`
 
 ## Architecture
 
@@ -54,6 +55,9 @@
   - Main/lock view resize formulas
   - Aggressive bottom-banner heuristics
   - short ASCII ad tokens are word-boundary matched to reduce false positives
+- `protocols.py`
+  - structural typing boundaries for Win32 API / joinable thread / UI root / engine state
+  - keeps runtime module contracts compatible with test doubles
 - `ui.py`
   - `TrayController` (status, toggle, aggressive mode, startup, restore-failure reset, logs, release page, exit)
   - startup notice is skipped when launching minimized
@@ -103,6 +107,7 @@
 
 - `kakaotalk_adblock.spec` resolves entry script and data files from project-root absolute paths for stable `pyinstaller` invocation.
 - `kakaotalk_adblock.spec` explicitly includes runtime modules (`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`) in `hiddenimports`.
+- `kakaotalk_adblock.spec` also includes `kakao_adblocker.protocols` to keep typed runtime imports explicit in onefile packaging.
 - `kakaotalk_adblock.spec` also includes `collect_submodules("pystray")` and `collect_submodules("PIL")` to avoid onefile runtime import misses.
 - recent startup-warning / stale-hide recovery changes are stdlib-only and do not require extra hidden imports.
 
@@ -116,3 +121,4 @@ Legacy code/assets were moved under `legacy/`:
 - `legacy/configs/*`
 - `legacy/scripts/*`
 - `legacy/카카오톡 광고제거 v10.0.py`
+- archived legacy files keep per-file `pyright` directives to preserve behavior while maintaining repo-wide type-check pass

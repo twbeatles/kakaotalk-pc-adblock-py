@@ -8,23 +8,21 @@ import sys
 import threading
 import webbrowser
 from pathlib import Path
-from typing import Set, Tuple
+from typing import Any, Set, Tuple
 
 try:
-    import psutil
-
-    PSUTIL_AVAILABLE = True
+    import psutil as _psutil
 except Exception:
-    psutil = None
-    PSUTIL_AVAILABLE = False
+    _psutil = None
+PSUTIL_AVAILABLE = _psutil is not None
+psutil: Any = _psutil
 
 try:
-    import winreg
-
-    WINREG_AVAILABLE = True
+    import winreg as _winreg
 except Exception:
-    winreg = None
-    WINREG_AVAILABLE = False
+    _winreg = None
+WINREG_AVAILABLE = _winreg is not None
+winreg: Any = _winreg
 
 
 class ProcessInspector:
@@ -59,9 +57,10 @@ class ProcessInspector:
 
         pids: Set[int] = set()
         warning_messages: list[str] = []
-        if PSUTIL_AVAILABLE:
+        psutil_mod: Any = psutil
+        if psutil_mod is not None:
             try:
-                proc_iter = psutil.process_iter(["pid", "name"])
+                proc_iter = psutil_mod.process_iter(["pid", "name"])
             except Exception as exc:
                 proc_iter = None
                 warning_messages.append(f"psutil init failed ({exc.__class__.__name__})")
@@ -133,24 +132,36 @@ class StartupManager:
 
     @staticmethod
     def is_enabled() -> bool:
-        if not WINREG_AVAILABLE:
+        winreg_mod: Any = winreg
+        if winreg_mod is None:
             return False
         try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, StartupManager.KEY, 0, winreg.KEY_READ)
+            key = winreg_mod.OpenKey(
+                winreg_mod.HKEY_CURRENT_USER,
+                StartupManager.KEY,
+                0,
+                winreg_mod.KEY_READ,
+            )
             try:
-                winreg.QueryValueEx(key, StartupManager.NAME)
+                winreg_mod.QueryValueEx(key, StartupManager.NAME)
                 return True
             finally:
-                winreg.CloseKey(key)
+                winreg_mod.CloseKey(key)
         except Exception:
             return False
 
     @staticmethod
     def set_enabled(enable: bool) -> bool:
-        if not WINREG_AVAILABLE:
+        winreg_mod: Any = winreg
+        if winreg_mod is None:
             return False
         try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, StartupManager.KEY, 0, winreg.KEY_SET_VALUE)
+            key = winreg_mod.OpenKey(
+                winreg_mod.HKEY_CURRENT_USER,
+                StartupManager.KEY,
+                0,
+                winreg_mod.KEY_SET_VALUE,
+            )
             try:
                 if enable:
                     if getattr(sys, "frozen", False):
@@ -158,36 +169,47 @@ class StartupManager:
                     else:
                         script = Path(sys.argv[0]).resolve()
                         cmd = f'"{sys.executable}" "{script}" --minimized'
-                    winreg.SetValueEx(key, StartupManager.NAME, 0, winreg.REG_SZ, cmd)
+                    winreg_mod.SetValueEx(key, StartupManager.NAME, 0, winreg_mod.REG_SZ, cmd)
                 else:
                     try:
-                        winreg.DeleteValue(key, StartupManager.NAME)
+                        winreg_mod.DeleteValue(key, StartupManager.NAME)
                     except FileNotFoundError:
                         pass
             finally:
-                winreg.CloseKey(key)
+                winreg_mod.CloseKey(key)
             return True
         except Exception:
             return False
 
     @staticmethod
     def probe_access() -> Tuple[bool, str]:
-        if not WINREG_AVAILABLE:
+        winreg_mod: Any = winreg
+        if winreg_mod is None:
             return False, "winreg unavailable"
         try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, StartupManager.KEY, 0, winreg.KEY_READ)
+            key = winreg_mod.OpenKey(
+                winreg_mod.HKEY_CURRENT_USER,
+                StartupManager.KEY,
+                0,
+                winreg_mod.KEY_READ,
+            )
             try:
                 pass
             finally:
-                winreg.CloseKey(key)
+                winreg_mod.CloseKey(key)
         except Exception as exc:
             return False, f"read failed ({exc.__class__.__name__}: {exc})"
         try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, StartupManager.KEY, 0, winreg.KEY_SET_VALUE)
+            key = winreg_mod.OpenKey(
+                winreg_mod.HKEY_CURRENT_USER,
+                StartupManager.KEY,
+                0,
+                winreg_mod.KEY_SET_VALUE,
+            )
             try:
                 return True, "Run 레지스트리 읽기/쓰기 가능"
             finally:
-                winreg.CloseKey(key)
+                winreg_mod.CloseKey(key)
         except Exception as exc:
             return False, f"write failed ({exc.__class__.__name__}: {exc})"
 

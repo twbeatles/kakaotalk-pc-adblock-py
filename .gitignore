@@ -8,6 +8,7 @@ window_inspection.log
 adblock.log
 
 .pytest_cache/
+.pyright/
 .mypy_cache/
 .ruff_cache/
 .tox/

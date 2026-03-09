@@ -8,15 +8,15 @@ import time
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox, ttk
-from typing import Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 from .config import APP_NAME, APPDATA_DIR, LayoutSettingsV11, SETTINGS_FILE
-from .event_engine import LayoutOnlyEngine
+from .protocols import EngineLike, RootLike, StatusVarLike
 from .services import ReleaseService, ShellService, StartupManager
 
-pystray = None
-Image = None
-ImageDraw = None
+pystray: Any = None
+Image: Any = None
+ImageDraw: Any = None
 PYSTRAY_AVAILABLE = False
 _LAST_TRAY_IMPORT_FAILURE_AT: Optional[float] = None
 _TRAY_IMPORT_RETRY_TTL_SECONDS = 30.0
@@ -43,11 +43,19 @@ def _load_tray_modules() -> bool:
         return False
 
 
+def _require_tray_modules() -> tuple[Any, Any, Any]:
+    if not _load_tray_modules():
+        raise RuntimeError("tray modules unavailable")
+    if pystray is None or Image is None or ImageDraw is None:
+        raise RuntimeError("tray modules unresolved")
+    return pystray, Image, ImageDraw
+
+
 class TrayController:
     def __init__(
         self,
-        root: tk.Tk,
-        engine: LayoutOnlyEngine,
+        root: RootLike,
+        engine: EngineLike,
         settings: LayoutSettingsV11,
         logger: logging.Logger,
     ) -> None:
@@ -55,7 +63,7 @@ class TrayController:
         self.engine = engine
         self.settings = settings
         self.logger = logger.getChild("TrayController")
-        self.icon = None
+        self.icon: Any = None
         self._tray_running = False
         self._tray_available = False
         self._tray_thread: Optional[threading.Thread] = None
@@ -67,25 +75,40 @@ class TrayController:
         self._ui_queue: "queue.Queue[Callable[[], None]]" = queue.Queue()
         self._ui_queue_running = False
         self._ui_queue_batch_size = 32
+        self._status_label: Any = None
         try:
-            self._status_var = tk.StringVar(master=self.root, value="상태: 초기화")
+            if isinstance(self.root, tk.Misc):
+                self._status_var: StatusVarLike = tk.StringVar(master=self.root, value="상태: 초기화")
+            else:
+                self._status_var = _ValueHolder("상태: 초기화")
         except Exception:
             self._status_var = _ValueHolder("상태: 초기화")
         self._build_window()
 
     def _build_window(self) -> None:
-        if not hasattr(self.root, "title"):
+        title = getattr(self.root, "title", None)
+        if not callable(title):
             return
-        self.root.title(APP_NAME)
-        self.root.geometry("460x260")
-        self.root.resizable(False, False)
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close_requested)
+        title(APP_NAME)
+        geometry = getattr(self.root, "geometry", None)
+        if callable(geometry):
+            geometry("460x260")
+        resizable = getattr(self.root, "resizable", None)
+        if callable(resizable):
+            resizable(False, False)
+        protocol = getattr(self.root, "protocol", None)
+        if callable(protocol):
+            protocol("WM_DELETE_WINDOW", self._on_close_requested)
 
-        wrapper = ttk.Frame(self.root, padding=16)
+        wrapper = ttk.Frame(cast(Any, self.root), padding=16)
         wrapper.pack(fill="both", expand=True)
 
         ttk.Label(wrapper, text="KakaoTalk Layout AdBlocker v11", font=("Malgun Gothic", 12, "bold")).pack(anchor="w")
-        ttk.Label(wrapper, textvariable=self._status_var).pack(anchor="w", pady=(10, 8))
+        if isinstance(self._status_var, tk.Variable):
+            self._status_label = ttk.Label(wrapper, textvariable=self._status_var)
+        else:
+            self._status_label = ttk.Label(wrapper, text=self._status_var.get())
+        self._status_label.pack(anchor="w", pady=(10, 8))
 
         btn_row = ttk.Frame(wrapper)
         btn_row.pack(fill="x", pady=6)
@@ -162,6 +185,11 @@ class TrayController:
         if not force and text == self._last_status_text:
             return
         self._status_var.set(text)
+        if self._status_label is not None and not isinstance(self._status_var, tk.Variable):
+            try:
+                self._status_label.configure(text=text)
+            except Exception:
+                pass
         self._last_status_text = text
 
     def _save_setting_attr(self, attr_name: str, new_value) -> bool:
@@ -261,10 +289,11 @@ class TrayController:
         self.shutdown()
 
     def _configure_close_behavior(self) -> None:
-        if not hasattr(self.root, "protocol"):
+        protocol = getattr(self.root, "protocol", None)
+        if not callable(protocol):
             return
         try:
-            self.root.protocol("WM_DELETE_WINDOW", self._on_close_requested)
+            protocol("WM_DELETE_WINDOW", self._on_close_requested)
         except Exception:
             self.logger.debug("Close behavior update skipped")
 
@@ -279,25 +308,27 @@ class TrayController:
             pass
 
     def _setup_tray(self) -> None:
-        if not _load_tray_modules():
+        try:
+            pystray_mod, _image_mod, _draw_mod = _require_tray_modules()
+        except RuntimeError:
             return
         self._tray_ready_event.clear()
         self._tray_start_error = ""
         self._tray_stopping = False
-        self.icon = pystray.Icon(
+        self.icon = pystray_mod.Icon(
             "KakaoTalkLayoutAdBlocker",
             self._create_icon(),
             APP_NAME,
-            pystray.Menu(
-                pystray.MenuItem(lambda _item: self.status_text(), None, enabled=False),
-                pystray.MenuItem(lambda _item: "차단 끄기" if self.settings.enabled else "차단 켜기", self._menu_toggle_blocking),
-                pystray.MenuItem("공격 모드", self._menu_toggle_aggressive_mode, checked=lambda _item: self.settings.aggressive_mode),
-                pystray.MenuItem("시작프로그램 등록", self._menu_toggle_startup, checked=lambda _item: StartupManager.is_enabled()),
-                pystray.MenuItem("복원 실패 초기화", self._menu_reset_restore_failures),
-                pystray.MenuItem("창 열기", self._menu_show_window),
-                pystray.MenuItem("로그 폴더 열기", self._menu_open_logs),
-                pystray.MenuItem("GitHub 리포 열기", self._menu_open_release),
-                pystray.MenuItem("종료", self._menu_exit),
+            pystray_mod.Menu(
+                pystray_mod.MenuItem(lambda _item: self.status_text(), None, enabled=False),
+                pystray_mod.MenuItem(lambda _item: "차단 끄기" if self.settings.enabled else "차단 켜기", self._menu_toggle_blocking),
+                pystray_mod.MenuItem("공격 모드", self._menu_toggle_aggressive_mode, checked=lambda _item: self.settings.aggressive_mode),
+                pystray_mod.MenuItem("시작프로그램 등록", self._menu_toggle_startup, checked=lambda _item: StartupManager.is_enabled()),
+                pystray_mod.MenuItem("복원 실패 초기화", self._menu_reset_restore_failures),
+                pystray_mod.MenuItem("창 열기", self._menu_show_window),
+                pystray_mod.MenuItem("로그 폴더 열기", self._menu_open_logs),
+                pystray_mod.MenuItem("GitHub 리포 열기", self._menu_open_release),
+                pystray_mod.MenuItem("종료", self._menu_exit),
             ),
         )
 
@@ -358,10 +389,12 @@ class TrayController:
         self._tray_ready_event.clear()
 
     def _create_icon(self):
-        if not _load_tray_modules():
+        try:
+            _pystray_mod, image_mod, image_draw_mod = _require_tray_modules()
+        except RuntimeError:
             return None
-        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
+        img = image_mod.new("RGBA", (64, 64), (0, 0, 0, 0))
+        draw = image_draw_mod.Draw(img)
         draw.polygon(
             [(32, 4), (60, 14), (60, 32), (32, 60), (4, 32), (4, 14)],
             fill=(254, 229, 0, 255),
@@ -433,10 +466,13 @@ class TrayController:
             return
         self._startup_notice_shown = True
         try:
+            kwargs: dict[str, Any] = {}
+            if isinstance(self.root, tk.Misc):
+                kwargs["parent"] = self.root
             messagebox.showinfo(
                 "KakaoTalk Layout AdBlocker",
                 "카카오톡 광고 레이아웃 차단이 활성화되었습니다.",
-                parent=self.root if hasattr(self.root, "winfo_exists") else None,
+                **kwargs,
             )
         except Exception:
             self.logger.debug("Startup notice popup skipped")

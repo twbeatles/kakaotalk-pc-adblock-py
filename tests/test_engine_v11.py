@@ -64,16 +64,16 @@ class FakeAPI:
         self.visible_calls += 1
         return self.windows[hwnd]["visible"]
 
-    def show_window(self, hwnd, _cmd):
-        if _cmd == SW_HIDE:
+    def show_window(self, hwnd: int, cmd: int) -> bool:
+        if cmd == SW_HIDE:
             self.hide_calls.append(hwnd)
             self.windows[hwnd]["visible"] = False
-        elif _cmd == SW_SHOW:
+        elif cmd == SW_SHOW:
             self.show_calls.append(hwnd)
             self.windows[hwnd]["visible"] = True
         return True
 
-    def set_window_pos(self, hwnd, x, y, width, height, _flags):
+    def set_window_pos(self, hwnd: int, x: int, y: int, width: int, height: int, flags: int) -> bool:
         self.set_pos_calls.append((hwnd, x, y, width, height))
         return True
 
@@ -83,6 +83,9 @@ class FakeAPI:
     def send_message(self, hwnd, msg, wparam=0, lparam=0):
         self.send_calls.append((hwnd, msg, wparam, lparam))
         return 1
+
+    def get_last_error(self) -> int:
+        return 0
 
 
 def test_engine_applies_layout_only_to_kakao_pid():
@@ -791,10 +794,10 @@ def test_engine_restore_failures_are_retained_for_retry():
 
     original_set_window_pos = api.set_window_pos
 
-    def failing_restore(hwnd, x, y, width, height, _flags):
+    def failing_restore(hwnd, x, y, width, height, flags):
         if hwnd == 200 and x >= 0:
             return False
-        return original_set_window_pos(hwnd, x, y, width, height, _flags)
+        return original_set_window_pos(hwnd, x, y, width, height, flags)
 
     api.set_window_pos = failing_restore
     engine.set_enabled(False)

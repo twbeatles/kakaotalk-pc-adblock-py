@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import ctypes
-import ctypes.wintypes
 import os
-from typing import Callable, Optional, Tuple
+from ctypes import wintypes
+from typing import Any, Callable, Optional, Tuple
 
 SW_HIDE = 0
 SW_SHOW = 5
@@ -17,6 +17,8 @@ WM_CLOSE = 0x0010
 class Win32API:
     def __init__(self) -> None:
         self.available = os.name == "nt"
+        self.user32: Any = None
+        self.WNDENUMPROC: Any = None
         self._callback_refs = []
         if not self.available:
             return
@@ -24,20 +26,20 @@ class Win32API:
         self.user32 = ctypes.WinDLL("user32", use_last_error=True)
         self.WNDENUMPROC = ctypes.WINFUNCTYPE(
             ctypes.c_bool,
-            ctypes.wintypes.HWND,
-            ctypes.wintypes.LPARAM,
+            wintypes.HWND,
+            wintypes.LPARAM,
         )
         self._bind_signatures()
 
     def _bind_signatures(self) -> None:
-        hwnd_t = ctypes.wintypes.HWND
-        lparam_t = ctypes.wintypes.LPARAM
-        bool_t = ctypes.wintypes.BOOL
-        uint_t = ctypes.wintypes.UINT
-        dword_t = ctypes.wintypes.DWORD
-        lresult_t = getattr(ctypes.wintypes, "LRESULT", ctypes.c_long)
-        rect_ptr_t = ctypes.POINTER(ctypes.wintypes.RECT)
-        dword_ptr_t = ctypes.POINTER(ctypes.wintypes.DWORD)
+        hwnd_t = wintypes.HWND
+        lparam_t = wintypes.LPARAM
+        bool_t = wintypes.BOOL
+        uint_t = wintypes.UINT
+        dword_t = wintypes.DWORD
+        lresult_t = getattr(wintypes, "LRESULT", ctypes.c_long)
+        rect_ptr_t = ctypes.POINTER(wintypes.RECT)
+        dword_ptr_t = ctypes.POINTER(wintypes.DWORD)
 
         self.user32.EnumWindows.argtypes = [self.WNDENUMPROC, lparam_t]
         self.user32.EnumWindows.restype = bool_t
@@ -48,10 +50,10 @@ class Win32API:
         self.user32.GetWindowThreadProcessId.argtypes = [hwnd_t, dword_ptr_t]
         self.user32.GetWindowThreadProcessId.restype = dword_t
 
-        self.user32.GetClassNameW.argtypes = [hwnd_t, ctypes.wintypes.LPWSTR, ctypes.c_int]
+        self.user32.GetClassNameW.argtypes = [hwnd_t, wintypes.LPWSTR, ctypes.c_int]
         self.user32.GetClassNameW.restype = ctypes.c_int
 
-        self.user32.GetWindowTextW.argtypes = [hwnd_t, ctypes.wintypes.LPWSTR, ctypes.c_int]
+        self.user32.GetWindowTextW.argtypes = [hwnd_t, wintypes.LPWSTR, ctypes.c_int]
         self.user32.GetWindowTextW.restype = ctypes.c_int
 
         self.user32.GetParent.argtypes = [hwnd_t]
@@ -86,8 +88,8 @@ class Win32API:
         self.user32.SendMessageW.argtypes = [
             hwnd_t,
             uint_t,
-            ctypes.wintypes.WPARAM,
-            ctypes.wintypes.LPARAM,
+            wintypes.WPARAM,
+            wintypes.LPARAM,
         ]
         self.user32.SendMessageW.restype = lresult_t
 
@@ -131,7 +133,7 @@ class Win32API:
     def get_window_thread_process_id(self, hwnd: int) -> int:
         if not self.available:
             return 0
-        pid = ctypes.wintypes.DWORD(0)
+        pid = wintypes.DWORD(0)
         self.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         return int(pid.value)
 
@@ -157,7 +159,7 @@ class Win32API:
     def get_window_rect(self, hwnd: int) -> Optional[Tuple[int, int, int, int]]:
         if not self.available:
             return None
-        rect = ctypes.wintypes.RECT()
+        rect = wintypes.RECT()
         ok = self.user32.GetWindowRect(hwnd, ctypes.byref(rect))
         if not ok:
             return None
@@ -166,7 +168,7 @@ class Win32API:
     def get_client_rect(self, hwnd: int) -> Optional[Tuple[int, int, int, int]]:
         if not self.available:
             return None
-        rect = ctypes.wintypes.RECT()
+        rect = wintypes.RECT()
         ok = self.user32.GetClientRect(hwnd, ctypes.byref(rect))
         if not ok:
             return None

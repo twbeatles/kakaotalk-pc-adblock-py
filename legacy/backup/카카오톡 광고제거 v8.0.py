@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
+# pyright: reportOptionalMemberAccess=false, reportPossiblyUnboundVariable=false, reportArgumentType=false, reportAttributeAccessIssue=false, reportSelfClsParameterName=false, reportOptionalCall=false
 """
 카카오톡 광고 차단기 Pro v8.0
 =========================================
@@ -12,7 +13,8 @@
 import os
 import sys
 import ctypes
-import ctypes.wintypes
+import ctypes
+from ctypes import wintypes
 import json
 import threading
 import time
@@ -276,16 +278,16 @@ class AdLayoutHider:
     def _resize_main_view(self, hwnd, parent_hwnd):
         try:
             # Parent Client Area
-            pr = ctypes.wintypes.RECT()
+            pr = wintypes.RECT()
             self.user32.GetClientRect(parent_hwnd, ctypes.byref(pr))
             parent_h = pr.bottom - pr.top
 
             # Child Window Rect
-            cr = ctypes.wintypes.RECT()
+            cr = wintypes.RECT()
             self.user32.GetWindowRect(hwnd, ctypes.byref(cr))
             
             # Convert Child Top-Left to Parent Client Coords
-            pt = ctypes.wintypes.POINT(cr.left, cr.top)
+            pt = wintypes.POINT(cr.left, cr.top)
             self.user32.ScreenToClient(parent_hwnd, ctypes.byref(pt))
             
             # Target Height = Parent Height - Child's Y Position
@@ -716,3 +718,5 @@ if __name__ == "__main__":
         root.withdraw()
     
     root.mainloop()
+
+

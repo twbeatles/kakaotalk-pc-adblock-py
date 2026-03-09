@@ -11,11 +11,10 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from .config import APPDATA_DIR, LayoutRulesV11, LayoutSettingsV11
 from .layout_engine import LayoutEngine
+from .protocols import JoinableThreadLike, Rect, Win32ApiLike, WindowIdentity
 from .services import ProcessInspector
 from .win32_api import SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, WM_CLOSE, Win32API
 
-Rect = Tuple[int, int, int, int]
-WindowIdentity = Tuple[int, int, str]
 MAX_ERROR_LOG_KEYS = 512
 ERROR_LOG_PRUNE_TARGET = 384
 DISABLED_LOOP_WAIT_SECONDS = 1.0
@@ -64,7 +63,7 @@ class LayoutOnlyEngine:
         logger: logging.Logger,
         settings: LayoutSettingsV11,
         rules: LayoutRulesV11,
-        api: Optional[Win32API] = None,
+        api: Optional[Win32ApiLike] = None,
         process_ids_provider: Optional[Callable[[str], Set[int]]] = None,
     ) -> None:
         self.logger = logger.getChild("LayoutOnlyEngine")
@@ -81,7 +80,7 @@ class LayoutOnlyEngine:
         self._error_log_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
-        self._watch_thread: Optional[threading.Thread] = None
+        self._watch_thread: Optional[JoinableThreadLike] = None
 
         self._main_window_class_set = frozenset(self.rules.main_window_classes)
         self._ad_candidate_class_set = frozenset(self.rules.ad_candidate_classes)
@@ -792,11 +791,8 @@ class LayoutOnlyEngine:
             self._state.last_tick = now
 
     def _api_last_error(self) -> int:
-        getter = getattr(self.api, "get_last_error", None)
-        if not callable(getter):
-            return 0
         try:
-            return int(getter())
+            return int(self.api.get_last_error())
         except Exception:
             return 0
 

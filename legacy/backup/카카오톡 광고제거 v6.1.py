@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
+# pyright: reportOptionalMemberAccess=false, reportPossiblyUnboundVariable=false, reportArgumentType=false, reportAttributeAccessIssue=false, reportSelfClsParameterName=false, reportOptionalCall=false
 """
 카카오톡 광고 차단기 Pro v6.1 (Simplified & Fixed)
 ==================================================
@@ -10,7 +11,8 @@
 import os
 import sys
 import ctypes
-import ctypes.wintypes
+import ctypes
+from ctypes import wintypes
 import json
 import threading
 import time
@@ -222,7 +224,7 @@ class WinAPI:
         self.user32.IsWindowVisible.argtypes = [ctypes.c_void_p]
         self.user32.IsWindowVisible.restype = ctypes.c_bool
         
-        self.user32.GetClientRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.wintypes.RECT)]
+        self.user32.GetClientRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.RECT)]
         self.user32.GetClientRect.restype = ctypes.c_bool
         
         self.user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, 
@@ -268,7 +270,7 @@ class WinAPI:
     def get_client_size(self, hwnd):
         if not self.available or not hwnd:
             return (0, 0)
-        rect = ctypes.wintypes.RECT()
+        rect = wintypes.RECT()
         if self.user32.GetClientRect(hwnd, ctypes.byref(rect)):
             return (rect.right - rect.left, rect.bottom - rect.top)
         return (0, 0)
@@ -1050,3 +1052,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

@@ -12,6 +12,7 @@
 - 실행: `kakaotalk_layout_adblock_v11.py`
 - 기존 `카카오톡 광고제거 v10.0.py`는 루트에서 제거되었고, `legacy/카카오톡 광고제거 v10.0.py`에서 사용중단 안내만 출력
 - 패키지 `kakao_adblocker`는 lazy export(`__getattr__`)를 사용해 초기 import 비용을 줄임
+- 정적 분석 기준선은 루트 `pyrightconfig.json`으로 고정되며 `requirements-dev.txt`에 `pyright`가 포함됨
 
 ## 핵심 모듈
 
@@ -51,6 +52,9 @@
 - `kakao_adblocker/layout_engine.py`
   - `OnlineMainView` / `LockModeView` 리사이즈 규칙
   - 공격적 배너 휴리스틱, 짧은 ad 토큰 단어 경계 매칭
+- `kakao_adblocker/protocols.py`
+  - Win32 API/Joinable Thread/UI Root/Engine 상태에 대한 구조적 타입 프로토콜 정의
+  - 테스트 더블(`tests/*`)과 런타임 모듈의 타입 경계를 분리
 - `kakao_adblocker/ui.py`
   - `TrayController`
   - 트레이 메뉴: 상태/OnOff/공격 모드/시작프로그램/복원실패초기화/창 열기/로그/릴리스/종료
@@ -79,6 +83,7 @@
 ## 빌드 메모
 
 - `kakaotalk_adblock.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`)을 `hiddenimports`로 명시하고 `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 누락을 방지
+- 타입 경계 모듈 `kakao_adblocker.protocols`도 `hiddenimports`에 포함되어 onefile 모듈 누락 가능성을 줄임
 
 ## 동작 규칙
 
@@ -104,3 +109,4 @@
 - 구버전 자산은 `legacy/`로 이동됨
 - 원본 모놀리식: `legacy/kakao_adblocker/legacy.py`
 - deprecated 엔트리포인트: `legacy/카카오톡 광고제거 v10.0.py`
+- 레거시 스크립트는 동작 보존을 위해 파일 상단 `pyright` 지시문으로 타입 진단 정책을 분리 관리

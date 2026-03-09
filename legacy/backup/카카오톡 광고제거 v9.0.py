@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
+# pyright: reportOptionalMemberAccess=false, reportPossiblyUnboundVariable=false, reportArgumentType=false, reportAttributeAccessIssue=false, reportSelfClsParameterName=false, reportOptionalCall=false
 """
 카카오톡 광고 차단기 Pro v9.0 (Refactored Architecture)
 =======================================================
@@ -14,7 +15,8 @@
 import os
 import sys
 import ctypes
-import ctypes.wintypes
+import ctypes
+from ctypes import wintypes
 import json
 import threading
 import time
@@ -388,19 +390,19 @@ class User32:
         return bool(User32.lib.SetWindowPos(hwnd, 0, x, y, w, h, flags))
     
     @staticmethod
-    def get_client_rect(hwnd: int) -> Optional[ctypes.wintypes.RECT]:
+    def get_client_rect(hwnd: int) -> Optional[wintypes.RECT]:
         if not User32.lib:
             return None
-        rect = ctypes.wintypes.RECT()
+        rect = wintypes.RECT()
         if User32.lib.GetClientRect(hwnd, ctypes.byref(rect)):
             return rect
         return None
     
     @staticmethod
-    def get_window_rect(hwnd: int) -> Optional[ctypes.wintypes.RECT]:
+    def get_window_rect(hwnd: int) -> Optional[wintypes.RECT]:
         if not User32.lib:
             return None
-        rect = ctypes.wintypes.RECT()
+        rect = wintypes.RECT()
         if User32.lib.GetWindowRect(hwnd, ctypes.byref(rect)):
             return rect
         return None
@@ -409,7 +411,7 @@ class User32:
     def screen_to_client(hwnd: int, x: int, y: int) -> tuple:
         if not User32.lib:
             return (0, 0)
-        pt = ctypes.wintypes.POINT(x, y)
+        pt = wintypes.POINT(x, y)
         User32.lib.ScreenToClient(hwnd, ctypes.byref(pt))
         return (pt.x, pt.y)
 
@@ -1163,3 +1165,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

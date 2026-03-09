@@ -1,4 +1,5 @@
-﻿import ctypes
+import ctypes
+from ctypes import wintypes
 
 from kakao_adblocker.win32_api import Win32API
 
@@ -34,11 +35,11 @@ def test_bind_signatures_sets_argtypes_and_restypes():
 
     api._bind_signatures()
 
-    assert api.user32.EnumWindows.argtypes == [api.WNDENUMPROC, ctypes.wintypes.LPARAM]
-    assert api.user32.EnumChildWindows.argtypes == [ctypes.wintypes.HWND, api.WNDENUMPROC, ctypes.wintypes.LPARAM]
+    assert api.user32.EnumWindows.argtypes == [api.WNDENUMPROC, wintypes.LPARAM]
+    assert api.user32.EnumChildWindows.argtypes == [wintypes.HWND, api.WNDENUMPROC, wintypes.LPARAM]
     assert api.user32.GetClassNameW.restype == ctypes.c_int
     assert api.user32.GetWindowTextW.restype == ctypes.c_int
-    assert api.user32.SetWindowPos.restype == ctypes.wintypes.BOOL
+    assert api.user32.SetWindowPos.restype == wintypes.BOOL
 
 
 def test_get_last_error_returns_zero_when_unavailable():

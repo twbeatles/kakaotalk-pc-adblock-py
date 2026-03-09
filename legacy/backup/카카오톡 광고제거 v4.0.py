@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
+# pyright: reportOptionalMemberAccess=false, reportPossiblyUnboundVariable=false, reportArgumentType=false, reportAttributeAccessIssue=false, reportSelfClsParameterName=false, reportOptionalCall=false
 """
 카카오톡 광고 차단기 Pro v5.0 (Refactored)
 =====================================
@@ -11,6 +12,7 @@
 import os
 import sys
 import ctypes
+from ctypes import wintypes
 import shutil
 import json
 import threading
@@ -384,16 +386,16 @@ class AdLayoutHider:
     def _resize_main_view(self, hwnd, parent_hwnd):
         try:
             # 부모(EVA_Window) 클라이언트 영역 높이
-            pr = ctypes.wintypes.RECT()
+            pr = wintypes.RECT()
             self.user32.GetClientRect(parent_hwnd, ctypes.byref(pr))
             parent_client_h = pr.bottom - pr.top
 
             # 자식(OnlineMainView)의 윈도우 좌표
-            cr = ctypes.wintypes.RECT()
+            cr = wintypes.RECT()
             self.user32.GetWindowRect(hwnd, ctypes.byref(cr))
             
             # 자식의 좌측 상단을 부모 클라이언트 기준 좌표로 변환
-            pt = ctypes.wintypes.POINT(cr.left, cr.top)
+            pt = wintypes.POINT(cr.left, cr.top)
             self.user32.ScreenToClient(parent_hwnd, ctypes.byref(pt))
             
             # 목표: 자식의 Y 시작점부터 부모의 끝까지 꽉 채우기
@@ -654,3 +656,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

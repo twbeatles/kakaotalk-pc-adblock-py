@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
+# pyright: reportOptionalMemberAccess=false, reportPossiblyUnboundVariable=false, reportArgumentType=false, reportAttributeAccessIssue=false, reportSelfClsParameterName=false, reportOptionalCall=false
 """
 카카오톡 광고 차단기 Pro v10.0 (Event-Driven Architecture)
 ==========================================================
@@ -15,7 +16,8 @@ import sys
 import shutil
 import codecs
 import ctypes
-import ctypes.wintypes
+import ctypes
+from ctypes import wintypes
 import json
 import threading
 import time
@@ -864,19 +866,19 @@ class User32:
         return bool(User32.lib.SetWindowPos(hwnd, 0, x, y, w, h, flags)) if User32.lib else False
 
     @staticmethod
-    def get_client_rect(hwnd: int) -> Optional[ctypes.wintypes.RECT]:
+    def get_client_rect(hwnd: int) -> Optional[wintypes.RECT]:
         if not User32.lib:
             return None
-        rect = ctypes.wintypes.RECT()
+        rect = wintypes.RECT()
         return rect if User32.lib.GetClientRect(hwnd, ctypes.byref(rect)) else None
 
     @staticmethod
-    def get_window_rect(hwnd: int) -> Optional[ctypes.wintypes.RECT]:
+    def get_window_rect(hwnd: int) -> Optional[wintypes.RECT]:
         if not User32.lib:
             return None
 
         def _load() -> Optional[Tuple[int, int, int, int]]:
-            rect = ctypes.wintypes.RECT()
+            rect = wintypes.RECT()
             if not User32.lib.GetWindowRect(hwnd, ctypes.byref(rect)):
                 return None
             return (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
@@ -884,7 +886,7 @@ class User32:
         rt = User32._get_cached("rect", hwnd, _load)
         if not rt:
             return None
-        rect = ctypes.wintypes.RECT()
+        rect = wintypes.RECT()
         rect.left, rect.top, rect.right, rect.bottom = rt
         return rect
 
@@ -892,7 +894,7 @@ class User32:
     def screen_to_client(hwnd: int, x: int, y: int) -> tuple:
         if not User32.lib:
             return (0, 0)
-        pt = ctypes.wintypes.POINT(x, y)
+        pt = wintypes.POINT(x, y)
         User32.lib.ScreenToClient(hwnd, ctypes.byref(pt))
         return (pt.x, pt.y)
 
@@ -1008,20 +1010,20 @@ class UIAAdBlocker:
 # Define WINEVENTPROC callback type
 WINEVENTPROC = ctypes.WINFUNCTYPE(
     None,  # return type
-    ctypes.wintypes.HANDLE,   # hWinEventHook
-    ctypes.wintypes.DWORD,    # event
-    ctypes.wintypes.HWND,     # hwnd
-    ctypes.wintypes.LONG,     # idObject
-    ctypes.wintypes.LONG,     # idChild
-    ctypes.wintypes.DWORD,    # dwEventThread
-    ctypes.wintypes.DWORD     # dwmsEventTime
+    wintypes.HANDLE,   # hWinEventHook
+    wintypes.DWORD,    # event
+    wintypes.HWND,     # hwnd
+    wintypes.LONG,     # idObject
+    wintypes.LONG,     # idChild
+    wintypes.DWORD,    # dwEventThread
+    wintypes.DWORD     # dwmsEventTime
 )
 
 # Define WNDENUMPROC callback type for EnumChildWindows
 WNDENUMPROC = ctypes.WINFUNCTYPE(
-    ctypes.wintypes.BOOL,     # return type
-    ctypes.wintypes.HWND,     # hwnd
-    ctypes.wintypes.LPARAM    # lParam
+    wintypes.BOOL,     # return type
+    wintypes.HWND,     # hwnd
+    wintypes.LPARAM    # lParam
 )
 
 class WindowEvent:
@@ -1036,7 +1038,7 @@ class WindowInfo:
     hwnd: int
     cls: str
     text: str
-    rect: Optional[ctypes.wintypes.RECT]
+    rect: Optional[wintypes.RECT]
     visible: bool
 
 
@@ -1054,11 +1056,11 @@ def _rect_to_tuple(rect: Any) -> Optional[Tuple[int, int, int, int]]:
         return None
 
 
-def _tuple_to_rect(rt: Optional[Tuple[int, int, int, int]]) -> Optional[ctypes.wintypes.RECT]:
+def _tuple_to_rect(rt: Optional[Tuple[int, int, int, int]]) -> Optional[wintypes.RECT]:
     if not rt:
         return None
     try:
-        rect = ctypes.wintypes.RECT()
+        rect = wintypes.RECT()
         rect.left = int(rt[0])
         rect.top = int(rt[1])
         rect.right = int(rt[2])
@@ -1569,7 +1571,7 @@ class EventDrivenAdBlocker:
         """
         try:
             # Store thread ID for PostThreadMessage
-            import ctypes.wintypes
+            import ctypes
             self._message_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
             
             # Install hooks for window events
@@ -1599,7 +1601,7 @@ class EventDrivenAdBlocker:
             self.logger.info(f"Installed {len(self._hooks)} event hooks")
             
             # Message pump loop
-            msg = ctypes.wintypes.MSG()
+            msg = wintypes.MSG()
             while self.active:
                 result = self.user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
                 if result == 0:  # WM_QUIT
@@ -1832,7 +1834,7 @@ class EventDrivenAdBlocker:
         self.user32.EnumChildWindows(parent_hwnd, callback_func, 0)
         return children
 
-    def _select_list_pane_rect(self, children: List[WindowInfo]) -> Optional[ctypes.wintypes.RECT]:
+    def _select_list_pane_rect(self, children: List[WindowInfo]) -> Optional[wintypes.RECT]:
         pane_rect = None
         pane_height = 0
         for child in children:
@@ -1847,8 +1849,8 @@ class EventDrivenAdBlocker:
                     pane_height = height
         return pane_rect
 
-    def _is_layout_ad(self, child: WindowInfo, parent_rect: Optional[ctypes.wintypes.RECT],
-                      pane_rect: Optional[ctypes.wintypes.RECT]) -> bool:
+    def _is_layout_ad(self, child: WindowInfo, parent_rect: Optional[wintypes.RECT],
+                      pane_rect: Optional[wintypes.RECT]) -> bool:
         if not self.config.layout_enabled:
             return False
         # Some KakaoTalk ad containers can report invisible while still reserving layout space.
@@ -2094,7 +2096,7 @@ class EventDrivenAdBlocker:
             u32 = ctypes.windll.user32
             u32.BeginDeferWindowPos.restype = ctypes.c_void_p
             u32.DeferWindowPos.restype = ctypes.c_void_p
-            u32.EndDeferWindowPos.restype = ctypes.wintypes.BOOL
+            u32.EndDeferWindowPos.restype = wintypes.BOOL
 
             flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
             hdwp = u32.BeginDeferWindowPos(len(ops))
@@ -3755,3 +3757,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

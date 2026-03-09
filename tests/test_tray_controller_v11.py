@@ -2,6 +2,8 @@ import logging
 import time
 import types
 import threading
+from dataclasses import dataclass
+from typing import Callable
 
 from kakao_adblocker.config import LayoutSettingsV11
 from kakao_adblocker.ui import TrayController
@@ -11,7 +13,7 @@ class FakeRoot:
     def __init__(self):
         self._visible = True
 
-    def after(self, _ms, fn):
+    def after(self, ms: int, fn: Callable[[], None]):
         self._last_after = fn
 
     def deiconify(self):
@@ -41,27 +43,26 @@ class FakeRoot:
         self.destroyed = True
 
 
+@dataclass
+class FakeState:
+    enabled: bool = True
+    kakao_pid_count: int = 1
+    main_window_count: int = 1
+    hidden_windows: int = 2
+    resized_windows: int = 3
+    last_error: str = ""
+    last_tick: float = 0.0
+    restore_failures: int = 0
+    last_restore_error: str = ""
+
+
 class FakeEngine:
     def __init__(self):
         self.enabled = True
         self.stop_called = False
         self.reset_called = 0
         self.aggressive_mode_calls = []
-        self._state = type(
-            "S",
-            (),
-            {
-                "enabled": True,
-                "kakao_pid_count": 1,
-                "main_window_count": 1,
-                "hidden_windows": 2,
-                "resized_windows": 3,
-                "last_error": "",
-                "last_tick": 0.0,
-                "restore_failures": 0,
-                "last_restore_error": "",
-            },
-        )()
+        self._state = FakeState()
 
     @property
     def state(self):
@@ -335,8 +336,11 @@ def test_status_update_skips_redundant_set(monkeypatch):
     calls = {"set": 0}
 
     class CounterVar:
-        def set(self, _value):
+        def set(self, value: str):
             calls["set"] += 1
+
+        def get(self) -> str:
+            return ""
 
     controller._status_var = CounterVar()
     controller._last_status_text = None
@@ -431,7 +435,7 @@ def test_tick_status_swallow_after_error(monkeypatch):
         def winfo_exists(self):
             return True
 
-        def after(self, _ms, _fn):
+        def after(self, ms: int, fn: Callable[[], None]):
             raise RuntimeError("tk closed")
 
     root = TickFailRoot()

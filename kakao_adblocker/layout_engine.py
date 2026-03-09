@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional, Tuple
+from typing import Optional
 
 from .config import LayoutRulesV11
-from .win32_api import SWP_NOMOVE, Win32API
+from .protocols import LayoutApiLike, Rect
+from .win32_api import SWP_NOMOVE
 
-Rect = Tuple[int, int, int, int]
 _ASCII_WORD_RE = re.compile(r"[a-z0-9]+")
 
 
@@ -20,7 +20,7 @@ def _rect_height(rect: Rect) -> int:
 
 
 class LayoutEngine:
-    def __init__(self, api: Win32API, rules: LayoutRulesV11, logger: logging.Logger):
+    def __init__(self, api: LayoutApiLike, rules: LayoutRulesV11, logger: logging.Logger):
         self.api = api
         self.rules = rules
         self.logger = logger
@@ -34,11 +34,9 @@ class LayoutEngine:
             height = _rect_height(parent_rect)
         if height is None or width < 1 or height < 1:
             return False
-        get_rect = getattr(self.api, "get_window_rect", None)
-        if callable(get_rect):
-            current = get_rect(child_hwnd)
-            if current and _rect_width(current) == width and _rect_height(current) == height:
-                return False
+        current = self.api.get_window_rect(child_hwnd)
+        if current and _rect_width(current) == width and _rect_height(current) == height:
+            return False
         self.api.update_window(child_hwnd)
         return bool(self.api.set_window_pos(child_hwnd, 0, 0, width, height, SWP_NOMOVE))
 

@@ -82,6 +82,25 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
+## 정적 분석(Pyright / Pylance)
+
+이 저장소는 루트의 `pyrightconfig.json`을 기준으로 타입 검사를 수행합니다.
+
+- 포함 경로: `kakao_adblocker`, `tests`, `legacy`, `kakaotalk_layout_adblock_v11.py`
+- 제외 경로: `build`, `dist`, `__pycache__`, `.pytest_cache`
+
+실행 예시:
+
+```bash
+pyright
+pyright kakao_adblocker tests
+pyright legacy
+```
+
+`kakao_adblocker/protocols.py`는 런타임/테스트 더블 간 구조적 타입 경계를 정의하고,  
+`kakao_adblocker/__init__.pyi`는 lazy export 패키지의 정적 타입 가시성을 제공합니다.  
+레거시 아카이브 파일은 동작 보존을 위해 파일 상단 `pyright` 지시문을 사용해 진단 정책을 분리 관리합니다.
+
 ## 설정/로그 경로
 
 - `%APPDATA%\KakaoTalkAdBlockerLayout\layout_settings_v11.json`
@@ -133,6 +152,7 @@ pyinstaller kakaotalk_adblock.spec
 - `.spec`는 프로젝트 루트 기준 절대 경로를 사용하도록 보강되어, 빌드 실행 위치에 덜 민감합니다.
 - `.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `pystray`, `PIL`)를 `hiddenimports`로 명시하고, `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 패키징 누락을 방지합니다.
 - `.spec`는 레이아웃/Win32 핵심 모듈(`kakao_adblocker.layout_engine`, `kakao_adblocker.win32_api`)도 `hiddenimports`에 명시해 패키징 안정성을 보강했습니다.
+- `.spec`는 타입 경계 모듈(`kakao_adblocker.protocols`)도 `hiddenimports`에 포함해 모듈 해석 경로를 고정합니다.
 - `.spec`는 `packaging/windows_version_info.txt`를 버전 리소스로 포함해 `CompanyName/ProductName/FileVersion` 등 PE 메타데이터를 채웁니다.
 - `--self-check` 진단 경로도 동일 hiddenimports 집합으로 별도 수정 없이 동작합니다.
 

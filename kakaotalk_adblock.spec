@@ -12,8 +12,8 @@ if not WINDOWS_VERSION_INFO.exists():
 
 # Keep lazy-imported core/runtime modules explicit so onefile packaging stays stable.
 # `--self-check` path also imports pystray/PIL via importlib for diagnostics.
-# Tray readiness/JSON self-heal/startup-warning/stale-hide recovery changes are stdlib-only;
-# existing hiddenimports set remains valid.
+# Tray readiness/JSON self-heal/startup-warning/stale-hide recovery changes are stdlib-only.
+# v11 typing boundary module(`kakao_adblocker.protocols`) is imported by runtime modules.
 hiddenimports = [
     "psutil",
     "PIL",
@@ -25,6 +25,7 @@ hiddenimports = [
     "kakao_adblocker.event_engine",
     "kakao_adblocker.layout_engine",
     "kakao_adblocker.logging_setup",
+    "kakao_adblocker.protocols",
     "kakao_adblocker.services",
     "kakao_adblocker.ui",
     "kakao_adblocker.win32_api",

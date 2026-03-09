@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
+# pyright: reportOptionalMemberAccess=false, reportPossiblyUnboundVariable=false, reportArgumentType=false, reportAttributeAccessIssue=false, reportSelfClsParameterName=false, reportOptionalCall=false
 """
 카카오톡 광고 차단기 Pro v5.1 (Enhanced)
 =====================================
@@ -12,7 +13,8 @@
 import os
 import sys
 import ctypes
-import ctypes.wintypes
+import ctypes
+from ctypes import wintypes
 import shutil
 import json
 import threading
@@ -430,16 +432,16 @@ class AdLayoutHider:
         self.user32.IsWindowVisible.argtypes = [ctypes.c_void_p]
         self.user32.IsWindowVisible.restype = ctypes.c_bool
         
-        self.user32.GetClientRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.wintypes.RECT)]
+        self.user32.GetClientRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.RECT)]
         self.user32.GetClientRect.restype = ctypes.c_bool
         
-        self.user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.wintypes.RECT)]
+        self.user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.RECT)]
         self.user32.GetWindowRect.restype = ctypes.c_bool
         
         self.user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
         self.user32.SetWindowPos.restype = ctypes.c_bool
         
-        self.user32.ScreenToClient.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.wintypes.POINT)]
+        self.user32.ScreenToClient.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.POINT)]
         self.user32.ScreenToClient.restype = ctypes.c_bool
 
     def start(self):
@@ -544,18 +546,18 @@ class AdLayoutHider:
         """메인 뷰를 부모 크기에 맞게 리사이징"""
         try:
             # 부모 클라이언트 영역
-            pr = ctypes.wintypes.RECT()
+            pr = wintypes.RECT()
             if not self.user32.GetClientRect(parent_hwnd, ctypes.byref(pr)):
                 return
             p_height = pr.bottom - pr.top
             p_width = pr.right - pr.left
 
             # 자식 현재 위치
-            cr = ctypes.wintypes.RECT()
+            cr = wintypes.RECT()
             if not self.user32.GetWindowRect(hwnd, ctypes.byref(cr)):
                 return
             
-            pt = ctypes.wintypes.POINT(cr.left, cr.top)
+            pt = wintypes.POINT(cr.left, cr.top)
             self.user32.ScreenToClient(parent_hwnd, ctypes.byref(pt))
             
             # 목표 크기
@@ -998,3 +1000,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

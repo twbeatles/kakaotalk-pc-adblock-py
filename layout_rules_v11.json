@@ -32,6 +32,8 @@
   "banner_max_height_px": 260,
   "banner_min_width_ratio": 0.75,
   "banner_bottom_margin_px": 40,
+  "hide_bottom_banner_without_token": false,
+  "close_empty_eva_child_requires_ad_signal": true,
   "layout_shadow_padding_px": 2,
   "main_view_padding_px": 31,
   "cache_ttl_seconds": 8.0,

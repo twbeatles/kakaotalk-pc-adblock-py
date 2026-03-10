@@ -21,6 +21,7 @@
   - `%APPDATA%\KakaoTalkAdBlockerLayout` 경로 관리
   - 성능 설정: `idle_poll_interval_ms`, `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
   - 신규 필드 누락 시 기본값 자동 보완(무중단 호환)
+  - 신규 rules 플래그: `hide_bottom_banner_without_token=false`, `close_empty_eva_child_requires_ad_signal=true`
   - rules 로드 시 `ad_candidate_classes`가 누락/비정상이면 `main_window_classes`로 폴백
   - JSON 파손(파싱 실패/최상위 타입 불일치) 시 `*.broken-YYYYMMDD-HHMMSS` 백업 생성 후 기본값 JSON으로 self-heal
   - rules 로드 시 `banner_min_height_px > banner_max_height_px` 역전값을 자동 교정(swap)하고 경고 기록
@@ -33,10 +34,12 @@
   - 단일 watch+apply 루프(적응형 폴링), `main_window_classes` 기반 메인 윈도우 식별
   - 차단 OFF 상태에서는 watch/apply를 모두 일시중단하고 1.0초 저비용 대기
   - 광고 후보는 `ad_candidate_classes`(기본: `EVA_Window_Dblclk`, `EVA_Window`)와 레거시 시그니처(exact + substring)를 함께 사용해 필터링
+  - 메인 윈도우 상태는 `candidate_main_window_count`(후보)와 `main_window_count`(확정)로 분리되며, 실제 apply는 확정 기준만 사용
   - 엔진 시작 시 enabled인 경우에만 동기 warm-up(scan+apply 1회)으로 초기 광고 깜빡임 완화
   - 빈 문자열 텍스트 캐시는 짧은 TTL로 재조회해 초기 UI 구성 구간 탐지 지연 완화
   - 메인 윈도우 제목이 빈 경우 자식 시그니처(`OnlineMainView`/`LockModeView`) 기반 fallback 탐지 지원
   - 차단 OFF/엔진 종료 시 숨김·이동 창 원복
+  - `stop()` 시작 이후에는 새 hide/close/apply 작업이 봉쇄되어, join timeout 이후에도 복원 직후 재은닉이 발생하지 않도록 정리
   - aggressive hide 창은 공격 모드 OFF 시 즉시 원복 후 재스캔/재적용
   - 숨김 창은 aggressive/legacy 시그니처에서 벗어나면 stale 상태로 남지 않고 자동 원복
   - `stop()` join timeout(2.0s) 시 상태/로그 경고 후 종료 절차 계속
@@ -51,7 +54,8 @@
   - `report_warning()`로 시작 시점 경고를 상태(`last_error`)에 반영하며, 엔진 시작 이후에도 우선순위 경고 1건 유지
 - `kakao_adblocker/layout_engine.py`
   - `OnlineMainView` / `LockModeView` 리사이즈 규칙
-  - 공격적 배너 휴리스틱, 짧은 ad 토큰 단어 경계 매칭
+  - 공격적 배너 휴리스틱은 token 판정과 geometry 판정을 분리하고, 짧은 ad 토큰은 단어 경계 기준으로 매칭
+  - 기본값에서는 token 없는 하단 `Chrome_WidgetWin_*` 패널을 geometry만으로 숨기지 않으며, subtree token도 aggressive signal로 사용
 - `kakao_adblocker/protocols.py`
   - Win32 API/Joinable Thread/UI Root/Engine 상태에 대한 구조적 타입 프로토콜 정의
   - 테스트 더블(`tests/*`)과 런타임 모듈의 타입 경계를 분리
@@ -65,6 +69,8 @@
   - 트레이 비가용 시 창 닫기(X)는 숨김이 아니라 종료로 처리
   - 시작 시 `run_on_startup` 값을 레지스트리 상태로 1회 동기화
   - 상태 문자열에 마지막 오류/갱신시각 표시
+  - 엔진 오류가 없을 때는 tray unavailable/startup rollback 같은 UI 계층 경고를 상태 문자열에 짧게 노출
+  - 상태 문자열의 `메인윈도우`는 확정 count이며, 후보가 더 많을 때만 `후보 N`을 추가 표기
   - 상태 문자열의 `누적 숨김`/`누적 리사이즈` 라벨로 누적 카운터 의미를 명시
   - pystray/Pillow 지연 로딩 + 실패 TTL(30초) 자동 재시도
   - 트레이 콜백은 queue 디스패치(`_safe_after` -> main-thread drain)로 처리
@@ -82,7 +88,7 @@
 
 ## 빌드 메모
 
-- `kakaotalk_adblock.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`)을 `hiddenimports`로 명시하고 `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 누락을 방지
+- `kakaotalk_adblock.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`, `tkinter`)을 `hiddenimports`로 명시하고 `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 누락을 방지
 - 타입 경계 모듈 `kakao_adblocker.protocols`도 `hiddenimports`에 포함되어 onefile 모듈 누락 가능성을 줄임
 
 ## 동작 규칙
@@ -92,10 +98,10 @@
 3. `OnlineMainView`: `width=parent-2`, `height=parent-31`
 4. `LockModeView`: `width=parent-2`, `height=parent`
 5. `Chrome Legacy Window` 하위 광고 서브윈도우 숨김
-6. 공격 모드에서 `Chrome_WidgetWin_* + ad token`/하단 배너 후보 숨김
+6. 공격 모드에서 `Chrome_WidgetWin_* + ad token` 또는 subtree token이 확인된 하단 배너 후보만 숨기고, geometry-only hide는 rules opt-in일 때만 허용
 7. 시작프로그램 토글은 레지스트리 갱신 성공 시에만 설정 파일에 반영
 8. `--dump-tree`는 UI 모듈을 로딩하지 않는 경량 경로로 동작
-9. `--self-check`는 UI/엔진을 기동하지 않고 환경 진단만 수행
+9. `--self-check`는 UI/엔진을 기동하지 않고 APPDATA/tasklist/레지스트리/`tkinter/Tk`/트레이 import 환경 진단만 수행
 10. 시작 경고 상태 반영은 `복구 실패 > 자동 복구 > 기타` 우선순위로 1건 노출
 
 ## 설정 파일

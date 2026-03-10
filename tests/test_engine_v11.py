@@ -190,6 +190,33 @@ def test_engine_detects_main_window_with_empty_title_using_child_signature():
     assert 101 in resized_handles
 
 
+def test_engine_candidate_and_confirmed_main_window_counts_are_tracked_separately():
+    api = FakeAPI()
+    api.windows[150] = {
+        "pid": 42,
+        "class": "EVA_Window_Dblclk",
+        "text": "카카오톡 설정",
+        "parent": 0,
+        "rect": (30, 30, 330, 330),
+        "visible": True,
+    }
+    api.children[150] = []
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+
+    state = engine.state
+    assert state.candidate_main_window_count == 3
+    assert state.main_window_count == 1
+
+
 def test_engine_restores_hidden_windows_when_disabled():
     api = FakeAPI()
     settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
@@ -262,6 +289,37 @@ def test_engine_stop_records_warning_when_watch_thread_join_times_out():
     assert state.last_error == "stop: watch thread did not terminate within 2.0s"
 
 
+def test_engine_stop_timeout_blocks_late_rehide_attempts():
+    class HungThread:
+        def __init__(self, engine_ref):
+            self.engine_ref = engine_ref
+
+        def join(self, timeout=None):
+            self.engine_ref._hide_window(102, 42, "Chrome_WidgetWin_1", hide_reason="aggressive")
+            return None
+
+        def is_alive(self):
+            return True
+
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    engine.scan_once()
+    engine.apply_once()
+
+    engine._watch_thread = HungThread(engine)
+    engine.stop()
+
+    assert api.windows[102]["visible"] is True
+    assert engine.state.running is False
+
+
 def test_engine_cache_access_is_thread_safe_under_stress():
     api = FakeAPI()
     settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
@@ -331,6 +389,53 @@ def test_engine_candidate_detection_requires_class_and_legacy_signature():
 
     assert 200 in api.hide_calls
     assert 210 not in api.hide_calls
+
+
+def test_engine_aggressive_mode_does_not_hide_bottom_widget_without_token_by_default():
+    api = FakeAPI()
+    api.windows[102]["text"] = "Footer Panel"
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(hide_bottom_banner_without_token=False),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert 102 not in api.hide_calls
+    assert api.windows[102]["visible"] is True
+
+
+def test_engine_aggressive_mode_can_use_descendant_token_signal():
+    api = FakeAPI()
+    api.windows[102]["text"] = ""
+    api.windows[103] = {
+        "pid": 42,
+        "class": "Static",
+        "text": "Advertisement",
+        "parent": 102,
+        "rect": (0, 620, 500, 700),
+        "visible": True,
+    }
+    api.children[100] = [101, 102]
+    api.children[102] = [103]
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert 102 in api.hide_calls
 
 
 def test_engine_candidate_detection_supports_legacy_substring_signature():
@@ -770,6 +875,7 @@ def test_engine_set_enabled_false_clears_scan_state():
 
     assert engine.state.enabled is False
     assert engine.state.kakao_pid_count == 0
+    assert engine.state.candidate_main_window_count == 0
     assert engine.state.main_window_count == 0
     with engine._data_lock:
         assert engine._kakao_pids == set()
@@ -900,6 +1006,69 @@ def test_engine_set_aggressive_mode_false_restores_aggressive_windows_immediatel
     assert api.windows[102]["visible"] is True
     assert api.windows[200]["visible"] is False
     assert 102 in api.show_calls
+
+
+def test_engine_empty_eva_child_without_ad_signal_is_not_closed():
+    api = FakeAPI()
+    api.windows[102]["text"] = "Footer Panel"
+    api.windows[104] = {
+        "pid": 42,
+        "class": "EVA_ChildWindow",
+        "text": "",
+        "parent": 100,
+        "rect": (0, 600, 500, 620),
+        "visible": True,
+    }
+    api.children[100] = [101, 102, 104]
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(close_empty_eva_child_requires_ad_signal=True),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    assert 104 not in closed_handles
+
+
+def test_engine_empty_eva_child_with_legacy_ad_signal_is_closed():
+    api = FakeAPI()
+    api.windows[104] = {
+        "pid": 42,
+        "class": "EVA_ChildWindow",
+        "text": "",
+        "parent": 100,
+        "rect": (0, 600, 500, 620),
+        "visible": True,
+    }
+    api.windows[105] = {
+        "pid": 42,
+        "class": "Chrome_WidgetWin_1",
+        "text": "Chrome Legacy Window",
+        "parent": 100,
+        "rect": (0, 620, 500, 700),
+        "visible": True,
+    }
+    api.children[100] = [101, 104, 105]
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(close_empty_eva_child_requires_ad_signal=True),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    assert 104 in closed_handles
 
 
 def test_engine_restores_stale_hidden_legacy_window_when_signature_disappears():

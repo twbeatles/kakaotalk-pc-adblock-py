@@ -72,6 +72,8 @@ class TrayController:
         self._tray_stopping = False
         self._startup_notice_shown = False
         self._last_status_text: Optional[str] = None
+        self._ui_warning = ""
+        self._ui_warning_at = 0.0
         self._ui_queue: "queue.Queue[Callable[[], None]]" = queue.Queue()
         self._ui_queue_running = False
         self._ui_queue_batch_size = 32
@@ -135,10 +137,15 @@ class TrayController:
             if not self._tray_available:
                 if self._tray_start_error:
                     self.logger.warning("tray mode disabled: %s", self._tray_start_error)
+                    self._set_ui_warning(f"tray unavailable: {self._tray_start_error}")
                 else:
                     self.logger.warning("tray mode disabled: tray startup timeout")
+                    self._set_ui_warning("tray unavailable: startup timeout")
+            else:
+                self._clear_ui_warning(("tray unavailable:",))
         else:
             self.logger.warning("pystray is unavailable; tray mode disabled")
+            self._set_ui_warning("tray unavailable: pystray import failed")
         self._configure_close_behavior()
         self._tick_status()
 
@@ -204,16 +211,34 @@ class TrayController:
             self._update_status(force=True)
             return False
 
+    def _set_ui_warning(self, message: str) -> None:
+        self._ui_warning = message or ""
+        self._ui_warning_at = time.time() if message else 0.0
+
+    def _clear_ui_warning(self, prefixes: tuple[str, ...] | None = None) -> None:
+        if not self._ui_warning:
+            return
+        if prefixes is not None and not any(self._ui_warning.startswith(prefix) for prefix in prefixes):
+            return
+        self._ui_warning = ""
+        self._ui_warning_at = 0.0
+
+    def _format_time(self, timestamp: float) -> str:
+        if timestamp <= 0:
+            return "-"
+        return datetime.fromtimestamp(timestamp).strftime("%H:%M:%S")
+
     def status_text(self) -> str:
         state = self.engine.state
         mode = "ON" if state.enabled else "OFF"
-        tick_text = "-"
-        if state.last_tick > 0:
-            tick_text = datetime.fromtimestamp(state.last_tick).strftime("%H:%M:%S")
+        tick_text = self._format_time(state.last_tick)
+        candidate_main_count = int(getattr(state, "candidate_main_window_count", state.main_window_count) or 0)
         base = (
             f"상태: {mode} | PID {state.kakao_pid_count} | 메인윈도우 {state.main_window_count} | "
             f"누적 숨김 {state.hidden_windows} | 누적 리사이즈 {state.resized_windows}"
         )
+        if candidate_main_count > state.main_window_count:
+            base = f"{base} | 후보 {candidate_main_count}"
         restore_failures = int(getattr(state, "restore_failures", 0) or 0)
         if restore_failures > 0:
             restore_error = str(getattr(state, "last_restore_error", "") or "")
@@ -224,6 +249,10 @@ class TrayController:
         if state.last_error:
             compact_error = state.last_error if len(state.last_error) <= 80 else f"{state.last_error[:77]}..."
             return f"{base} | 오류 {tick_text} {compact_error}"
+        if self._ui_warning:
+            warning_time = self._format_time(self._ui_warning_at)
+            compact_warning = self._ui_warning if len(self._ui_warning) <= 80 else f"{self._ui_warning[:77]}..."
+            return f"{base} | 경고 {warning_time} {compact_warning}"
         return f"{base} | 마지막 갱신 {tick_text}"
 
     def toggle_blocking(self) -> None:
@@ -239,15 +268,20 @@ class TrayController:
         target = not current
         if not StartupManager.set_enabled(target):
             self.logger.warning("Failed to update startup registration")
+            self._set_ui_warning("startup registry update failed")
+            self._update_status(force=True)
             return
         if not self._save_setting_attr("run_on_startup", target):
             rollback_ok = StartupManager.set_enabled(current)
             if rollback_ok:
                 self.logger.warning("Failed to save startup setting; registry change rolled back")
+                self._set_ui_warning("startup setting save failed; registry rolled back")
             else:
                 self.logger.error("Failed to save startup setting and registry rollback failed")
+                self._set_ui_warning("startup rollback failed")
             self._update_status(force=True)
             return
+        self._clear_ui_warning(("startup ",))
         self.logger.info("Startup registration toggled: %s", "ON" if target else "OFF")
         self._update_status(force=True)
 
@@ -433,6 +467,7 @@ class TrayController:
         if self._tray_stopping:
             return
         self._tray_available = False
+        self._set_ui_warning("tray unavailable: tray runtime stopped unexpectedly")
         self.logger.warning("Tray runtime stopped unexpectedly; forcing main window visible")
         if not self._is_window_visible():
             self.show_window()

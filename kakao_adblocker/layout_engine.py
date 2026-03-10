@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional
+from typing import Iterable, Optional
 
 from .config import LayoutRulesV11
 from .protocols import LayoutApiLike, Rect
@@ -46,13 +46,19 @@ class LayoutEngine:
         window_text: str,
         parent_text: str,
         has_custom_scroll: bool,
+        has_ad_signal: bool,
     ) -> bool:
-        return (
+        matches = (
             class_name == self.rules.eva_child_class
             and window_text == ""
             and parent_text != ""
             and not has_custom_scroll
         )
+        if not matches:
+            return False
+        if self.rules.close_empty_eva_child_requires_ad_signal and not has_ad_signal:
+            return False
+        return True
 
     def contains_ad_token(self, text: str) -> bool:
         low = (text or "").lower()
@@ -69,11 +75,14 @@ class LayoutEngine:
                 return True
         return False
 
+    def contains_ad_token_in_texts(self, texts: Iterable[str]) -> bool:
+        return any(self.contains_ad_token(text) for text in texts)
+
     def is_chrome_widget_class(self, class_name: str) -> bool:
         return any(class_name.startswith(prefix) for prefix in self.rules.chrome_widget_prefixes)
 
-    def is_aggressive_chrome_ad(self, class_name: str, window_text: str) -> bool:
-        return self.is_chrome_widget_class(class_name) and self.contains_ad_token(window_text)
+    def is_aggressive_chrome_ad(self, class_name: str, has_ad_token: bool) -> bool:
+        return self.is_chrome_widget_class(class_name) and has_ad_token
 
     def is_bottom_banner_candidate(self, class_name: str, window_text: str, child_rect: Rect, parent_rect: Rect) -> bool:
         height = _rect_height(child_rect)
@@ -87,12 +96,16 @@ class LayoutEngine:
             return False
         if abs(child_rect[3] - parent_rect[3]) > self.rules.banner_bottom_margin_px:
             return False
-        return self.is_chrome_widget_class(class_name) or self.contains_ad_token(window_text)
+        return True
 
-    def should_hide_aggressive(self, class_name: str, window_text: str, child_rect: Rect, parent_rect: Rect) -> bool:
-        if self.is_aggressive_chrome_ad(class_name, window_text):
+    def should_hide_aggressive(self, class_name: str, has_ad_token: bool, child_rect: Rect, parent_rect: Rect) -> bool:
+        if self.is_aggressive_chrome_ad(class_name, has_ad_token):
             return True
-        return self.is_bottom_banner_candidate(class_name, window_text, child_rect, parent_rect)
+        if not self.is_bottom_banner_candidate(class_name, "", child_rect, parent_rect):
+            return False
+        if has_ad_token:
+            return True
+        return bool(self.rules.hide_bottom_banner_without_token)
 
 
 __all__ = ["LayoutEngine"]

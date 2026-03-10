@@ -259,6 +259,7 @@ def test_self_check_path_skips_engine_and_ui(monkeypatch):
     monkeypatch.setattr(app, "_check_appdata_writable", lambda: (True, "ok"))
     monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app, "_check_tk_boot", lambda: (True, "ok"))
     monkeypatch.setattr(app, "_check_tray_import", lambda: (True, "ok"))
 
     rc = app.main(["--self-check"])
@@ -267,3 +268,55 @@ def test_self_check_path_skips_engine_and_ui(monkeypatch):
     assert called["runtime"] == 0
     assert called["engine"] == 0
     assert called["ui_load"] == 0
+
+
+def test_self_check_fails_when_tk_boot_check_fails(monkeypatch):
+    monkeypatch.setattr(app.os, "name", "nt")
+    monkeypatch.setattr(app, "_check_appdata_writable", lambda: (True, "ok"))
+    monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app, "_check_tk_boot", lambda: (False, "tk failed"))
+    monkeypatch.setattr(app, "_check_tray_import", lambda: (True, "ok"))
+
+    rc = app.main(["--self-check"])
+
+    assert rc == 1
+
+
+def test_check_tk_boot_success(monkeypatch):
+    class FakeRoot:
+        def __init__(self):
+            self.withdrawn = False
+            self.destroyed = False
+            self.updated = False
+
+        def withdraw(self):
+            self.withdrawn = True
+
+        def update_idletasks(self):
+            self.updated = True
+
+        def destroy(self):
+            self.destroyed = True
+
+    fake_module = type("FakeTkModule", (), {"Tk": FakeRoot})
+    monkeypatch.setattr(app.importlib, "import_module", lambda name: fake_module if name == "tkinter" else None)
+
+    ok, detail = app._check_tk_boot()
+
+    assert ok is True
+    assert "초기화 가능" in detail
+
+
+def test_check_tk_boot_failure(monkeypatch):
+    def broken_import(name):
+        if name == "tkinter":
+            raise RuntimeError("tk unavailable")
+        return None
+
+    monkeypatch.setattr(app.importlib, "import_module", broken_import)
+
+    ok, detail = app._check_tk_boot()
+
+    assert ok is False
+    assert "RuntimeError" in detail

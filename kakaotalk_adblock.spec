@@ -11,7 +11,7 @@ if not WINDOWS_VERSION_INFO.exists():
     raise FileNotFoundError(f"Missing Windows version resource: {WINDOWS_VERSION_INFO}")
 
 # Keep lazy-imported core/runtime modules explicit so onefile packaging stays stable.
-# `--self-check` path also imports pystray/PIL via importlib for diagnostics.
+# `--self-check` path also imports pystray/PIL/tkinter via importlib for diagnostics.
 # Tray readiness/JSON self-heal/startup-warning/stale-hide recovery changes are stdlib-only.
 # v11 typing boundary module(`kakao_adblocker.protocols`) is imported by runtime modules.
 hiddenimports = [
@@ -20,6 +20,9 @@ hiddenimports = [
     "PIL.Image",
     "PIL.ImageDraw",
     "pystray",
+    "tkinter",
+    "tkinter.ttk",
+    "tkinter.messagebox",
     "kakao_adblocker.app",
     "kakao_adblocker.config",
     "kakao_adblocker.event_engine",

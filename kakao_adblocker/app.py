@@ -60,11 +60,30 @@ def _check_tray_import() -> Tuple[bool, str]:
         return False, f"{exc.__class__.__name__}: {exc}"
 
 
+def _check_tk_boot() -> Tuple[bool, str]:
+    root = None
+    try:
+        tkinter = importlib.import_module("tkinter")
+        root = tkinter.Tk()
+        root.withdraw()
+        root.update_idletasks()
+        return True, "tkinter/Tk 초기화 가능"
+    except Exception as exc:
+        return False, f"{exc.__class__.__name__}: {exc}"
+    finally:
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+
 def _run_self_check() -> int:
     checks: list[Tuple[str, Callable[[], Tuple[bool, str]]]] = [
         ("APPDATA 접근/쓰기", _check_appdata_writable),
         ("tasklist 실행", ProcessInspector.probe_tasklist),
         ("Run 레지스트리 읽기/쓰기 접근", StartupManager.probe_access),
+        ("Tk UI 부팅", _check_tk_boot),
         ("트레이 모듈 import", _check_tray_import),
     ]
     passed = 0

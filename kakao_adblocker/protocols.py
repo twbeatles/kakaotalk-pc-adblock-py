@@ -61,6 +61,7 @@ class StatusVarLike(Protocol):
 class EngineStateLike(Protocol):
     enabled: bool
     kakao_pid_count: int
+    candidate_main_window_count: int
     main_window_count: int
     hidden_windows: int
     resized_windows: int

@@ -72,10 +72,36 @@ def test_aggressive_banner_heuristic():
 
     assert engine.should_hide_aggressive(
         class_name="Chrome_WidgetWin_1",
-        window_text="AdFit NAS Advertisement",
+        has_ad_token=True,
         child_rect=(0, 620, 500, 700),
         parent_rect=(0, 0, 500, 700),
     )
+
+
+def test_bottom_banner_without_token_is_not_hidden_by_default():
+    api = DummyAPI()
+    rules = LayoutRulesV11(hide_bottom_banner_without_token=False)
+    engine = LayoutEngine(api, rules, logging.getLogger("test"))
+
+    assert engine.should_hide_aggressive(
+        class_name="Chrome_WidgetWin_1",
+        has_ad_token=False,
+        child_rect=(0, 620, 500, 700),
+        parent_rect=(0, 0, 500, 700),
+    ) is False
+
+
+def test_bottom_banner_without_token_can_be_hidden_when_rule_enabled():
+    api = DummyAPI()
+    rules = LayoutRulesV11(hide_bottom_banner_without_token=True)
+    engine = LayoutEngine(api, rules, logging.getLogger("test"))
+
+    assert engine.should_hide_aggressive(
+        class_name="Chrome_WidgetWin_1",
+        has_ad_token=False,
+        child_rect=(0, 620, 500, 700),
+        parent_rect=(0, 0, 500, 700),
+    ) is True
 
 
 def test_short_ascii_ad_token_uses_word_boundary():
@@ -87,3 +113,12 @@ def test_short_ascii_ad_token_uses_word_boundary():
     assert engine.contains_ad_token("Header") is False
     assert engine.contains_ad_token("Ad") is True
     assert engine.contains_ad_token("AdFit NAS") is True
+
+
+def test_contains_ad_token_in_texts_checks_multiple_texts():
+    api = DummyAPI()
+    rules = LayoutRulesV11(aggressive_ad_tokens=["Ad", "광고"])
+    engine = LayoutEngine(api, rules, logging.getLogger("test"))
+
+    assert engine.contains_ad_token_in_texts(["header", "광고 배너"]) is True
+    assert engine.contains_ad_token_in_texts(["header", "footer"]) is False

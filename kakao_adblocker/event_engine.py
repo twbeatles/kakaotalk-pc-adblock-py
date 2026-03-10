@@ -38,6 +38,7 @@ class EngineState:
     enabled: bool = True
     running: bool = False
     kakao_pid_count: int = 0
+    candidate_main_window_count: int = 0
     main_window_count: int = 0
     resized_windows: int = 0
     hidden_windows: int = 0
@@ -112,6 +113,7 @@ class LayoutOnlyEngine:
             self._state.resized_windows = 0
             self._state.hidden_windows = 0
             self._state.closed_windows = 0
+            self._state.candidate_main_window_count = 0
             self._state.restore_failures = 0
             self._state.last_restore_error = ""
             enabled_on_start = self._state.enabled
@@ -120,6 +122,8 @@ class LayoutOnlyEngine:
             self._last_pid_scan = 0.0
             self._last_cache_cleanup = 0.0
             self._last_activity = time.time()
+        self._stop_event.clear()
+        self._wake_event.clear()
 
         # Warm-up immediately in caller thread to reduce first-run ad flash.
         if enabled_on_start:
@@ -129,8 +133,6 @@ class LayoutOnlyEngine:
             except Exception as e:
                 self._set_error(f"warmup: {e}")
 
-        self._stop_event.clear()
-        self._wake_event.clear()
         self._watch_thread = threading.Thread(target=self._watch_loop, daemon=True)
         self._watch_thread.start()
 
@@ -210,6 +212,9 @@ class LayoutOnlyEngine:
     def _cache_cleanup_interval_seconds(self) -> float:
         return max(int(self.settings.cache_cleanup_interval_ms), 250) / 1000.0
 
+    def _is_stopping(self) -> bool:
+        return self._stop_event.is_set()
+
     def _is_enabled(self) -> bool:
         with self._state_lock:
             return self._state.enabled
@@ -274,37 +279,41 @@ class LayoutOnlyEngine:
                 self._watch_once()
             except Exception as e:
                 self._set_error(f"watch: {e}")
-            else:
-                try:
-                    self._apply_once()
-                except Exception as e:
-                    self._set_error(f"apply: {e}")
+            if self._is_stopping():
+                break
+            try:
+                self._apply_once()
+            except Exception as e:
+                self._set_error(f"apply: {e}")
             self._wait_next_tick(self._current_loop_interval_seconds())
 
     def _watch_once(self) -> None:
+        if self._is_stopping():
+            return
         now = time.time()
         was_active = self._is_active_mode(now)
         pids = self._get_kakao_pids(now)
         windows = self._collect_windows(pids) if pids else []
+        if self._is_stopping():
+            return
+        candidate_main_handles: Set[int] = set()
         main_handles: Set[int] = set()
         candidates: Set[int] = set()
         legacy_text_memo: Dict[Tuple[int, str, int], bool] = {}
         legacy_contains_memo: Dict[Tuple[int, str, int], bool] = {}
 
         for item in windows:
-            if item.class_name not in self._main_window_class_set:
+            if self._is_stopping():
+                return
+            if not self._is_main_window_candidate(item):
                 continue
-            if item.parent_hwnd != 0:
-                continue
-            if item.text:
-                if item.class_name == "EVA_Window" and not self._is_main_title(item.text):
-                    continue
-            else:
-                if not self._has_main_view_signature(item.hwnd):
-                    continue
-            main_handles.add(item.hwnd)
+            candidate_main_handles.add(item.hwnd)
+            if self._is_confirmed_main_window(item.hwnd, item=item):
+                main_handles.add(item.hwnd)
 
         for item in windows:
+            if self._is_stopping():
+                return
             if item.class_name not in self._ad_candidate_class_set:
                 continue
             if item.parent_hwnd in main_handles:
@@ -328,13 +337,14 @@ class LayoutOnlyEngine:
 
         with self._state_lock:
             self._state.kakao_pid_count = len(pids)
+            self._state.candidate_main_window_count = len(candidate_main_handles)
             self._state.main_window_count = len(main_handles)
             self._state.last_tick = now
 
         self._maybe_cleanup_caches(now)
 
     def _apply_once(self) -> None:
-        if not self._is_enabled():
+        if not self._is_enabled() or self._is_stopping():
             return
 
         with self._data_lock:
@@ -349,8 +359,11 @@ class LayoutOnlyEngine:
         matched_hidden_identities: Set[WindowIdentity] = set()
         legacy_text_memo: Dict[Tuple[int, str, int], bool] = {}
         legacy_contains_memo: Dict[Tuple[int, str, int], bool] = {}
+        ad_token_memo: Dict[Tuple[int, int], bool] = {}
 
         for wnd in main_handles:
+            if self._is_stopping():
+                return
             if not self.api.is_window(wnd):
                 continue
             pid = self.api.get_window_thread_process_id(wnd)
@@ -359,22 +372,51 @@ class LayoutOnlyEngine:
             parent_rect = self.api.get_window_rect(wnd)
             if not parent_rect:
                 continue
+            if not self._is_confirmed_main_window(wnd):
+                continue
             parent_class_name = self._get_class(wnd)
             parent_identity = (wnd, pid, parent_class_name)
 
             children = self._enum_children(wnd)
-            if not self._is_main_window(children):
-                continue
             parent_text = self._get_text(wnd, pid, parent_class_name)
+            main_window_has_ad_signal = False
+            child_contexts: List[Tuple[int, str, str, Optional[Rect], bool]] = []
 
             for child in children:
+                if self._is_stopping():
+                    return
                 if not self.api.is_window(child):
                     continue
                 if self.api.get_parent(child) != wnd:
                     continue
                 class_name = self._get_class(child)
                 window_text = self._get_text(child, pid, class_name)
+                child_rect: Optional[Rect] = None
+                aggressive_signal = False
+                legacy_signal = False
+                if self.settings.aggressive_mode:
+                    child_rect = self.api.get_window_rect(child)
+                    if child_rect:
+                        has_ad_token = self._subtree_contains_ad_token(child, memo=ad_token_memo)
+                        aggressive_signal = self._layout.should_hide_aggressive(
+                            class_name,
+                            has_ad_token,
+                            child_rect,
+                            parent_rect,
+                        )
+                if self.rules.close_empty_eva_child_requires_ad_signal:
+                    legacy_signal = self._matches_legacy_signature(
+                        child,
+                        memo_exact=legacy_text_memo,
+                        memo_contains=legacy_contains_memo,
+                    )
+                if legacy_signal or aggressive_signal:
+                    main_window_has_ad_signal = True
+                child_contexts.append((child, class_name, window_text, child_rect, aggressive_signal))
 
+            for child, class_name, window_text, child_rect, aggressive_signal in child_contexts:
+                if self._is_stopping():
+                    return
                 if class_name == self.rules.eva_child_class and window_text == "" and parent_text != "":
                     with self._cache_lock:
                         has_custom_scroll = self._custom_scroll_cache.get(parent_identity)
@@ -382,22 +424,33 @@ class LayoutOnlyEngine:
                         has_custom_scroll = self._class_name_starts_with(wnd, self.rules.custom_scroll_prefix)
                         with self._cache_lock:
                             self._custom_scroll_cache[parent_identity] = has_custom_scroll
-                    if self._layout.should_close_empty_eva_child(class_name, window_text, parent_text, has_custom_scroll):
+                    if self._layout.should_close_empty_eva_child(
+                        class_name,
+                        window_text,
+                        parent_text,
+                        has_custom_scroll,
+                        main_window_has_ad_signal,
+                    ):
+                        if self._is_stopping():
+                            return
                         self.api.send_message(child, WM_CLOSE, 0, 0)
                         closed += 1
 
+                if self._is_stopping():
+                    return
                 if self._layout.apply_view_resize(child, window_text, parent_rect):
                     resized += 1
 
                 if not self.settings.aggressive_mode:
                     continue
-                child_rect = self.api.get_window_rect(child)
-                if child_rect and self._layout.should_hide_aggressive(class_name, window_text, child_rect, parent_rect):
+                if child_rect and aggressive_signal:
                     if self._hide_window(child, pid, class_name, hide_reason=HIDE_REASON_AGGRESSIVE):
                         matched_hidden_identities.add((child, pid, class_name))
                         hidden += 1
 
         for wnd in candidates:
+            if self._is_stopping():
+                return
             if not self.api.is_window(wnd):
                 continue
             pid = self.api.get_window_thread_process_id(wnd)
@@ -454,6 +507,36 @@ class LayoutOnlyEngine:
         self.api.enum_child_windows(parent_hwnd, lambda hwnd: children.append(hwnd) or True)
         return children
 
+    def _is_main_window_candidate(self, item: WindowInfo) -> bool:
+        if item.class_name not in self._main_window_class_set:
+            return False
+        if item.parent_hwnd != 0:
+            return False
+        if item.text and not self._is_main_title(item.text):
+            return False
+        return True
+
+    def _is_confirmed_main_window(self, hwnd: int, item: Optional[WindowInfo] = None) -> bool:
+        if item is not None and not self._is_main_window_candidate(item):
+            return False
+        if item is None:
+            pid = self.api.get_window_thread_process_id(hwnd)
+            if pid <= 0:
+                return False
+            class_name = self._get_class(hwnd)
+            item = WindowInfo(
+                hwnd=hwnd,
+                pid=pid,
+                class_name=class_name,
+                text=self._get_text(hwnd, pid, class_name),
+                parent_hwnd=self.api.get_parent(hwnd),
+                rect=None,
+                visible=False,
+            )
+            if not self._is_main_window_candidate(item):
+                return False
+        return self._has_main_view_signature(hwnd)
+
     def _is_main_window(self, child_handles: List[int]) -> bool:
         for hwnd in child_handles:
             class_name = self._get_class(hwnd)
@@ -469,6 +552,34 @@ class LayoutOnlyEngine:
         if not self.api.is_window(parent_hwnd):
             return False
         return self._is_main_window(self._enum_children(parent_hwnd))
+
+    def _subtree_contains_ad_token(
+        self,
+        hwnd: int,
+        max_depth: int = 8,
+        memo: Optional[Dict[Tuple[int, int], bool]] = None,
+    ) -> bool:
+        cache_key = (hwnd, max_depth)
+        if memo is not None and cache_key in memo:
+            return memo[cache_key]
+        if max_depth < 0 or not self.api.is_window(hwnd):
+            if memo is not None:
+                memo[cache_key] = False
+            return False
+        pid = self.api.get_window_thread_process_id(hwnd)
+        class_name = self._get_class(hwnd)
+        if self._layout.contains_ad_token(self._get_text(hwnd, pid, class_name)):
+            if memo is not None:
+                memo[cache_key] = True
+            return True
+        for child in self._enum_children(hwnd):
+            if self._subtree_contains_ad_token(child, max_depth - 1, memo=memo):
+                if memo is not None:
+                    memo[cache_key] = True
+                return True
+        if memo is not None:
+            memo[cache_key] = False
+        return False
 
     def _class_name_starts_with(self, hwnd: int, prefix: str, max_depth: int = 8) -> bool:
         if max_depth < 0 or not self.api.is_window(hwnd):
@@ -560,6 +671,8 @@ class LayoutOnlyEngine:
         return False
 
     def _hide_window(self, hwnd: int, pid: int, class_name: str, hide_reason: str) -> bool:
+        if self._is_stopping():
+            return False
         if pid <= 0 or not self.api.is_window(hwnd):
             return False
         identity = (hwnd, pid, class_name)
@@ -702,6 +815,7 @@ class LayoutOnlyEngine:
             self._last_activity = 0.0
         with self._state_lock:
             self._state.kakao_pid_count = 0
+            self._state.candidate_main_window_count = 0
             self._state.main_window_count = 0
             self._state.last_tick = now
 

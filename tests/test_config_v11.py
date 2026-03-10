@@ -80,6 +80,8 @@ def test_rules_load_with_bounds(tmp_path: Path):
     assert 0.1 <= rules.banner_min_width_ratio <= 1.0
     assert rules.cache_ttl_seconds >= 0.1
     assert rules.chrome_legacy_title_contains == ["Chrome Legacy Window"]
+    assert rules.hide_bottom_banner_without_token is False
+    assert rules.close_empty_eva_child_requires_ad_signal is True
 
 
 def test_rules_load_falls_back_ad_candidate_classes_to_main_window_classes(tmp_path: Path):
@@ -144,6 +146,24 @@ def test_rules_load_coerces_chrome_legacy_title_contains(tmp_path: Path):
     rules = LayoutRulesV11.load(str(path))
 
     assert rules.chrome_legacy_title_contains == ["Legacy Window"]
+
+
+def test_rules_load_with_new_boolean_flags(tmp_path: Path):
+    path = tmp_path / "layout_rules_v11.json"
+    path.write_text(
+        json.dumps(
+            {
+                "hide_bottom_banner_without_token": True,
+                "close_empty_eva_child_requires_ad_signal": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rules = LayoutRulesV11.load(str(path))
+
+    assert rules.hide_bottom_banner_without_token is True
+    assert rules.close_empty_eva_child_requires_ad_signal is False
 
 
 def test_settings_load_backs_up_malformed_json_and_records_warning(tmp_path: Path):
@@ -321,12 +341,18 @@ def test_settings_save_writes_json_atomically(tmp_path: Path):
 
 def test_rules_save_writes_json_atomically(tmp_path: Path):
     path = tmp_path / "layout_rules_v11.json"
-    rules = LayoutRulesV11(main_window_titles=["CustomTitle"])
+    rules = LayoutRulesV11(
+        main_window_titles=["CustomTitle"],
+        hide_bottom_banner_without_token=True,
+        close_empty_eva_child_requires_ad_signal=False,
+    )
 
     rules.save(str(path))
 
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved["main_window_titles"] == ["CustomTitle"]
+    assert saved["hide_bottom_banner_without_token"] is True
+    assert saved["close_empty_eva_child_requires_ad_signal"] is False
 
 
 def test_settings_save_preserves_existing_file_on_atomic_replace_failure(tmp_path: Path, monkeypatch):

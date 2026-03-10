@@ -312,6 +312,8 @@ class LayoutRulesV11:
     banner_max_height_px: int = 260
     banner_min_width_ratio: float = 0.75
     banner_bottom_margin_px: int = 40
+    hide_bottom_banner_without_token: bool = False
+    close_empty_eva_child_requires_ad_signal: bool = True
     layout_shadow_padding_px: int = 2
     main_view_padding_px: int = 31
     cache_ttl_seconds: float = 8.0
@@ -364,6 +366,14 @@ class LayoutRulesV11:
             banner_max_height_px=banner_max_height_px,
             banner_min_width_ratio=_coerce_float(raw.get("banner_min_width_ratio"), defaults.banner_min_width_ratio, minimum=0.1, maximum=1.0),
             banner_bottom_margin_px=_coerce_int(raw.get("banner_bottom_margin_px"), defaults.banner_bottom_margin_px, minimum=0),
+            hide_bottom_banner_without_token=_coerce_bool(
+                raw.get("hide_bottom_banner_without_token"),
+                defaults.hide_bottom_banner_without_token,
+            ),
+            close_empty_eva_child_requires_ad_signal=_coerce_bool(
+                raw.get("close_empty_eva_child_requires_ad_signal"),
+                defaults.close_empty_eva_child_requires_ad_signal,
+            ),
             layout_shadow_padding_px=_coerce_int(raw.get("layout_shadow_padding_px"), defaults.layout_shadow_padding_px, minimum=0),
             main_view_padding_px=_coerce_int(raw.get("main_view_padding_px"), defaults.main_view_padding_px, minimum=0),
             cache_ttl_seconds=_coerce_float(raw.get("cache_ttl_seconds"), defaults.cache_ttl_seconds, minimum=0.1),

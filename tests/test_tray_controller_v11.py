@@ -47,6 +47,7 @@ class FakeRoot:
 class FakeState:
     enabled: bool = True
     kakao_pid_count: int = 1
+    candidate_main_window_count: int = 1
     main_window_count: int = 1
     hidden_windows: int = 2
     resized_windows: int = 3
@@ -150,6 +151,7 @@ def test_toggle_startup_does_not_persist_on_registry_failure(monkeypatch):
 
     assert settings.run_on_startup is False
     assert saved["called"] == 0
+    assert "startup registry update failed" in controller.status_text()
 
 
 def test_toggle_startup_persists_on_registry_success(monkeypatch):
@@ -258,6 +260,7 @@ def test_toggle_startup_rolls_back_when_save_fails(monkeypatch):
 
     assert settings.run_on_startup is False
     assert calls == [True, False]
+    assert "registry rolled back" in controller.status_text()
 
 
 def test_toggle_aggressive_mode_rolls_back_when_save_fails(monkeypatch):
@@ -324,6 +327,51 @@ def test_status_text_shows_restore_failure_context(monkeypatch):
 
     assert "복원실패 2" in text
     assert "restore failed" in text
+
+
+def test_status_text_shows_candidate_main_window_count(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    engine._state.main_window_count = 1
+    engine._state.candidate_main_window_count = 3
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    text = controller.status_text()
+
+    assert "후보 3" in text
+
+
+def test_status_text_uses_ui_warning_when_engine_error_absent(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    controller._set_ui_warning("tray unavailable: startup timeout")
+
+    text = controller.status_text()
+
+    assert "경고" in text
+    assert "tray unavailable" in text
+
+
+def test_status_text_prefers_engine_error_over_ui_warning(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    engine._state.last_tick = time.time()
+    engine._state.last_error = "engine error"
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    controller._set_ui_warning("tray unavailable: startup timeout")
+
+    text = controller.status_text()
+
+    assert "오류" in text
+    assert "engine error" in text
+    assert "tray unavailable" not in text
 
 
 def test_status_update_skips_redundant_set(monkeypatch):
@@ -585,3 +633,4 @@ def test_tray_unexpected_exit_forces_window_visible(monkeypatch):
 
     assert controller.is_tray_available() is False
     assert getattr(root, "deiconified", False) is True
+    assert "tray unavailable" in controller.status_text()

@@ -391,6 +391,54 @@ def test_engine_candidate_detection_requires_class_and_legacy_signature():
     assert 210 not in api.hide_calls
 
 
+def test_engine_popup_ad_class_is_closed_hidden_and_not_restored():
+    api = FakeAPI()
+    api.windows[240] = {
+        "pid": 42,
+        "class": "EVA_Window",
+        "text": "",
+        "parent": 0,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.windows[241] = {
+        "pid": 42,
+        "class": "AdFitWebView",
+        "text": "",
+        "parent": 240,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.children[240] = [241]
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    rules = LayoutRulesV11(popup_ad_classes=["AdFitWebView"])
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    assert 240 in closed_handles
+    assert 241 in closed_handles
+    assert 240 in api.hide_calls
+    assert 241 in api.hide_calls
+    assert (240, 0, 0, 0, 0) in api.set_pos_calls
+    assert (241, 0, 0, 0, 0) in api.set_pos_calls
+    assert all(identity[0] not in {240, 241} for identity in engine._hidden_windows)
+
+    engine.set_enabled(False)
+    engine.stop()
+
+    assert 240 not in api.show_calls
+    assert 241 not in api.show_calls
+
+
 def test_engine_aggressive_mode_does_not_hide_bottom_widget_without_token_by_default():
     api = FakeAPI()
     api.windows[102]["text"] = "Footer Panel"
@@ -436,6 +484,47 @@ def test_engine_aggressive_mode_can_use_descendant_token_signal():
     engine.apply_once()
 
     assert 102 in api.hide_calls
+
+
+def test_engine_non_main_media_viewer_window_is_ignored():
+    api = FakeAPI()
+    api.windows[250] = {
+        "pid": 42,
+        "class": "EVA_Window_Dblclk",
+        "text": "이모티콘 보러가기",
+        "parent": 0,
+        "rect": (60, 60, 460, 420),
+        "visible": True,
+    }
+    api.windows[251] = {
+        "pid": 42,
+        "class": "Chrome_WidgetWin_1",
+        "text": "Advertisement",
+        "parent": 250,
+        "rect": (60, 60, 460, 420),
+        "visible": True,
+    }
+    api.children[250] = [251]
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    resized_handles = [hwnd for hwnd, _x, _y, _width, _height in api.set_pos_calls]
+
+    assert 250 not in api.hide_calls
+    assert 251 not in api.hide_calls
+    assert 250 not in closed_handles
+    assert 251 not in closed_handles
+    assert 251 not in resized_handles
 
 
 def test_engine_candidate_detection_supports_legacy_substring_signature():

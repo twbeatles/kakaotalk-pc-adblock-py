@@ -307,6 +307,7 @@ class LayoutRulesV11:
     chrome_legacy_title: str = "Chrome Legacy Window"
     chrome_legacy_title_contains: List[str] = field(default_factory=lambda: ["Chrome Legacy Window"])
     chrome_widget_prefixes: List[str] = field(default_factory=lambda: ["Chrome_WidgetWin_"])
+    popup_ad_classes: List[str] = field(default_factory=lambda: ["AdFitWebView"])
     aggressive_ad_tokens: List[str] = field(default_factory=lambda: ["Ad", "AdFit", "Advertisement", "광고"])
     banner_min_height_px: int = 40
     banner_max_height_px: int = 260
@@ -361,6 +362,7 @@ class LayoutRulesV11:
                 defaults.chrome_legacy_title_contains,
             ),
             chrome_widget_prefixes=_coerce_str_list(raw.get("chrome_widget_prefixes"), defaults.chrome_widget_prefixes),
+            popup_ad_classes=_coerce_str_list(raw.get("popup_ad_classes"), defaults.popup_ad_classes),
             aggressive_ad_tokens=_coerce_str_list(raw.get("aggressive_ad_tokens"), defaults.aggressive_ad_tokens),
             banner_min_height_px=banner_min_height_px,
             banner_max_height_px=banner_max_height_px,

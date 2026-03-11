@@ -22,6 +22,7 @@
   - 성능 설정: `idle_poll_interval_ms`, `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
   - 신규 필드 누락 시 기본값 자동 보완(무중단 호환)
   - 신규 rules 플래그: `hide_bottom_banner_without_token=false`, `close_empty_eva_child_requires_ad_signal=true`
+  - 신규 rules 키: `popup_ad_classes=["AdFitWebView"]`
   - rules 로드 시 `ad_candidate_classes`가 누락/비정상이면 `main_window_classes`로 폴백
   - JSON 파손(파싱 실패/최상위 타입 불일치) 시 `*.broken-YYYYMMDD-HHMMSS` 백업 생성 후 기본값 JSON으로 self-heal
   - rules 로드 시 `banner_min_height_px > banner_max_height_px` 역전값을 자동 교정(swap)하고 경고 기록
@@ -34,6 +35,7 @@
   - 단일 watch+apply 루프(적응형 폴링), `main_window_classes` 기반 메인 윈도우 식별
   - 차단 OFF 상태에서는 watch/apply를 모두 일시중단하고 1.0초 저비용 대기
   - 광고 후보는 `ad_candidate_classes`(기본: `EVA_Window_Dblclk`, `EVA_Window`)와 레거시 시그니처(exact + substring)를 함께 사용해 필터링
+  - 비메인 top-level KakaoTalk window의 direct child가 `popup_ad_classes`와 매치되면 upstream parity 방식(`WM_CLOSE + SW_HIDE + zero-size`)으로 parent/child popup을 정리
   - 메인 윈도우 상태는 `candidate_main_window_count`(후보)와 `main_window_count`(확정)로 분리되며, 실제 apply는 확정 기준만 사용
   - 엔진 시작 시 enabled인 경우에만 동기 warm-up(scan+apply 1회)으로 초기 광고 깜빡임 완화
   - 빈 문자열 텍스트 캐시는 짧은 TTL로 재조회해 초기 UI 구성 구간 탐지 지연 완화
@@ -90,6 +92,8 @@
 
 - `kakaotalk_adblock.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`, `tkinter`)을 `hiddenimports`로 명시하고 `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 누락을 방지
 - 타입 경계 모듈 `kakao_adblocker.protocols`도 `hiddenimports`에 포함되어 onefile 모듈 누락 가능성을 줄임
+- 패키지 루트 `kakao_adblocker`도 `hiddenimports`에 포함되어 lazy export 패키지 접근 경로를 고정
+- popup parity(`popup_ad_classes` / `AdFitWebView`)는 기존 `config/event_engine` 내부 구현이라 추가 PyInstaller hook 없이 현재 spec으로 포장 가능
 
 ## 동작 규칙
 
@@ -99,10 +103,11 @@
 4. `LockModeView`: `width=parent-2`, `height=parent`
 5. `Chrome Legacy Window` 하위 광고 서브윈도우 숨김
 6. 공격 모드에서 `Chrome_WidgetWin_* + ad token` 또는 subtree token이 확인된 하단 배너 후보만 숨기고, geometry-only hide는 rules opt-in일 때만 허용
-7. 시작프로그램 토글은 레지스트리 갱신 성공 시에만 설정 파일에 반영
-8. `--dump-tree`는 UI 모듈을 로딩하지 않는 경량 경로로 동작
-9. `--self-check`는 UI/엔진을 기동하지 않고 APPDATA/tasklist/레지스트리/`tkinter/Tk`/트레이 import 환경 진단만 수행
-10. 시작 경고 상태 반영은 `복구 실패 > 자동 복구 > 기타` 우선순위로 1건 노출
+7. 비메인 top-level 창의 direct child가 `AdFitWebView` 등 `popup_ad_classes`에 매치되면 popup parent/child를 close/hide/zero-size 처리
+8. 시작프로그램 토글은 레지스트리 갱신 성공 시에만 설정 파일에 반영
+9. `--dump-tree`는 UI 모듈을 로딩하지 않는 경량 경로로 동작
+10. `--self-check`는 UI/엔진을 기동하지 않고 APPDATA/tasklist/레지스트리/`tkinter/Tk`/트레이 import 환경 진단만 수행
+11. 시작 경고 상태 반영은 `복구 실패 > 자동 복구 > 기타` 우선순위로 1건 노출
 
 ## 설정 파일
 

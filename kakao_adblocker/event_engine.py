@@ -85,6 +85,7 @@ class LayoutOnlyEngine:
 
         self._main_window_class_set = frozenset(self.rules.main_window_classes)
         self._ad_candidate_class_set = frozenset(self.rules.ad_candidate_classes)
+        self._popup_ad_class_set = frozenset(self.rules.popup_ad_classes)
         self._main_window_handles: Set[int] = set()
         self._ad_subwindow_candidates: Set[int] = set()
         self._kakao_pids: Set[int] = set()
@@ -466,6 +467,10 @@ class LayoutOnlyEngine:
                     matched_hidden_identities.add((wnd, pid, class_name))
                     hidden += 1
 
+        popup_hidden, popup_closed = self._remove_popup_ads(kakao_pids)
+        hidden += popup_hidden
+        closed += popup_closed
+
         self._restore_no_longer_matched_hidden_windows(matched_hidden_identities)
 
         with self._state_lock:
@@ -669,6 +674,52 @@ class LayoutOnlyEngine:
             if self._has_window_text_contains(hwnd, token, memo=memo_contains):
                 return True
         return False
+
+    def _remove_popup_ads(self, kakao_pids: Set[int]) -> Tuple[int, int]:
+        if not kakao_pids or not self._popup_ad_class_set or self._is_stopping():
+            return 0, 0
+
+        hidden = 0
+        closed = 0
+        handled_hwnds: Set[int] = set()
+
+        for item in self._collect_windows(kakao_pids):
+            if self._is_stopping():
+                return hidden, closed
+            if item.parent_hwnd != 0:
+                continue
+            if self._is_confirmed_main_window(item.hwnd, item=item):
+                continue
+
+            for child in self._enum_children(item.hwnd):
+                if self._is_stopping():
+                    return hidden, closed
+                if not self.api.is_window(child):
+                    continue
+                if self.api.get_parent(child) != item.hwnd:
+                    continue
+                if self._get_class(child) not in self._popup_ad_class_set:
+                    continue
+
+                if item.hwnd not in handled_hwnds:
+                    parent_hidden, parent_closed = self._dismiss_popup_window(item.hwnd)
+                    hidden += parent_hidden
+                    closed += parent_closed
+                    handled_hwnds.add(item.hwnd)
+                if child not in handled_hwnds:
+                    child_hidden, child_closed = self._dismiss_popup_window(child)
+                    hidden += child_hidden
+                    closed += child_closed
+                    handled_hwnds.add(child)
+        return hidden, closed
+
+    def _dismiss_popup_window(self, hwnd: int) -> Tuple[int, int]:
+        if self._is_stopping() or hwnd <= 0 or not self.api.is_window(hwnd):
+            return 0, 0
+        self.api.send_message(hwnd, WM_CLOSE, 0, 0)
+        self.api.show_window(hwnd, SW_HIDE)
+        self.api.set_window_pos(hwnd, 0, 0, 0, 0, 0)
+        return 1, 1
 
     def _hide_window(self, hwnd: int, pid: int, class_name: str, hide_reason: str) -> bool:
         if self._is_stopping():

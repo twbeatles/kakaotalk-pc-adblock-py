@@ -152,3 +152,42 @@ def test_window_dump_fixture_empty_eva_child_without_ad_signal_is_not_closed():
 
     closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
     assert 104 not in closed_handles
+
+
+def test_window_dump_fixture_popup_adfit_webview_is_closed_hidden_and_not_restored():
+    _payload, api, engine = _run_fixture(
+        "popup_adfit_webview.json",
+        settings=LayoutSettingsV11(enabled=True, aggressive_mode=False),
+        rules=LayoutRulesV11(popup_ad_classes=["AdFitWebView"]),
+    )
+
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    assert 200 in closed_handles
+    assert 201 in closed_handles
+    assert 200 in api.hide_calls
+    assert 201 in api.hide_calls
+    assert (200, 0, 0, 0, 0) in api.set_pos_calls
+    assert (201, 0, 0, 0, 0) in api.set_pos_calls
+    assert all(identity[0] not in {200, 201} for identity in engine._hidden_windows)
+
+    engine.set_enabled(False)
+    engine.stop()
+
+    assert 200 not in api.show_calls
+    assert 201 not in api.show_calls
+
+
+def test_window_dump_fixture_non_main_media_viewer_is_ignored():
+    _payload, api, _engine = _run_fixture(
+        "non_main_media_viewer.json",
+        settings=LayoutSettingsV11(enabled=True, aggressive_mode=True),
+    )
+
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    resized_handles = [hwnd for hwnd, _x, _y, _width, _height in api.set_pos_calls]
+
+    assert 200 not in api.hide_calls
+    assert 201 not in api.hide_calls
+    assert 200 not in closed_handles
+    assert 201 not in closed_handles
+    assert 201 not in resized_handles

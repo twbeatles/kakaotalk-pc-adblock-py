@@ -22,6 +22,9 @@
   "chrome_widget_prefixes": [
     "Chrome_WidgetWin_"
   ],
+  "popup_ad_classes": [
+    "AdFitWebView"
+  ],
   "aggressive_ad_tokens": [
     "Ad",
     "AdFit",

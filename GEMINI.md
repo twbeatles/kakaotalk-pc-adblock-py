@@ -26,6 +26,7 @@
   - advanced perf knobs: `idle_poll_interval_ms`, `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
   - missing new perf fields are backfilled with safe defaults
   - new rules flags: `hide_bottom_banner_without_token=false`, `close_empty_eva_child_requires_ad_signal=true`
+  - new rules key: `popup_ad_classes=["AdFitWebView"]`
   - rules loader falls back `ad_candidate_classes` to `main_window_classes` when missing/invalid
   - malformed/non-object JSON input is backed up as `*.broken-YYYYMMDD-HHMMSS` and then self-healed with default JSON
   - inverted banner bounds (`banner_min_height_px > banner_max_height_px`) are auto-normalized
@@ -38,6 +39,7 @@
   - main window detection uses `main_window_classes` from rules
   - candidate and confirmed main-window counts are tracked separately; apply uses confirmed handles only
   - ad candidate filtering uses `ad_candidate_classes` (default: `EVA_Window_Dblclk`, `EVA_Window`) + legacy exact/substring signatures
+  - non-main top-level KakaoTalk windows are scanned for direct-child popup classes and matched `AdFitWebView`-style popups are closed/hidden/zero-sized with upstream parity behavior
   - empty-title main windows can still be detected via child signature fallback (`OnlineMainView` / `LockModeView`)
   - synchronous warm-up scan/apply on engine start runs only when enabled
   - empty-string text cache uses short TTL refresh to reduce startup detection lag
@@ -115,6 +117,8 @@
 - `kakaotalk_adblock.spec` explicitly includes runtime modules (`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`, `tkinter`) in `hiddenimports`.
 - `kakaotalk_adblock.spec` also includes `kakao_adblocker.protocols` to keep typed runtime imports explicit in onefile packaging.
 - `kakaotalk_adblock.spec` also includes `collect_submodules("pystray")` and `collect_submodules("PIL")` to avoid onefile runtime import misses.
+- `kakaotalk_adblock.spec` includes package root `kakao_adblocker` so lazy exports remain importable in onefile builds and tooling paths.
+- popup parity (`popup_ad_classes` / `AdFitWebView`) stays inside existing modules, so no extra hidden-import or hook change is required.
 - `--self-check` now exercises dynamic Tk diagnostics as well, so explicit `tkinter` hidden imports keep onefile packaging deterministic.
 
 ## Legacy Archive

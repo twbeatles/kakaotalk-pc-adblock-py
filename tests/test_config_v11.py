@@ -80,6 +80,7 @@ def test_rules_load_with_bounds(tmp_path: Path):
     assert 0.1 <= rules.banner_min_width_ratio <= 1.0
     assert rules.cache_ttl_seconds >= 0.1
     assert rules.chrome_legacy_title_contains == ["Chrome Legacy Window"]
+    assert rules.popup_ad_classes == ["AdFitWebView"]
     assert rules.hide_bottom_banner_without_token is False
     assert rules.close_empty_eva_child_requires_ad_signal is True
 
@@ -146,6 +147,22 @@ def test_rules_load_coerces_chrome_legacy_title_contains(tmp_path: Path):
     rules = LayoutRulesV11.load(str(path))
 
     assert rules.chrome_legacy_title_contains == ["Legacy Window"]
+
+
+def test_rules_load_coerces_popup_ad_classes(tmp_path: Path):
+    path = tmp_path / "layout_rules_v11.json"
+    path.write_text(
+        json.dumps(
+            {
+                "popup_ad_classes": ["AdFitWebView", "", 123, "PopupWebView"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rules = LayoutRulesV11.load(str(path))
+
+    assert rules.popup_ad_classes == ["AdFitWebView", "PopupWebView"]
 
 
 def test_rules_load_with_new_boolean_flags(tmp_path: Path):
@@ -264,6 +281,7 @@ def test_rules_default_strings_are_utf8_intact():
     assert "카카오톡" in rules.main_window_titles
     assert "광고" in rules.aggressive_ad_tokens
     assert "Chrome Legacy Window" in rules.chrome_legacy_title_contains
+    assert "AdFitWebView" in rules.popup_ad_classes
 
 
 def test_rules_load_warns_when_mojibake_signatures_detected(tmp_path: Path):
@@ -351,6 +369,7 @@ def test_rules_save_writes_json_atomically(tmp_path: Path):
 
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved["main_window_titles"] == ["CustomTitle"]
+    assert saved["popup_ad_classes"] == ["AdFitWebView"]
     assert saved["hide_bottom_banner_without_token"] is True
     assert saved["close_empty_eva_child_requires_ad_signal"] is False
 

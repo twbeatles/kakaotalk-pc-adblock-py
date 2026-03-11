@@ -145,8 +145,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         engine_started = True
         if priority_warning:
             engine.report_warning(priority_warning)
-        controller.start()
         requested_minimized = bool(args.minimized or settings.start_minimized)
+        controller.start(startup_minimized=requested_minimized)
         should_start_minimized = requested_minimized
         if requested_minimized and not controller.is_tray_available():
             warning = "tray unavailable, minimized ignored"

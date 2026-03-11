@@ -21,6 +21,7 @@ PYSTRAY_AVAILABLE = False
 _LAST_TRAY_IMPORT_FAILURE_AT: Optional[float] = None
 _TRAY_IMPORT_RETRY_TTL_SECONDS = 30.0
 _TRAY_READY_TIMEOUT_SECONDS = 1.5
+_TRAY_READY_TIMEOUT_MINIMIZED_SECONDS = 8.0
 
 
 def _load_tray_modules() -> bool:
@@ -125,7 +126,7 @@ class TrayController:
 
         ttk.Button(wrapper, text="종료", command=self.shutdown).pack(anchor="e", pady=(14, 0))
 
-    def start(self) -> None:
+    def start(self, startup_minimized: bool = False) -> None:
         self._ui_queue_running = True
         self._schedule_ui_queue_drain()
         self._sync_startup_setting()
@@ -133,7 +134,8 @@ class TrayController:
         self._tray_start_error = ""
         self._tray_stopping = False
         if _load_tray_modules():
-            self._setup_tray()
+            ready_timeout_seconds = _TRAY_READY_TIMEOUT_MINIMIZED_SECONDS if startup_minimized else _TRAY_READY_TIMEOUT_SECONDS
+            self._setup_tray(ready_timeout_seconds=ready_timeout_seconds)
             if not self._tray_available:
                 if self._tray_start_error:
                     self.logger.warning("tray mode disabled: %s", self._tray_start_error)
@@ -341,7 +343,7 @@ class TrayController:
         except Exception:
             pass
 
-    def _setup_tray(self) -> None:
+    def _setup_tray(self, ready_timeout_seconds: float = _TRAY_READY_TIMEOUT_SECONDS) -> None:
         try:
             pystray_mod, _image_mod, _draw_mod = _require_tray_modules()
         except RuntimeError:
@@ -385,7 +387,7 @@ class TrayController:
 
         self._tray_thread = threading.Thread(target=_runner, daemon=True)
         self._tray_thread.start()
-        ready = self._tray_ready_event.wait(_TRAY_READY_TIMEOUT_SECONDS)
+        ready = self._tray_ready_event.wait(ready_timeout_seconds)
         if not ready or not self._tray_running or self._tray_start_error:
             if not ready and not self._tray_start_error:
                 self._tray_start_error = "startup timeout"

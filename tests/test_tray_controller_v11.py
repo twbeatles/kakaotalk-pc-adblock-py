@@ -173,7 +173,7 @@ def test_toggle_startup_persists_on_registry_success(monkeypatch):
 
 def test_start_syncs_startup_setting_from_registry(monkeypatch):
     monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
-    monkeypatch.setattr(TrayController, "_setup_tray", lambda self: None)
+    monkeypatch.setattr(TrayController, "_setup_tray", lambda self, **_kwargs: None)
     root = FakeRoot()
     engine = FakeEngine()
     settings = LayoutSettingsV11(enabled=True, run_on_startup=False)
@@ -188,9 +188,33 @@ def test_start_syncs_startup_setting_from_registry(monkeypatch):
     assert saved["called"] == 1
 
 
+def test_start_uses_extended_tray_timeout_for_minimized_launch(monkeypatch):
+    import kakao_adblocker.ui as ui
+
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    monkeypatch.setattr(ui, "_load_tray_modules", lambda: True)
+
+    captured = {"timeout": None}
+
+    def fake_setup(self, ready_timeout_seconds=ui._TRAY_READY_TIMEOUT_SECONDS):
+        captured["timeout"] = ready_timeout_seconds
+
+    monkeypatch.setattr(TrayController, "_setup_tray", fake_setup)
+    monkeypatch.setattr("kakao_adblocker.ui.StartupManager.is_enabled", lambda: False)
+
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    controller.start(startup_minimized=True)
+
+    assert captured["timeout"] == ui._TRAY_READY_TIMEOUT_MINIMIZED_SECONDS
+
+
 def test_startup_sync_skips_save_when_already_synced(monkeypatch):
     monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
-    monkeypatch.setattr(TrayController, "_setup_tray", lambda self: None)
+    monkeypatch.setattr(TrayController, "_setup_tray", lambda self, **_kwargs: None)
     root = FakeRoot()
     engine = FakeEngine()
     settings = LayoutSettingsV11(enabled=True, run_on_startup=True)

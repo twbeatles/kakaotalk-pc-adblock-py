@@ -47,12 +47,14 @@ class FakeController:
         self.hidden_called = False
         self.shown_called = False
         self.started = False
+        self.started_with_minimized = None
         self.stopped = False
         self._tray_available = FakeController.tray_available_default
         FakeController.last_instance = self
 
-    def start(self):
+    def start(self, startup_minimized=False):
         self.started = True
+        self.started_with_minimized = bool(startup_minimized)
 
     def show_startup_notice(self):
         self.notice_called = True
@@ -91,6 +93,7 @@ def test_main_skips_startup_notice_when_minimized(monkeypatch):
     assert rc == 0
     controller = FakeController.last_instance
     assert controller is not None
+    assert controller.started_with_minimized is True
     assert controller.notice_called is False
     assert controller.hidden_called is True
 
@@ -103,6 +106,7 @@ def test_main_shows_startup_notice_when_not_minimized(monkeypatch):
     assert rc == 0
     controller = FakeController.last_instance
     assert controller is not None
+    assert controller.started_with_minimized is False
     assert controller.notice_called is True
     assert controller.shown_called is True
 
@@ -199,7 +203,7 @@ def test_main_reports_priority_load_warning_to_engine(monkeypatch):
 
 def test_main_cleans_up_when_controller_start_fails(monkeypatch):
     class BrokenController(FakeController):
-        def start(self):
+        def start(self, startup_minimized=False):
             raise RuntimeError("start failed")
 
     settings = LayoutSettingsV11(start_minimized=True)

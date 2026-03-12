@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import csv
+import ctypes
 import io
 import os
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
+from ctypes import wintypes
 from pathlib import Path
-from typing import Any, Set, Tuple
+from typing import Any, Optional, Set, Tuple
 
 try:
     import psutil as _psutil
@@ -131,6 +134,84 @@ class StartupManager:
     NAME = "KakaoTalkAdBlockerLayout"
 
     @staticmethod
+    def build_command() -> str:
+        if getattr(sys, "frozen", False):
+            return f'"{sys.executable}" --startup-launch --minimized'
+        script = Path(sys.argv[0]).resolve()
+        return f'"{sys.executable}" "{script}" --startup-launch --minimized'
+
+    @staticmethod
+    def get_registered_command() -> Optional[str]:
+        winreg_mod: Any = winreg
+        if winreg_mod is None:
+            return None
+        try:
+            key = winreg_mod.OpenKey(
+                winreg_mod.HKEY_CURRENT_USER,
+                StartupManager.KEY,
+                0,
+                winreg_mod.KEY_READ,
+            )
+            try:
+                value, _reg_type = winreg_mod.QueryValueEx(key, StartupManager.NAME)
+                return str(value or "")
+            finally:
+                winreg_mod.CloseKey(key)
+        except Exception:
+            return None
+
+    @staticmethod
+    def sync_registration_command() -> bool:
+        winreg_mod: Any = winreg
+        if winreg_mod is None:
+            return False
+        expected = StartupManager.build_command()
+        current = StartupManager.get_registered_command()
+        if current == expected:
+            return True
+        try:
+            key = winreg_mod.OpenKey(
+                winreg_mod.HKEY_CURRENT_USER,
+                StartupManager.KEY,
+                0,
+                winreg_mod.KEY_SET_VALUE,
+            )
+            try:
+                winreg_mod.SetValueEx(key, StartupManager.NAME, 0, winreg_mod.REG_SZ, expected)
+            finally:
+                winreg_mod.CloseKey(key)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def wait_for_shell_ready(timeout_seconds: float = 15.0, poll_interval_seconds: float = 0.5) -> bool:
+        if os.name != "nt":
+            return False
+        try:
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            find_window = user32.FindWindowW
+            find_window.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+            find_window.restype = wintypes.HWND
+        except Exception:
+            return False
+
+        deadline = time.monotonic() + max(timeout_seconds, 0.0)
+        stable_hits = 0
+        required_hits = 2
+        while time.monotonic() < deadline:
+            explorer_ready = bool(ProcessInspector.get_process_ids("explorer.exe"))
+            tray_ready = bool(find_window("Shell_TrayWnd", None))
+            if explorer_ready and tray_ready:
+                stable_hits += 1
+                if stable_hits >= required_hits:
+                    return True
+            else:
+                stable_hits = 0
+            time.sleep(max(poll_interval_seconds, 0.05))
+        return bool(ProcessInspector.get_process_ids("explorer.exe")) and bool(find_window("Shell_TrayWnd", None))
+
+    @staticmethod
     def is_enabled() -> bool:
         winreg_mod: Any = winreg
         if winreg_mod is None:
@@ -164,11 +245,7 @@ class StartupManager:
             )
             try:
                 if enable:
-                    if getattr(sys, "frozen", False):
-                        cmd = f'"{sys.executable}" --minimized'
-                    else:
-                        script = Path(sys.argv[0]).resolve()
-                        cmd = f'"{sys.executable}" "{script}" --minimized'
+                    cmd = StartupManager.build_command()
                     winreg_mod.SetValueEx(key, StartupManager.NAME, 0, winreg_mod.REG_SZ, cmd)
                 else:
                     try:

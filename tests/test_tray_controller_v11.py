@@ -221,6 +221,7 @@ def test_startup_sync_skips_save_when_already_synced(monkeypatch):
     saved = {"called": 0}
     monkeypatch.setattr(settings, "save", lambda _path=None: saved.__setitem__("called", saved["called"] + 1))
     monkeypatch.setattr("kakao_adblocker.ui.StartupManager.is_enabled", lambda: True)
+    monkeypatch.setattr("kakao_adblocker.ui.StartupManager.sync_registration_command", lambda: True)
 
     controller = TrayController(root, engine, settings, logging.getLogger("test"))
     controller.start()
@@ -316,11 +317,65 @@ def test_sync_startup_setting_rolls_back_when_save_fails(monkeypatch):
 
     monkeypatch.setattr(settings, "save", broken_save)
     monkeypatch.setattr("kakao_adblocker.ui.StartupManager.is_enabled", lambda: True)
+    monkeypatch.setattr("kakao_adblocker.ui.StartupManager.sync_registration_command", lambda: True)
     controller = TrayController(root, engine, settings, logging.getLogger("test"))
 
     controller._sync_startup_setting()
 
     assert settings.run_on_startup is False
+
+
+def test_schedule_startup_tray_refresh_registers_delayed_refresh(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    controller._tray_available = True
+
+    controller.schedule_startup_tray_refresh()
+
+    assert controller._startup_tray_refresh_scheduled is True
+    assert getattr(root, "_last_after", None) == controller._refresh_tray_after_startup_launch
+
+
+def test_refresh_tray_after_startup_launch_restarts_icon(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    controller._tray_available = True
+    controller._ui_queue_running = True
+    calls = []
+
+    monkeypatch.setattr(controller, "stop_tray", lambda: calls.append("stop"))
+
+    def fake_setup(*, ready_timeout_seconds):
+        calls.append(("setup", ready_timeout_seconds))
+        controller._tray_available = True
+        controller._tray_start_error = ""
+
+    monkeypatch.setattr(controller, "_setup_tray", fake_setup)
+
+    controller._refresh_tray_after_startup_launch()
+
+    assert calls[0] == "stop"
+    assert calls[1][0] == "setup"
+
+
+def test_sync_startup_setting_warns_when_command_refresh_fails(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True, run_on_startup=True)
+    monkeypatch.setattr("kakao_adblocker.ui.StartupManager.is_enabled", lambda: True)
+    monkeypatch.setattr("kakao_adblocker.ui.StartupManager.sync_registration_command", lambda: False)
+
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    controller._sync_startup_setting()
+
+    assert "startup command refresh failed" in controller.status_text()
 
 
 def test_status_text_shows_compact_error_context(monkeypatch):

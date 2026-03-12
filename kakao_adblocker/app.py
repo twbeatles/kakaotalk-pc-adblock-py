@@ -32,6 +32,7 @@ def _load_ui_dependencies() -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="KakaoTalk Layout AdBlocker v11")
     parser.add_argument("--minimized", action="store_true", help="Start minimized to tray")
+    parser.add_argument("--startup-launch", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--dump-tree", action="store_true", help="Dump KakaoTalk window tree and exit")
     parser.add_argument("--dump-dir", type=str, default=None, help="Dump directory for --dump-tree")
     parser.add_argument("--self-check", action="store_true", help="Run environment self-check and exit")
@@ -141,6 +142,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     controller = TrayController(root, engine, settings, logger)
     engine_started = False
     try:
+        if args.startup_launch:
+            shell_ready = StartupManager.wait_for_shell_ready()
+            if not shell_ready:
+                logger.warning("startup launch: shell readiness wait timed out")
         engine.start()
         engine_started = True
         if priority_warning:
@@ -159,6 +164,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         if should_start_minimized:
             controller.hide_window()
+            if args.startup_launch and controller.is_tray_available():
+                controller.schedule_startup_tray_refresh()
         else:
             controller.show_window()
 

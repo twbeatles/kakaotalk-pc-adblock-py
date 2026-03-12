@@ -1,6 +1,15 @@
 from kakao_adblocker import services
 
 
+def test_startup_manager_build_command_includes_startup_launch(monkeypatch):
+    monkeypatch.setattr(services.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(services.sys, "executable", r"C:\Apps\KakaoTalkLayoutAdBlocker_v11.exe")
+
+    command = services.StartupManager.build_command()
+
+    assert command == r'"C:\Apps\KakaoTalkLayoutAdBlocker_v11.exe" --startup-launch --minimized'
+
+
 def test_process_inspector_isolates_per_process_psutil_errors(monkeypatch):
     class BrokenProc:
         @property
@@ -169,3 +178,67 @@ def test_startup_manager_probe_access_failure_on_write(monkeypatch):
 
     assert ok is False
     assert "write failed" in detail
+
+
+def test_startup_manager_sync_registration_command_updates_stale_value(monkeypatch):
+    class FakeWinreg:
+        HKEY_CURRENT_USER = object()
+        KEY_READ = 0x20019
+        KEY_SET_VALUE = 0x0002
+        REG_SZ = 1
+        written = []
+
+        @staticmethod
+        def OpenKey(*_args, **_kwargs):
+            return "k"
+
+        @staticmethod
+        def QueryValueEx(_key, _name):
+            return (r'"C:\Apps\KakaoTalkLayoutAdBlocker_v11.exe" --minimized', FakeWinreg.REG_SZ)
+
+        @staticmethod
+        def SetValueEx(_key, _name, _reserved, _regtype, value):
+            FakeWinreg.written.append(value)
+
+        @staticmethod
+        def CloseKey(_key):
+            return None
+
+    monkeypatch.setattr(services, "WINREG_AVAILABLE", True)
+    monkeypatch.setattr(services, "winreg", FakeWinreg)
+    monkeypatch.setattr(
+        services.StartupManager,
+        "build_command",
+        staticmethod(lambda: r'"C:\Apps\KakaoTalkLayoutAdBlocker_v11.exe" --startup-launch --minimized'),
+    )
+
+    ok = services.StartupManager.sync_registration_command()
+
+    assert ok is True
+    assert FakeWinreg.written == [r'"C:\Apps\KakaoTalkLayoutAdBlocker_v11.exe" --startup-launch --minimized']
+
+
+def test_startup_manager_wait_for_shell_ready_requires_stable_shell(monkeypatch):
+    class FakeFindWindow:
+        def __init__(self):
+            self.calls = 0
+            self.argtypes = None
+            self.restype = None
+
+        def __call__(self, _class_name, _window_name):
+            self.calls += 1
+            return 0 if self.calls == 1 else 100
+
+    fake_find_window = FakeFindWindow()
+    fake_user32 = type("FakeUser32", (), {"FindWindowW": fake_find_window})()
+
+    times = iter([0.0, 0.2, 0.6, 1.0])
+    monkeypatch.setattr(services.os, "name", "nt")
+    monkeypatch.setattr(services.ctypes, "WinDLL", lambda *_args, **_kwargs: fake_user32)
+    monkeypatch.setattr(services.ProcessInspector, "get_process_ids", staticmethod(lambda _name: {1234}))
+    monkeypatch.setattr(services.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(services.time, "sleep", lambda _seconds: None)
+
+    ok = services.StartupManager.wait_for_shell_ready(timeout_seconds=2.0, poll_interval_seconds=0.1)
+
+    assert ok is True

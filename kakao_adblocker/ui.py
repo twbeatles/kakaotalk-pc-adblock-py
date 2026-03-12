@@ -22,6 +22,7 @@ _LAST_TRAY_IMPORT_FAILURE_AT: Optional[float] = None
 _TRAY_IMPORT_RETRY_TTL_SECONDS = 30.0
 _TRAY_READY_TIMEOUT_SECONDS = 1.5
 _TRAY_READY_TIMEOUT_MINIMIZED_SECONDS = 8.0
+_STARTUP_TRAY_REFRESH_DELAY_MS = 3000
 
 
 def _load_tray_modules() -> bool:
@@ -79,6 +80,7 @@ class TrayController:
         self._ui_queue_running = False
         self._ui_queue_batch_size = 32
         self._status_label: Any = None
+        self._startup_tray_refresh_scheduled = False
         try:
             if isinstance(self.root, tk.Misc):
                 self._status_var: StatusVarLike = tk.StringVar(master=self.root, value="상태: 초기화")
@@ -333,6 +335,18 @@ class TrayController:
         except Exception:
             self.logger.debug("Close behavior update skipped")
 
+    def schedule_startup_tray_refresh(self, delay_ms: int = _STARTUP_TRAY_REFRESH_DELAY_MS) -> None:
+        if self._startup_tray_refresh_scheduled or not self.is_tray_available():
+            return
+        if not hasattr(self.root, "after"):
+            return
+        self._startup_tray_refresh_scheduled = True
+        try:
+            self.root.after(delay_ms, self._refresh_tray_after_startup_launch)
+        except Exception:
+            self._startup_tray_refresh_scheduled = False
+            self.logger.debug("Startup tray refresh scheduling skipped")
+
     def shutdown(self) -> None:
         self._ui_queue_running = False
         self.stop_tray()
@@ -474,6 +488,24 @@ class TrayController:
         if not self._is_window_visible():
             self.show_window()
 
+    def _refresh_tray_after_startup_launch(self) -> None:
+        self._startup_tray_refresh_scheduled = False
+        if not self._ui_queue_running:
+            return
+        if not self.is_tray_available():
+            return
+        self.logger.info("Refreshing tray icon after startup launch")
+        window_was_hidden = not self._is_window_visible()
+        self.stop_tray()
+        self._setup_tray(ready_timeout_seconds=_TRAY_READY_TIMEOUT_SECONDS)
+        if self._tray_available:
+            self._clear_ui_warning(("tray unavailable:",))
+            return
+        message = self._tray_start_error or "startup refresh failed"
+        self._set_ui_warning(f"tray unavailable: {message}")
+        if window_was_hidden:
+            self.show_window()
+
     def _menu_toggle_blocking(self, _icon, _item) -> None:
         self._safe_after(self.toggle_blocking)
 
@@ -516,6 +548,9 @@ class TrayController:
 
     def _sync_startup_setting(self) -> None:
         actual = StartupManager.is_enabled()
+        if actual and not StartupManager.sync_registration_command():
+            self.logger.warning("Failed to refresh startup registration command")
+            self._set_ui_warning("startup command refresh failed")
         if self.settings.run_on_startup == actual:
             return
         if not self._save_setting_attr("run_on_startup", actual):

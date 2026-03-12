@@ -49,6 +49,7 @@ class FakeController:
         self.started = False
         self.started_with_minimized = None
         self.stopped = False
+        self.startup_refresh_scheduled = False
         self._tray_available = FakeController.tray_available_default
         FakeController.last_instance = self
 
@@ -71,6 +72,9 @@ class FakeController:
     def is_tray_available(self):
         return self._tray_available
 
+    def schedule_startup_tray_refresh(self):
+        self.startup_refresh_scheduled = True
+
 
 def _patch_main_dependencies(monkeypatch, settings, load_warnings=None):
     monkeypatch.setattr(app.os, "name", "nt")
@@ -82,6 +86,7 @@ def _patch_main_dependencies(monkeypatch, settings, load_warnings=None):
     monkeypatch.setattr(app, "LayoutOnlyEngine", FakeEngine)
     monkeypatch.setattr(app.tk, "Tk", FakeRoot)
     monkeypatch.setattr(app, "TrayController", FakeController)
+    monkeypatch.setattr(app.StartupManager, "wait_for_shell_ready", staticmethod(lambda: True))
     FakeController.tray_available_default = True
 
 
@@ -126,6 +131,22 @@ def test_main_ignores_minimized_when_tray_unavailable(monkeypatch):
     assert controller.hidden_called is False
     assert controller.shown_called is True
     assert engine.reported_warnings[-1] == "tray unavailable, minimized ignored"
+
+
+def test_main_waits_for_shell_and_schedules_tray_refresh_on_startup_launch(monkeypatch):
+    settings = LayoutSettingsV11(start_minimized=True)
+    _patch_main_dependencies(monkeypatch, settings)
+    called = {"wait": 0}
+    monkeypatch.setattr(app.StartupManager, "wait_for_shell_ready", staticmethod(lambda: called.__setitem__("wait", called["wait"] + 1) or True))
+
+    rc = app.main(["--startup-launch", "--minimized"])
+
+    assert rc == 0
+    controller = FakeController.last_instance
+    assert controller is not None
+    assert called["wait"] == 1
+    assert controller.hidden_called is True
+    assert controller.startup_refresh_scheduled is True
 
 
 def test_main_fail_fast_on_non_windows(monkeypatch, capsys):

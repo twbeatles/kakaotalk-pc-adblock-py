@@ -194,7 +194,7 @@ def test_start_uses_extended_tray_timeout_for_minimized_launch(monkeypatch):
     monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
     monkeypatch.setattr(ui, "_load_tray_modules", lambda: True)
 
-    captured = {"timeout": None}
+    captured: dict[str, float | None] = {"timeout": None}
 
     def fake_setup(self, ready_timeout_seconds=ui._TRAY_READY_TIMEOUT_SECONDS):
         captured["timeout"] = ready_timeout_seconds

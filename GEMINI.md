@@ -16,7 +16,8 @@
 - `--dump-tree` runs in a lightweight path without UI/tray module import
 - `--self-check` runs diagnostics only (no UI/tray/engine start)
 - package `kakao_adblocker` exports are lazy-resolved via `__getattr__`
-- static analysis baseline is fixed by root `pyrightconfig.json`; `requirements-dev.txt` includes `pyright`
+- static analysis baseline is fixed by root `pyrightconfig.json`; active scope is `kakao_adblocker`, `tests`, and `kakaotalk_layout_adblock_v11.py`
+- preferred local verification entrypoint is `.\scripts\dev_check.ps1` (`-SkipTests` runs pyright only)
 
 ## Architecture
 
@@ -118,6 +119,7 @@
 - `kakaotalk_adblock.spec` also includes `kakao_adblocker.protocols` to keep typed runtime imports explicit in onefile packaging.
 - `kakaotalk_adblock.spec` also includes `collect_submodules("pystray")` and `collect_submodules("PIL")` to avoid onefile runtime import misses.
 - `kakaotalk_adblock.spec` includes package root `kakao_adblocker` so lazy exports remain importable in onefile builds and tooling paths.
+- `kakaotalk_adblock.spec` excludes `pywinauto` and `comtypes` so archived legacy/UIA-only dependencies do not leak into the active v11 onefile bundle.
 - popup parity (`popup_ad_classes` / `AdFitWebView`) stays inside existing modules, so no extra hidden-import or hook change is required.
 - `--self-check` now exercises dynamic Tk diagnostics as well, so explicit `tkinter` hidden imports keep onefile packaging deterministic.
 
@@ -131,4 +133,4 @@ Legacy code/assets were moved under `legacy/`:
 - `legacy/configs/*`
 - `legacy/scripts/*`
 - `legacy/카카오톡 광고제거 v10.0.py`
-- archived legacy files keep per-file `pyright` directives to preserve behavior while maintaining repo-wide type-check pass
+- archived legacy files stay outside the active repo-wide `pyright` scope; existing per-file directives remain for ad hoc maintenance

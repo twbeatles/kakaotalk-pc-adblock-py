@@ -5,6 +5,9 @@ from pathlib import Path
 import kakao_adblocker.config as config_module
 from kakao_adblocker.config import LayoutRulesV11, LayoutSettingsV11, consume_load_warnings
 
+MOJIBAKE_KAKAOTALK = "\u79fb\ub301\ubb45?\u317d\ub11a"
+MOJIBAKE_AD = "\u613f\ubb0e\ud02c"
+
 
 def test_settings_load_with_type_coercion(tmp_path: Path):
     path = tmp_path / "layout_settings_v11.json"
@@ -289,8 +292,8 @@ def test_rules_load_warns_when_mojibake_signatures_detected(tmp_path: Path):
     path.write_text(
         json.dumps(
             {
-                "main_window_titles": ["移댁뭅?ㅽ넚"],
-                "aggressive_ad_tokens": ["愿묎퀬"],
+                "main_window_titles": [MOJIBAKE_KAKAOTALK],
+                "aggressive_ad_tokens": [MOJIBAKE_AD],
             }
         ),
         encoding="utf-8",
@@ -299,7 +302,8 @@ def test_rules_load_warns_when_mojibake_signatures_detected(tmp_path: Path):
 
     rules = LayoutRulesV11.load(str(path))
 
-    assert rules.main_window_titles == ["移댁뭅?ㅽ넚"]
+    assert rules.main_window_titles == [MOJIBAKE_KAKAOTALK]
+    assert rules.aggressive_ad_tokens == [MOJIBAKE_AD]
     warnings = consume_load_warnings()
     assert any("문자열 무결성 경고" in msg for msg in warnings)
 

@@ -15,6 +15,7 @@ if not WINDOWS_VERSION_INFO.exists():
 # Popup-removal parity (`popup_ad_classes` / `AdFitWebView`) lives in existing stdlib-backed modules.
 # Tray readiness/JSON self-heal/startup-warning/stale-hide recovery changes are also stdlib-only.
 # v11 typing boundary module(`kakao_adblocker.protocols`) is imported by runtime modules.
+# Legacy-only deps (`pywinauto`, `comtypes`) stay excluded so onefile builds match the active v11 runtime surface.
 hiddenimports = [
     "psutil",
     "PIL",
@@ -51,6 +52,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
+    # Keep packaging focused on active v11 code paths; archived legacy/UIA fallback deps are not bundled.
     excludes=["pytest", "unittest", "pywinauto", "comtypes"],
     noarchive=False,
 )

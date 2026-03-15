@@ -61,7 +61,10 @@ LEGACY_FILES = (
 BROKEN_BACKUP_KEEP_COUNT = 10
 BROKEN_BACKUP_MAX_AGE_DAYS = 30
 _BROKEN_SUFFIX_RE = re.compile(r"\.broken-(\d{8}-\d{6})$")
-_MOJIBAKE_SIGNATURES = ("移댁뭅?ㅽ넚", "愿묎퀬")
+# Store intentional mojibake signatures via escapes so code pages/editors do not rewrite them.
+_MOJIBAKE_KAKAOTALK = "\u79fb\ub301\ubb45?\u317d\ub11a"
+_MOJIBAKE_AD = "\u613f\ubb0e\ud02c"
+_MOJIBAKE_SIGNATURES = (_MOJIBAKE_KAKAOTALK, _MOJIBAKE_AD)
 
 
 def _coerce_bool(value: Any, default: bool) -> bool:

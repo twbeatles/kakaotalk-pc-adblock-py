@@ -2,10 +2,10 @@
   "include": [
     "kakao_adblocker",
     "tests",
-    "legacy",
     "kakaotalk_layout_adblock_v11.py"
   ],
   "exclude": [
+    "legacy",
     "build",
     "dist",
     "__pycache__",

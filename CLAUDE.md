@@ -23,12 +23,13 @@
   - 성능 설정: `idle_poll_interval_ms`, `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
   - 신규 필드 누락 시 기본값 자동 보완(무중단 호환)
   - 신규 rules 플래그: `hide_bottom_banner_without_token=false`, `close_empty_eva_child_requires_ad_signal=true`
-  - 신규 rules 키: `popup_ad_classes=["AdFitWebView"]`
+  - 신규 rules 키: `popup_ad_classes=["AdFitWebView"]`, `popup_host_text_contains=[]`, `popup_host_require_empty_text=true`
   - rules 로드 시 `ad_candidate_classes`가 누락/비정상이면 `main_window_classes`로 폴백
   - JSON 파손(파싱 실패/최상위 타입 불일치) 시 `*.broken-YYYYMMDD-HHMMSS` 백업 생성 후 기본값 JSON으로 self-heal
   - rules 로드 시 `banner_min_height_px > banner_max_height_px` 역전값을 자동 교정(swap)하고 경고 기록
   - `*.broken-*` 백업 자동 정리(30일 초과 삭제 + 최신 10개 유지)를 로드 시마다 적용
   - settings/rules 저장은 원자적 교체(`os.replace`)로 파일 파손 리스크 완화
+  - 첫 실행 runtime bootstrap(settings/rules/log)은 create-if-missing 방식으로 처리해 기존 파일 덮어쓰기를 방지
   - rules 문자열 무결성 self-check(mojibake 시그니처/`�`) 경고
   - 앱 계층 전달용 `consume_load_warnings()` 제공
 - `kakao_adblocker/event_engine.py`
@@ -36,7 +37,8 @@
   - 단일 watch+apply 루프(적응형 폴링), `main_window_classes` 기반 메인 윈도우 식별
   - 차단 OFF 상태에서는 watch/apply를 모두 일시중단하고 1.0초 저비용 대기
   - 광고 후보는 `ad_candidate_classes`(기본: `EVA_Window_Dblclk`, `EVA_Window`)와 레거시 시그니처(exact + substring)를 함께 사용해 필터링
-  - 비메인 top-level KakaoTalk window의 direct child가 `popup_ad_classes`와 매치되면 upstream parity 방식(`WM_CLOSE + SW_HIDE + zero-size`)으로 parent/child popup을 정리
+  - 비메인 top-level KakaoTalk window의 direct child가 `popup_ad_classes`와 매치되더라도, 기본값에서는 empty host title 또는 allowlist(`popup_host_text_contains`) 매치일 때만 parent/child popup을 정리
+  - popup dismiss는 실제 close/hide/zero-size 성공 여부를 검증하고, 실패 시 상태(`last_error`)와 로그에 반영
   - 메인 윈도우 상태는 `candidate_main_window_count`(후보)와 `main_window_count`(확정)로 분리되며, 실제 apply는 확정 기준만 사용
   - 엔진 시작 시 enabled인 경우에만 동기 warm-up(scan+apply 1회)으로 초기 광고 깜빡임 완화
   - 빈 문자열 텍스트 캐시는 짧은 TTL로 재조회해 초기 UI 구성 구간 탐지 지연 완화
@@ -81,6 +83,7 @@
   - startup 토글에서 저장 실패 시 레지스트리 역롤백
   - aggressive mode 토글은 저장 성공 후 엔진에 즉시 반영
   - `_tick_status` 스케줄링(`root.after`)도 종료 경합 예외 비전파
+  - `로그 폴더 열기` / `GitHub 리포 열기` 실패도 상태 문자열 경고로 노출
 - `kakao_adblocker/services.py`
   - `ProcessInspector`, `StartupManager`, `ReleaseService`
   - `ProcessInspector.get_process_ids()`는 psutil 경로에서 per-process 예외 격리 처리
@@ -96,6 +99,7 @@
 - 패키지 루트 `kakao_adblocker`도 `hiddenimports`에 포함되어 lazy export 패키지 접근 경로를 고정
 - `pywinauto`, `comtypes`는 active v11 런타임 바깥의 legacy/UIA 의존성이므로 `.spec`의 `excludes`로 유지
 - popup parity(`popup_ad_classes` / `AdFitWebView`)는 기존 `config/event_engine` 내부 구현이라 추가 PyInstaller hook 없이 현재 spec으로 포장 가능
+- `scripts/build_release.ps1`는 기본값으로 built EXE에 `--self-check` packaged smoke를 1회 수행하며, 필요 시 `-SkipSmokeCheck`로 비활성화 가능
 
 ## 동작 규칙
 
@@ -105,10 +109,10 @@
 4. `LockModeView`: `width=parent-2`, `height=parent`
 5. `Chrome Legacy Window` 하위 광고 서브윈도우 숨김
 6. 공격 모드에서 `Chrome_WidgetWin_* + ad token` 또는 subtree token이 확인된 하단 배너 후보만 숨기고, geometry-only hide는 rules opt-in일 때만 허용
-7. 비메인 top-level 창의 direct child가 `AdFitWebView` 등 `popup_ad_classes`에 매치되면 popup parent/child를 close/hide/zero-size 처리
+7. 비메인 top-level 창의 direct child가 `AdFitWebView` 등 `popup_ad_classes`에 매치되더라도 기본값에서는 empty host title 또는 allowlist match일 때만 popup parent/child를 close/hide/zero-size 처리
 8. 시작프로그램 토글은 레지스트리 갱신 성공 시에만 설정 파일에 반영
 9. `--dump-tree`는 UI 모듈을 로딩하지 않는 경량 경로로 동작
-10. `--self-check`는 UI/엔진을 기동하지 않고 APPDATA/tasklist/레지스트리/`tkinter/Tk`/트레이 import 환경 진단만 수행
+10. `--self-check`는 UI/엔진을 기동하지 않고 APPDATA/logging bootstrap/tasklist/레지스트리/`tkinter/Tk`/트레이 import 환경 진단만 수행
 11. 시작 경고 상태 반영은 `복구 실패 > 자동 복구 > 기타` 우선순위로 1건 노출
 
 ## 설정 파일

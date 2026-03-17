@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import logging
 import os
 import sys
 from types import SimpleNamespace
@@ -9,7 +10,7 @@ from typing import Any, Callable, Optional, Tuple
 
 from .config import APPDATA_DIR, LayoutRulesV11, LayoutSettingsV11, VERSION, consume_load_warnings, ensure_runtime_files
 from .event_engine import LayoutOnlyEngine
-from .logging_setup import setup_logging
+from .logging_setup import _build_formatter, _resolve_level, probe_logging_setup, setup_logging
 from .services import ProcessInspector, StartupManager
 
 # Lazy-loaded UI dependencies for faster non-UI startup paths.
@@ -79,9 +80,25 @@ def _check_tk_boot() -> Tuple[bool, str]:
                 pass
 
 
+def _build_fallback_logger(level: str, reason: str) -> tuple[logging.Logger, str]:
+    logger = logging.getLogger("KakaoTalkLayoutAdBlocker")
+    logger.setLevel(logging.DEBUG)
+    logger.handlers.clear()
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(_resolve_level(level))
+    stream_handler.setFormatter(_build_formatter())
+    logger.addHandler(stream_handler)
+
+    warning = f"logging init failed ({reason}); using stderr fallback"
+    logger.warning(warning)
+    return logger, warning
+
+
 def _run_self_check() -> int:
     checks: list[Tuple[str, Callable[[], Tuple[bool, str]]]] = [
         ("APPDATA 접근/쓰기", _check_appdata_writable),
+        ("로그 초기화", probe_logging_setup),
         ("tasklist 실행", ProcessInspector.probe_tasklist),
         ("Run 레지스트리 읽기/쓰기 접근", StartupManager.probe_access),
         ("Tk UI 부팅", _check_tk_boot),
@@ -121,13 +138,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     ensure_runtime_files()
     settings = LayoutSettingsV11.load()
     rules = LayoutRulesV11.load()
-    logger = setup_logging(settings.log_level)
+    logging_warning = ""
+    try:
+        logger = setup_logging(settings.log_level)
+    except Exception as exc:
+        logger, logging_warning = _build_fallback_logger(settings.log_level, exc.__class__.__name__)
     load_warnings = consume_load_warnings()
+    combined_warnings = list(load_warnings)
+    if logging_warning:
+        combined_warnings.append(logging_warning)
 
     engine = LayoutOnlyEngine(logger, settings, rules)
     for warning in load_warnings:
         logger.warning(warning)
-    priority_warning = _pick_priority_warning(load_warnings)
+    priority_warning = _pick_priority_warning(combined_warnings)
 
     if args.dump_tree:
         path = engine.dump_window_tree(out_dir=args.dump_dir)

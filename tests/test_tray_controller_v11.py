@@ -117,6 +117,32 @@ def test_tray_controller_release_menu(monkeypatch):
     assert called["url"] == 1
 
 
+def test_tray_controller_open_log_folder_sets_warning_on_failure(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    monkeypatch.setattr("kakao_adblocker.ui.ShellService.open_folder", lambda _path: False)
+    controller.open_log_folder()
+
+    assert "log folder open failed" in controller.status_text()
+
+
+def test_tray_controller_open_release_page_sets_warning_on_failure(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    monkeypatch.setattr("kakao_adblocker.ui.ReleaseService.open_releases_page", lambda: False)
+    controller.open_releases_page()
+
+    assert "release page open failed" in controller.status_text()
+
+
 def test_tray_controller_startup_notice_once(monkeypatch):
     monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
     root = FakeRoot()

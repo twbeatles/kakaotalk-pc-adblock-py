@@ -558,6 +558,24 @@ class LayoutOnlyEngine:
             return False
         return self._is_main_window(self._enum_children(parent_hwnd))
 
+    def _popup_host_text_matches(self, text: str) -> bool:
+        normalized = (text or "").strip()
+        if not normalized:
+            return True
+        text_lc = normalized.lower()
+        if any(token and token.lower() in text_lc for token in self.rules.popup_host_text_contains):
+            return True
+        return not self.rules.popup_host_require_empty_text
+
+    def _is_popup_ad_host_candidate(self, item: WindowInfo) -> bool:
+        if item.parent_hwnd != 0:
+            return False
+        if self._is_confirmed_main_window(item.hwnd, item=item):
+            return False
+        if not self.api.is_window_visible(item.hwnd):
+            return False
+        return self._popup_host_text_matches(item.text)
+
     def _subtree_contains_ad_token(
         self,
         hwnd: int,
@@ -686,9 +704,7 @@ class LayoutOnlyEngine:
         for item in self._collect_windows(kakao_pids):
             if self._is_stopping():
                 return hidden, closed
-            if item.parent_hwnd != 0:
-                continue
-            if self._is_confirmed_main_window(item.hwnd, item=item):
+            if not self._is_popup_ad_host_candidate(item):
                 continue
 
             for child in self._enum_children(item.hwnd):
@@ -697,6 +713,8 @@ class LayoutOnlyEngine:
                 if not self.api.is_window(child):
                     continue
                 if self.api.get_parent(child) != item.hwnd:
+                    continue
+                if not self.api.is_window_visible(child):
                     continue
                 if self._get_class(child) not in self._popup_ad_class_set:
                     continue
@@ -717,9 +735,31 @@ class LayoutOnlyEngine:
         if self._is_stopping() or hwnd <= 0 or not self.api.is_window(hwnd):
             return 0, 0
         self.api.send_message(hwnd, WM_CLOSE, 0, 0)
+        if not self.api.is_window(hwnd):
+            return 1, 1
+
         self.api.show_window(hwnd, SW_HIDE)
-        self.api.set_window_pos(hwnd, 0, 0, 0, 0, 0)
-        return 1, 1
+        if not self.api.is_window(hwnd):
+            return 1, 1
+        hidden_ok = not self.api.is_window_visible(hwnd)
+        if not hidden_ok:
+            self.logger.debug("popup window still visible after SW_HIDE hwnd=%s win32err=%s", hwnd, self._api_last_error())
+
+        resized_ok = bool(self.api.set_window_pos(hwnd, 0, 0, 0, 0, 0))
+        if not self.api.is_window(hwnd):
+            return 1, 1
+        if not resized_ok:
+            self.logger.debug("popup set_window_pos(zero-size) failed hwnd=%s win32err=%s", hwnd, self._api_last_error())
+
+        if not hidden_ok or not resized_ok:
+            failures: list[str] = []
+            if not hidden_ok:
+                failures.append("hide failed")
+            if not resized_ok:
+                failures.append("zero-size failed")
+            self._set_error(f"popup-dismiss: hwnd={hwnd} {'; '.join(failures)}")
+
+        return (1 if hidden_ok or resized_ok else 0, 0)
 
     def _hide_window(self, hwnd: int, pid: int, class_name: str, hide_reason: str) -> bool:
         if self._is_stopping():

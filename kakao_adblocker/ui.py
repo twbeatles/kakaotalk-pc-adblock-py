@@ -304,11 +304,20 @@ class TrayController:
         self.logger.info("Restore failure counters reset")
         self._update_status(force=True)
 
+    def _report_ui_action_failure(self, action: str, warning: str) -> None:
+        self.logger.warning("UI action failed: %s", action)
+        self._set_ui_warning(warning)
+        self._update_status(force=True)
+
     def open_log_folder(self) -> None:
-        ShellService.open_folder(APPDATA_DIR)
+        if ShellService.open_folder(APPDATA_DIR):
+            return
+        self._report_ui_action_failure("open_log_folder", "log folder open failed")
 
     def open_releases_page(self) -> None:
-        ReleaseService.open_releases_page()
+        if ReleaseService.open_releases_page():
+            return
+        self._report_ui_action_failure("open_releases_page", "release page open failed")
 
     def show_window(self) -> None:
         if hasattr(self.root, "deiconify"):

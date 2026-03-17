@@ -11,9 +11,9 @@ if not WINDOWS_VERSION_INFO.exists():
     raise FileNotFoundError(f"Missing Windows version resource: {WINDOWS_VERSION_INFO}")
 
 # Keep lazy-imported core/runtime modules explicit so onefile packaging stays stable.
-# `--self-check` path also imports pystray/PIL/tkinter via importlib for diagnostics.
-# Popup-removal parity (`popup_ad_classes` / `AdFitWebView`) lives in existing stdlib-backed modules.
-# Tray readiness/JSON self-heal/startup-warning/stale-hide recovery changes are also stdlib-only.
+# `--self-check` path also imports pystray/PIL/tkinter and probes logging bootstrap.
+# Popup-removal parity (`popup_ad_classes` / `AdFitWebView`) and popup host text guards live in existing stdlib-backed modules.
+# Tray readiness/JSON self-heal/startup-warning/stale-hide recovery/logging-fallback changes are also stdlib-only.
 # v11 typing boundary module(`kakao_adblocker.protocols`) is imported by runtime modules.
 # Legacy-only deps (`pywinauto`, `comtypes`) stay excluded so onefile builds match the active v11 runtime surface.
 hiddenimports = [

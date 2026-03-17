@@ -125,6 +125,16 @@ def _atomic_write_text(path: str, text: str) -> None:
         raise
 
 
+def _write_text_if_missing(path: str, text: str) -> None:
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    try:
+        with open(path, "x", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+    except FileExistsError:
+        return
+
+
 def _json_with_trailing_newline(text: str) -> str:
     return text if text.endswith("\n") else f"{text}\n"
 
@@ -311,6 +321,8 @@ class LayoutRulesV11:
     chrome_legacy_title_contains: List[str] = field(default_factory=lambda: ["Chrome Legacy Window"])
     chrome_widget_prefixes: List[str] = field(default_factory=lambda: ["Chrome_WidgetWin_"])
     popup_ad_classes: List[str] = field(default_factory=lambda: ["AdFitWebView"])
+    popup_host_text_contains: List[str] = field(default_factory=list)
+    popup_host_require_empty_text: bool = True
     aggressive_ad_tokens: List[str] = field(default_factory=lambda: ["Ad", "AdFit", "Advertisement", "광고"])
     banner_min_height_px: int = 40
     banner_max_height_px: int = 260
@@ -366,6 +378,11 @@ class LayoutRulesV11:
             ),
             chrome_widget_prefixes=_coerce_str_list(raw.get("chrome_widget_prefixes"), defaults.chrome_widget_prefixes),
             popup_ad_classes=_coerce_str_list(raw.get("popup_ad_classes"), defaults.popup_ad_classes),
+            popup_host_text_contains=_coerce_str_list(raw.get("popup_host_text_contains"), defaults.popup_host_text_contains),
+            popup_host_require_empty_text=_coerce_bool(
+                raw.get("popup_host_require_empty_text"),
+                defaults.popup_host_require_empty_text,
+            ),
             aggressive_ad_tokens=_coerce_str_list(raw.get("aggressive_ad_tokens"), defaults.aggressive_ad_tokens),
             banner_min_height_px=banner_min_height_px,
             banner_max_height_px=banner_max_height_px,
@@ -409,8 +426,7 @@ def _ensure_from_template(dst: str, default_text: str) -> None:
             content = default_text
     except Exception:
         content = default_text
-    with open(dst, "w", encoding="utf-8") as f:
-        f.write(content)
+    _write_text_if_missing(dst, _json_with_trailing_newline(content))
 
 
 def ensure_runtime_files() -> None:
@@ -418,8 +434,7 @@ def ensure_runtime_files() -> None:
     _ensure_from_template(SETTINGS_FILE, LayoutSettingsV11.default_json())
     _ensure_from_template(RULES_FILE, LayoutRulesV11.default_json())
     if not os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "a", encoding="utf-8"):
-            pass
+        _write_text_if_missing(LOG_FILE, "")
 
 
 __all__ = [

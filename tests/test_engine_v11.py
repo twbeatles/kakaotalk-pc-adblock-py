@@ -439,6 +439,90 @@ def test_engine_popup_ad_class_is_closed_hidden_and_not_restored():
     assert 241 not in api.show_calls
 
 
+def test_engine_popup_ad_class_with_non_empty_host_title_is_ignored_by_default():
+    api = FakeAPI()
+    api.windows[240] = {
+        "pid": 42,
+        "class": "EVA_Window",
+        "text": "사진 미리보기",
+        "parent": 0,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.windows[241] = {
+        "pid": 42,
+        "class": "AdFitWebView",
+        "text": "",
+        "parent": 240,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.children[240] = [241]
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    rules = LayoutRulesV11(popup_ad_classes=["AdFitWebView"])
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert 240 not in api.hide_calls
+    assert 241 not in api.hide_calls
+    assert api.send_calls == []
+
+
+def test_engine_popup_ad_class_reports_failure_when_hide_and_zero_size_fail():
+    api = FakeAPI()
+    api.windows[240] = {
+        "pid": 42,
+        "class": "EVA_Window",
+        "text": "",
+        "parent": 0,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.windows[241] = {
+        "pid": 42,
+        "class": "AdFitWebView",
+        "text": "",
+        "parent": 240,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.children[240] = [241]
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    rules = LayoutRulesV11(popup_ad_classes=["AdFitWebView"])
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    def ineffective_show_window(hwnd, cmd):
+        if cmd == SW_HIDE:
+            api.hide_calls.append(hwnd)
+        elif cmd == SW_SHOW:
+            api.show_calls.append(hwnd)
+        return True
+
+    api.show_window = ineffective_show_window
+    api.set_window_pos = lambda *_args, **_kwargs: False
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert engine.state.hidden_windows == 0
+    assert engine.state.closed_windows == 0
+    assert "popup-dismiss: hwnd=" in engine.state.last_error
+
+
 def test_engine_aggressive_mode_does_not_hide_bottom_widget_without_token_by_default():
     api = FakeAPI()
     api.windows[102]["text"] = "Footer Panel"

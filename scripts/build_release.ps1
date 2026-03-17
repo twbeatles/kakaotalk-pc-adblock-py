@@ -3,7 +3,8 @@ param(
     [string]$ExeName = "KakaoTalkLayoutAdBlocker_v11.exe",
     [string]$DistDir = "dist",
     [string]$WorkDir = "build",
-    [switch]$NoSign
+    [switch]$NoSign,
+    [switch]$SkipSmokeCheck
 )
 
 $ErrorActionPreference = "Stop"
@@ -67,6 +68,19 @@ function Invoke-Sign {
     }
 }
 
+function Invoke-SmokeCheck {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ExePath
+    )
+
+    Write-Host "Running packaged smoke check (--self-check): $ExePath"
+    $proc = Start-Process -FilePath $ExePath -ArgumentList @("--self-check") -PassThru -Wait -WindowStyle Hidden
+    if ($proc.ExitCode -ne 0) {
+        throw "packaged --self-check failed with exit code $($proc.ExitCode)"
+    }
+}
+
 Push-Location $repoRoot
 try {
     $signingConfig = $null
@@ -84,6 +98,12 @@ try {
     $exePath = Join-Path $repoRoot (Join-Path $DistDir $ExeName)
     if (-not (Test-Path $exePath)) {
         throw "Built EXE not found: $exePath"
+    }
+
+    if ($SkipSmokeCheck) {
+        Write-Host "Skipping packaged smoke check (-SkipSmokeCheck)."
+    } else {
+        Invoke-SmokeCheck -ExePath $exePath
     }
 
     if ($NoSign) {

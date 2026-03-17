@@ -27,11 +27,12 @@
   - advanced perf knobs: `idle_poll_interval_ms`, `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
   - missing new perf fields are backfilled with safe defaults
   - new rules flags: `hide_bottom_banner_without_token=false`, `close_empty_eva_child_requires_ad_signal=true`
-  - new rules key: `popup_ad_classes=["AdFitWebView"]`
+  - new rules keys: `popup_ad_classes=["AdFitWebView"]`, `popup_host_text_contains=[]`, `popup_host_require_empty_text=true`
   - rules loader falls back `ad_candidate_classes` to `main_window_classes` when missing/invalid
   - malformed/non-object JSON input is backed up as `*.broken-YYYYMMDD-HHMMSS` and then self-healed with default JSON
   - inverted banner bounds (`banner_min_height_px > banner_max_height_px`) are auto-normalized
   - broken-backup cleanup policy is enforced on every load (`>30 days` purge + keep latest `10`)
+  - first-run runtime bootstrap for settings/rules/log now uses create-if-missing semantics so existing files are not overwritten
   - rules string integrity self-check warns on mojibake signatures / replacement char (`�`)
   - `consume_load_warnings()` exposes startup warnings to app layer
 - `event_engine.py`
@@ -40,7 +41,8 @@
   - main window detection uses `main_window_classes` from rules
   - candidate and confirmed main-window counts are tracked separately; apply uses confirmed handles only
   - ad candidate filtering uses `ad_candidate_classes` (default: `EVA_Window_Dblclk`, `EVA_Window`) + legacy exact/substring signatures
-  - non-main top-level KakaoTalk windows are scanned for direct-child popup classes and matched `AdFitWebView`-style popups are closed/hidden/zero-sized with upstream parity behavior
+  - non-main top-level KakaoTalk windows are scanned for direct-child popup classes, but default popup handling now requires an empty host title or an allowlisted title substring before dismissing `AdFitWebView`-style popups
+  - popup dismiss validates actual close/hide/zero-size success and reports failures into `last_error` / log
   - empty-title main windows can still be detected via child signature fallback (`OnlineMainView` / `LockModeView`)
   - synchronous warm-up scan/apply on engine start runs only when enabled
   - empty-string text cache uses short TTL refresh to reduce startup detection lag
@@ -76,6 +78,7 @@
   - startup toggle rolls registry back on settings-save failure
   - setting save failures roll back values (`enabled`, `run_on_startup`, `aggressive_mode`)
   - aggressive mode toggle is pushed into the engine immediately after a successful save
+  - `로그 폴더 열기` / `GitHub 리포 열기` failures surface as short UI warnings instead of failing silently
   - status text includes last error and last tick context
   - status text shows confirmed main-window count and appends candidate count only when larger
   - status text labels cumulative counters explicitly (`누적 숨김`, `누적 리사이즈`)
@@ -120,8 +123,9 @@
 - `kakaotalk_adblock.spec` also includes `collect_submodules("pystray")` and `collect_submodules("PIL")` to avoid onefile runtime import misses.
 - `kakaotalk_adblock.spec` includes package root `kakao_adblocker` so lazy exports remain importable in onefile builds and tooling paths.
 - `kakaotalk_adblock.spec` excludes `pywinauto` and `comtypes` so archived legacy/UIA-only dependencies do not leak into the active v11 onefile bundle.
-- popup parity (`popup_ad_classes` / `AdFitWebView`) stays inside existing modules, so no extra hidden-import or hook change is required.
-- `--self-check` now exercises dynamic Tk diagnostics as well, so explicit `tkinter` hidden imports keep onefile packaging deterministic.
+- popup parity (`popup_ad_classes` / `AdFitWebView`), popup host guards, and logging fallback/probe stay inside existing modules, so no extra hidden-import or hook change is required.
+- `--self-check` now exercises dynamic Tk diagnostics and logging bootstrap probe, so explicit `tkinter` hidden imports keep onefile packaging deterministic.
+- `scripts/build_release.ps1` runs a packaged `--self-check` smoke by default after building; `-SkipSmokeCheck` disables that step.
 
 ## Legacy Archive
 

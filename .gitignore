@@ -21,6 +21,8 @@ pip-wheel-metadata/
 
 build/
 dist/
+window_dump_*.json
+Thumbs.db
 
 .venv/
 venv/

@@ -282,6 +282,7 @@ def test_self_check_path_skips_engine_and_ui(monkeypatch):
     monkeypatch.setattr(app, "LayoutOnlyEngine", NeverEngine)
     monkeypatch.setattr(app, "_load_ui_dependencies", lambda: called.__setitem__("ui_load", called["ui_load"] + 1))
     monkeypatch.setattr(app, "_check_appdata_writable", lambda: (True, "ok"))
+    monkeypatch.setattr(app, "probe_logging_setup", lambda: (True, "ok"))
     monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app, "_check_tk_boot", lambda: (True, "ok"))
@@ -298,6 +299,7 @@ def test_self_check_path_skips_engine_and_ui(monkeypatch):
 def test_self_check_fails_when_tk_boot_check_fails(monkeypatch):
     monkeypatch.setattr(app.os, "name", "nt")
     monkeypatch.setattr(app, "_check_appdata_writable", lambda: (True, "ok"))
+    monkeypatch.setattr(app, "probe_logging_setup", lambda: (True, "ok"))
     monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app, "_check_tk_boot", lambda: (False, "tk failed"))
@@ -306,6 +308,35 @@ def test_self_check_fails_when_tk_boot_check_fails(monkeypatch):
     rc = app.main(["--self-check"])
 
     assert rc == 1
+
+
+def test_self_check_fails_when_logging_probe_fails(monkeypatch):
+    monkeypatch.setattr(app.os, "name", "nt")
+    monkeypatch.setattr(app, "_check_appdata_writable", lambda: (True, "ok"))
+    monkeypatch.setattr(app, "probe_logging_setup", lambda: (False, "log failed"))
+    monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app, "_check_tk_boot", lambda: (True, "ok"))
+    monkeypatch.setattr(app, "_check_tray_import", lambda: (True, "ok"))
+
+    rc = app.main(["--self-check"])
+
+    assert rc == 1
+
+
+def test_main_uses_fallback_logger_when_setup_logging_fails(monkeypatch):
+    settings = LayoutSettingsV11(start_minimized=True)
+    _patch_main_dependencies(monkeypatch, settings)
+    monkeypatch.setattr(app, "setup_logging", lambda _level: (_ for _ in ()).throw(PermissionError("denied")))
+
+    rc = app.main([])
+
+    assert rc == 0
+    engine = FakeEngine.last_instance
+    controller = FakeController.last_instance
+    assert engine is not None
+    assert controller is not None
+    assert any("logging init failed" in warning for warning in engine.reported_warnings)
 
 
 def test_check_tk_boot_success(monkeypatch):

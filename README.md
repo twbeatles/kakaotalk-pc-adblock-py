@@ -19,7 +19,8 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 광고 후보 탐지는 `ad_candidate_classes`를 분리 적용하고, 최상위 후보는 `Chrome Legacy Window` 시그니처를 만족할 때만 처리합니다.
 - 레거시 광고 시그니처는 exact(`chrome_legacy_title`)와 substring(`chrome_legacy_title_contains`)을 함께 지원합니다.
 - 기본 광고 후보 클래스는 `EVA_Window_Dblclk`, `EVA_Window`이며, 구버전 rules에서 `ad_candidate_classes`가 누락/비정상이면 `main_window_classes`로 폴백합니다.
-- 비메인 top-level 카카오톡 창의 direct child가 `popup_ad_classes`(기본값: `AdFitWebView`)와 일치하면 upstream parity 방식으로 parent/child를 `WM_CLOSE + SW_HIDE + zero-size` 처리합니다.
+- 비메인 top-level 카카오톡 창의 direct child가 `popup_ad_classes`(기본값: `AdFitWebView`)와 일치하더라도, 기본값에서는 popup host title이 비어있는 경우에만 광고 popup으로 간주해 parent/child를 `WM_CLOSE + SW_HIDE + zero-size` 처리합니다.
+- popup dismiss는 실제 close/hide/zero-size 성공 여부를 검증하며, 실패 시 상태 문자열(`last_error`)과 로그에 반영됩니다.
 - 공격 모드에서 짧은 토큰(예: `Ad`)은 단어 경계 기준으로 매칭하여 오탐(`ReadLater`, `Header` 등)을 줄였습니다.
 - 공격 모드는 현재 윈도우 텍스트뿐 아니라 자식 subtree 텍스트의 ad token도 확인하지만, 기본값에서는 token 없는 하단 `Chrome_WidgetWin_*` 패널을 geometry만으로 숨기지 않습니다.
 - `hide_bottom_banner_without_token=true` rules opt-in을 켠 경우에만 기존 geometry-only 하단 배너 hide를 허용합니다.
@@ -42,8 +43,9 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - psutil 스캔 초기화/루프 실패 시 `tasklist` 폴백 경로로 PID 탐지를 이어갑니다.
 - PID 탐지 경고(예: psutil 실패, tasklist fallback/실패)는 상태 문자열(`last_error`)과 로그에 반영됩니다.
 - `--dump-tree` 경로는 UI/트레이 모듈을 지연 로딩하여 시작 오버헤드를 최소화합니다.
-- `--self-check` 경로는 UI/엔진을 기동하지 않고 환경 진단(APPDATA, tasklist, 레지스트리, `tkinter/Tk` 부팅, 트레이 모듈 import)만 수행합니다.
+- `--self-check` 경로는 UI/엔진을 기동하지 않고 환경 진단(APPDATA, logging bootstrap, tasklist, 레지스트리, `tkinter/Tk` 부팅, 트레이 모듈 import)만 수행합니다.
 - `--self-check`의 시작프로그램 진단은 Run 레지스트리 `읽기/쓰기` 접근을 함께 점검합니다.
+- 로그 파일 핸들러 초기화가 실패하면 stderr fallback logger로 계속 기동하고, 해당 경고를 상태 문자열에도 반영합니다.
 - UI 실행 경로는 `try/finally` cleanup으로 예외 발생 시에도 `stop_tray()/engine.stop()`를 보장합니다.
 - 기본 설정(`idle_poll_interval_ms=200`) 기준으로 유휴 복귀 지연은 최대 약 200ms를 목표로 합니다.
 - `layout_settings_v11.json`, `layout_rules_v11.json` 파손(파싱 실패/최상위 타입 오류) 시 `*.broken-YYYYMMDD-HHMMSS` 백업을 생성하고, 기본값 JSON으로 자동 복구(self-heal)합니다.
@@ -51,12 +53,14 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 시작 시 다중 경고가 존재하면 상태 문자열(`last_error`)에는 우선순위 1건(`복구 실패 > 자동 복구 > 기타`)만 노출합니다.
 - 시작 경고 상태 반영은 엔진 시작 이후 적용되어, 우선순위 경고 1건이 실제 상태 문자열에도 유지됩니다.
 - `layout_settings_v11.json`, `layout_rules_v11.json` 저장은 원자적 교체(`os.replace`) 방식으로 처리해 파손 가능성을 낮췄습니다.
+- 첫 실행 runtime bootstrap(settings/rules/log)도 create-if-missing 방식으로 처리해 초기 생성 경합에서 기존 파일을 덮어쓰지 않도록 정리했습니다.
 - rules 문자열(`main_window_titles`, `aggressive_ad_tokens`, `chrome_legacy_title_contains`)에 인코딩 이상 징후(mojibake/`�`)가 있으면 시작 시 경고를 기록합니다.
 - 엔진 내부 캐시/숨김 스냅샷 키를 `WindowIdentity(hwnd,pid,class)`로 강화해 HWND 재사용 시 오동작 가능성을 낮췄습니다.
 - 스캔 경로는 경량 수집(`rect/visible` 미조회)으로 최적화되고, 상세 수집은 `--dump-tree` 경로에만 적용됩니다.
 - 트레이 메뉴 콜백은 큐 디스패치(`_safe_after` -> main-thread drain)로 처리해 스레드 경합을 줄입니다.
 - 트레이 모듈 import 실패 시 즉시 재시도하지 않고 TTL(기본 30초) 경과 후 자동 재시도합니다.
 - 상태 갱신 타이머(`_tick_status`)도 종료 경합에서 스케줄링 실패 예외를 전파하지 않습니다.
+- UI의 `로그 폴더 열기` / `GitHub 리포 열기`가 실패하면 상태 문자열에 짧은 경고를 노출합니다.
 - 엔진 시작 시 동기 warm-up(scan+apply 1회)을 먼저 수행해 초기 광고 깜빡임을 줄였습니다.
 - 빈 텍스트 캐시는 짧은 TTL로 빠르게 재조회해 초기 UI 구성 구간의 탐지 지연을 줄였습니다.
 - 공격 모드를 끄면 aggressive hide로 숨긴 창은 즉시 복구되고, 즉시 재스캔/재적용이 수행됩니다.
@@ -131,6 +135,8 @@ python -m pyright
 추가 rules 키:
 
 - `popup_ad_classes`: 기본값 `["AdFitWebView"]`, non-main top-level popup host의 direct child class 매칭 목록
+- `popup_host_text_contains`: 기본값 `[]`, non-empty popup host title을 광고 popup으로 허용할 substring 목록
+- `popup_host_require_empty_text`: 기본값 `true`, 위 allowlist에 매치되지 않는 non-empty popup host title은 기본적으로 광고 popup 판정에서 제외
 - `hide_bottom_banner_without_token`: 기본값 `false`, token 없는 하단 배너 geometry-only hide를 opt-in으로 허용
 - `close_empty_eva_child_requires_ad_signal`: 기본값 `true`, empty `EVA_ChildWindow` close를 확인된 광고 신호가 있을 때로 제한
 
@@ -200,6 +206,9 @@ PowerShell 스크립트(`scripts/build_release.ps1`)로 onefile 빌드 후 `sign
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign
 ```
+
+- 기본값으로 빌드 직후 생성된 EXE에 `--self-check` packaged smoke를 1회 수행합니다.
+- smoke를 건너뛰려면 `-SkipSmokeCheck`를 사용합니다.
 
 서명을 켜려면 아래 둘 중 하나를 설정하세요.
 

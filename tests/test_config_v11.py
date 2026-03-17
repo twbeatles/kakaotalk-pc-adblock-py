@@ -84,6 +84,8 @@ def test_rules_load_with_bounds(tmp_path: Path):
     assert rules.cache_ttl_seconds >= 0.1
     assert rules.chrome_legacy_title_contains == ["Chrome Legacy Window"]
     assert rules.popup_ad_classes == ["AdFitWebView"]
+    assert rules.popup_host_text_contains == []
+    assert rules.popup_host_require_empty_text is True
     assert rules.hide_bottom_banner_without_token is False
     assert rules.close_empty_eva_child_requires_ad_signal is True
 
@@ -168,6 +170,22 @@ def test_rules_load_coerces_popup_ad_classes(tmp_path: Path):
     assert rules.popup_ad_classes == ["AdFitWebView", "PopupWebView"]
 
 
+def test_rules_load_coerces_popup_host_text_contains(tmp_path: Path):
+    path = tmp_path / "layout_rules_v11.json"
+    path.write_text(
+        json.dumps(
+            {
+                "popup_host_text_contains": ["광고", "", 123, "Ad"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rules = LayoutRulesV11.load(str(path))
+
+    assert rules.popup_host_text_contains == ["광고", "Ad"]
+
+
 def test_rules_load_with_new_boolean_flags(tmp_path: Path):
     path = tmp_path / "layout_rules_v11.json"
     path.write_text(
@@ -175,6 +193,7 @@ def test_rules_load_with_new_boolean_flags(tmp_path: Path):
             {
                 "hide_bottom_banner_without_token": True,
                 "close_empty_eva_child_requires_ad_signal": False,
+                "popup_host_require_empty_text": False,
             }
         ),
         encoding="utf-8",
@@ -184,6 +203,7 @@ def test_rules_load_with_new_boolean_flags(tmp_path: Path):
 
     assert rules.hide_bottom_banner_without_token is True
     assert rules.close_empty_eva_child_requires_ad_signal is False
+    assert rules.popup_host_require_empty_text is False
 
 
 def test_settings_load_backs_up_malformed_json_and_records_warning(tmp_path: Path):
@@ -285,6 +305,8 @@ def test_rules_default_strings_are_utf8_intact():
     assert "광고" in rules.aggressive_ad_tokens
     assert "Chrome Legacy Window" in rules.chrome_legacy_title_contains
     assert "AdFitWebView" in rules.popup_ad_classes
+    assert rules.popup_host_text_contains == []
+    assert rules.popup_host_require_empty_text is True
 
 
 def test_rules_load_warns_when_mojibake_signatures_detected(tmp_path: Path):
@@ -398,3 +420,51 @@ def test_settings_save_preserves_existing_file_on_atomic_replace_failure(tmp_pat
     assert path.read_text(encoding="utf-8") == '{"enabled": true}'
     leftovers = list(tmp_path.glob(f".{path.name}*.tmp"))
     assert leftovers == []
+
+
+def test_ensure_runtime_files_creates_missing_runtime_files(tmp_path: Path, monkeypatch):
+    appdata_dir = tmp_path / "appdata"
+    resource_dir = tmp_path / "resource"
+    resource_dir.mkdir()
+    (resource_dir / "layout_settings_v11.json").write_text('{"enabled": false}\n', encoding="utf-8")
+    (resource_dir / "layout_rules_v11.json").write_text('{"popup_host_require_empty_text": false}\n', encoding="utf-8")
+
+    monkeypatch.setattr(config_module, "APPDATA_DIR", str(appdata_dir))
+    monkeypatch.setattr(config_module, "SETTINGS_FILE", str(appdata_dir / "layout_settings_v11.json"))
+    monkeypatch.setattr(config_module, "RULES_FILE", str(appdata_dir / "layout_rules_v11.json"))
+    monkeypatch.setattr(config_module, "LOG_FILE", str(appdata_dir / "layout_adblock.log"))
+    monkeypatch.setattr(config_module, "resource_base_dir", lambda: str(resource_dir))
+
+    config_module.ensure_runtime_files()
+
+    assert json.loads((appdata_dir / "layout_settings_v11.json").read_text(encoding="utf-8"))["enabled"] is False
+    assert json.loads((appdata_dir / "layout_rules_v11.json").read_text(encoding="utf-8"))["popup_host_require_empty_text"] is False
+    assert (appdata_dir / "layout_adblock.log").exists()
+
+
+def test_ensure_runtime_files_preserves_existing_runtime_files(tmp_path: Path, monkeypatch):
+    appdata_dir = tmp_path / "appdata"
+    appdata_dir.mkdir()
+    settings_path = appdata_dir / "layout_settings_v11.json"
+    rules_path = appdata_dir / "layout_rules_v11.json"
+    log_path = appdata_dir / "layout_adblock.log"
+    settings_path.write_text('{"enabled": true}\n', encoding="utf-8")
+    rules_path.write_text('{"popup_host_require_empty_text": true}\n', encoding="utf-8")
+    log_path.write_text("existing-log", encoding="utf-8")
+
+    resource_dir = tmp_path / "resource"
+    resource_dir.mkdir()
+    (resource_dir / "layout_settings_v11.json").write_text('{"enabled": false}\n', encoding="utf-8")
+    (resource_dir / "layout_rules_v11.json").write_text('{"popup_host_require_empty_text": false}\n', encoding="utf-8")
+
+    monkeypatch.setattr(config_module, "APPDATA_DIR", str(appdata_dir))
+    monkeypatch.setattr(config_module, "SETTINGS_FILE", str(settings_path))
+    monkeypatch.setattr(config_module, "RULES_FILE", str(rules_path))
+    monkeypatch.setattr(config_module, "LOG_FILE", str(log_path))
+    monkeypatch.setattr(config_module, "resource_base_dir", lambda: str(resource_dir))
+
+    config_module.ensure_runtime_files()
+
+    assert settings_path.read_text(encoding="utf-8") == '{"enabled": true}\n'
+    assert rules_path.read_text(encoding="utf-8") == '{"popup_host_require_empty_text": true}\n'
+    assert log_path.read_text(encoding="utf-8") == "existing-log"

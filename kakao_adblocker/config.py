@@ -20,6 +20,14 @@ _LOAD_WARNINGS: List[str] = []
 _LOAD_WARNINGS_LOCK = threading.Lock()
 
 
+@dataclass(frozen=True)
+class RuntimePaths:
+    appdata_dir: str
+    settings_file: str
+    rules_file: str
+    log_file: str
+
+
 def _push_load_warning(message: str) -> None:
     with _LOAD_WARNINGS_LOCK:
         _LOAD_WARNINGS.append(message)
@@ -38,19 +46,29 @@ def resource_base_dir() -> str:
     return str(Path(__file__).resolve().parents[1])
 
 
-def get_app_data_dir() -> str:
+def _default_appdata_dir() -> str:
     appdata = os.environ.get("APPDATA")
     if not appdata:
         appdata = str(Path.home() / "AppData" / "Roaming")
-    path = Path(appdata) / APPDATA_DIRNAME
-    path.mkdir(parents=True, exist_ok=True)
-    return str(path)
+    return str(Path(appdata) / APPDATA_DIRNAME)
 
 
-APPDATA_DIR = get_app_data_dir()
-SETTINGS_FILE = os.path.join(APPDATA_DIR, "layout_settings_v11.json")
-RULES_FILE = os.path.join(APPDATA_DIR, "layout_rules_v11.json")
-LOG_FILE = os.path.join(APPDATA_DIR, "layout_adblock.log")
+def _build_runtime_paths(appdata_dir: str) -> RuntimePaths:
+    return RuntimePaths(
+        appdata_dir=appdata_dir,
+        settings_file=os.path.join(appdata_dir, "layout_settings_v11.json"),
+        rules_file=os.path.join(appdata_dir, "layout_rules_v11.json"),
+        log_file=os.path.join(appdata_dir, "layout_adblock.log"),
+    )
+
+
+_INITIAL_RUNTIME_PATHS = _build_runtime_paths(_default_appdata_dir())
+
+# Compatibility aliases only. Internal runtime code should use get_runtime_paths().
+APPDATA_DIR = _INITIAL_RUNTIME_PATHS.appdata_dir
+SETTINGS_FILE = _INITIAL_RUNTIME_PATHS.settings_file
+RULES_FILE = _INITIAL_RUNTIME_PATHS.rules_file
+LOG_FILE = _INITIAL_RUNTIME_PATHS.log_file
 
 LEGACY_FILES = (
     "adblock_settings.json",
@@ -65,6 +83,33 @@ _BROKEN_SUFFIX_RE = re.compile(r"\.broken-(\d{8}-\d{6})$")
 _MOJIBAKE_KAKAOTALK = "\u79fb\ub301\ubb45?\u317d\ub11a"
 _MOJIBAKE_AD = "\u613f\ubb0e\ud02c"
 _MOJIBAKE_SIGNATURES = (_MOJIBAKE_KAKAOTALK, _MOJIBAKE_AD)
+
+
+def _runtime_path_override(name: str, initial: str, fallback: str) -> str:
+    current = str(globals().get(name, initial))
+    return current if current != initial else fallback
+
+
+def get_runtime_paths(create: bool = False) -> RuntimePaths:
+    appdata_dir = _runtime_path_override("APPDATA_DIR", _INITIAL_RUNTIME_PATHS.appdata_dir, _default_appdata_dir())
+    default_paths = _build_runtime_paths(appdata_dir)
+    paths = RuntimePaths(
+        appdata_dir=appdata_dir,
+        settings_file=_runtime_path_override("SETTINGS_FILE", _INITIAL_RUNTIME_PATHS.settings_file, default_paths.settings_file),
+        rules_file=_runtime_path_override("RULES_FILE", _INITIAL_RUNTIME_PATHS.rules_file, default_paths.rules_file),
+        log_file=_runtime_path_override("LOG_FILE", _INITIAL_RUNTIME_PATHS.log_file, default_paths.log_file),
+    )
+    if create:
+        Path(paths.appdata_dir).mkdir(parents=True, exist_ok=True)
+    return paths
+
+
+def resolve_app_data_dir(create: bool = False) -> str:
+    return get_runtime_paths(create=create).appdata_dir
+
+
+def get_app_data_dir() -> str:
+    return resolve_app_data_dir(create=True)
 
 
 def _coerce_bool(value: Any, default: bool) -> bool:
@@ -265,11 +310,12 @@ class LayoutSettingsV11:
     log_level: str = "INFO"
 
     @classmethod
-    def load(cls, path: str = SETTINGS_FILE) -> "LayoutSettingsV11":
+    def load(cls, path: str | None = None) -> "LayoutSettingsV11":
+        resolved_path = path or get_runtime_paths().settings_file
         defaults = cls()
         label = "layout_settings_v11.json"
-        _cleanup_broken_backups(path, label)
-        raw = _load_json_object(path, label, default_text=defaults.default_json())
+        _cleanup_broken_backups(resolved_path, label)
+        raw = _load_json_object(resolved_path, label, default_text=defaults.default_json())
         if raw is None:
             return defaults
         return cls(
@@ -299,9 +345,9 @@ class LayoutSettingsV11:
             log_level=_coerce_str(raw.get("log_level"), defaults.log_level).upper(),
         )
 
-    def save(self, path: str = SETTINGS_FILE) -> None:
+    def save(self, path: str | None = None) -> None:
         payload = json.dumps(asdict(self), indent=2, ensure_ascii=False) + "\n"
-        _atomic_write_text(path, payload)
+        _atomic_write_text(path or get_runtime_paths().settings_file, payload)
 
     @classmethod
     def default_json(cls) -> str:
@@ -340,11 +386,12 @@ class LayoutRulesV11:
         return [t.lower() for t in self.aggressive_ad_tokens]
 
     @classmethod
-    def load(cls, path: str = RULES_FILE) -> "LayoutRulesV11":
+    def load(cls, path: str | None = None) -> "LayoutRulesV11":
+        resolved_path = path or get_runtime_paths().rules_file
         defaults = cls()
         label = "layout_rules_v11.json"
-        _cleanup_broken_backups(path, label)
-        raw = _load_json_object(path, label, default_text=defaults.default_json())
+        _cleanup_broken_backups(resolved_path, label)
+        raw = _load_json_object(resolved_path, label, default_text=defaults.default_json())
         if raw is None:
             _warn_if_rules_text_corrupted(defaults, label)
             return defaults
@@ -404,9 +451,9 @@ class LayoutRulesV11:
         _warn_if_rules_text_corrupted(rules, "layout_rules_v11.json")
         return rules
 
-    def save(self, path: str = RULES_FILE) -> None:
+    def save(self, path: str | None = None) -> None:
         payload = json.dumps(asdict(self), indent=2, ensure_ascii=False) + "\n"
-        _atomic_write_text(path, payload)
+        _atomic_write_text(path or get_runtime_paths().rules_file, payload)
 
     @classmethod
     def default_json(cls) -> str:
@@ -430,11 +477,11 @@ def _ensure_from_template(dst: str, default_text: str) -> None:
 
 
 def ensure_runtime_files() -> None:
-    os.makedirs(APPDATA_DIR, exist_ok=True)
-    _ensure_from_template(SETTINGS_FILE, LayoutSettingsV11.default_json())
-    _ensure_from_template(RULES_FILE, LayoutRulesV11.default_json())
-    if not os.path.exists(LOG_FILE):
-        _write_text_if_missing(LOG_FILE, "")
+    paths = get_runtime_paths(create=True)
+    _ensure_from_template(paths.settings_file, LayoutSettingsV11.default_json())
+    _ensure_from_template(paths.rules_file, LayoutRulesV11.default_json())
+    if not os.path.exists(paths.log_file):
+        _write_text_if_missing(paths.log_file, "")
 
 
 __all__ = [
@@ -446,10 +493,13 @@ __all__ = [
     "RULES_FILE",
     "LOG_FILE",
     "LEGACY_FILES",
+    "RuntimePaths",
     "LayoutSettingsV11",
     "LayoutRulesV11",
     "resource_base_dir",
+    "resolve_app_data_dir",
     "get_app_data_dir",
+    "get_runtime_paths",
     "ensure_runtime_files",
     "consume_load_warnings",
 ]

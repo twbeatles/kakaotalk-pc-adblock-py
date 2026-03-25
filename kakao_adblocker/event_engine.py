@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
-from .config import APPDATA_DIR, LayoutRulesV11, LayoutSettingsV11
+from .config import LayoutRulesV11, LayoutSettingsV11, get_runtime_paths
 from .layout_engine import LayoutEngine
 from .protocols import JoinableThreadLike, Rect, Win32ApiLike, WindowIdentity
 from .services import ProcessInspector
@@ -1031,7 +1031,7 @@ class LayoutOnlyEngine:
             "pids": sorted(pids),
             "windows": [self._dump_node(root.hwnd, 0, 6) for root in roots],
         }
-        dump_dir = out_dir or APPDATA_DIR
+        dump_dir = out_dir or get_runtime_paths(create=True).appdata_dir
         os.makedirs(dump_dir, exist_ok=True)
         path = os.path.join(dump_dir, f"window_dump_{datetime.now().strftime('%Y%m%d-%H%M%S')}.json")
         with open(path, "w", encoding="utf-8") as f:

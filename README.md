@@ -60,7 +60,8 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 트레이 메뉴 콜백은 큐 디스패치(`_safe_after` -> main-thread drain)로 처리해 스레드 경합을 줄입니다.
 - 트레이 모듈 import 실패 시 즉시 재시도하지 않고 TTL(기본 30초) 경과 후 자동 재시도합니다.
 - 상태 갱신 타이머(`_tick_status`)도 종료 경합에서 스케줄링 실패 예외를 전파하지 않습니다.
-- UI의 `로그 폴더 열기` / `GitHub 리포 열기`가 실패하면 상태 문자열에 짧은 경고를 노출합니다.
+- UI의 `로그 폴더 열기` / `GitHub 릴리스 열기`가 실패하면 상태 문자열에 짧은 경고를 노출합니다.
+- `--startup-launch` 경로는 셸 준비 대기를 `Tk()`/트레이 생성보다 먼저 수행해 로그인 직후 레이스를 줄입니다.
 - 엔진 시작 시 동기 warm-up(scan+apply 1회)을 먼저 수행해 초기 광고 깜빡임을 줄였습니다.
 - 빈 텍스트 캐시는 짧은 TTL로 빠르게 재조회해 초기 UI 구성 구간의 탐지 지연을 줄였습니다.
 - 공격 모드를 끄면 aggressive hide로 숨긴 창은 즉시 복구되고, 즉시 재스캔/재적용이 수행됩니다.
@@ -75,6 +76,7 @@ python kakaotalk_layout_adblock_v11.py --minimized
 python kakaotalk_layout_adblock_v11.py --dump-tree
 python kakaotalk_layout_adblock_v11.py --dump-tree --dump-dir "C:\temp"
 python kakaotalk_layout_adblock_v11.py --self-check
+python kakaotalk_layout_adblock_v11.py --self-check --json
 ```
 
 - 이 도구는 Windows 전용입니다. 비Windows 환경에서는 `This application only supports Windows.` 메시지와 함께 종료 코드 `2`로 종료됩니다.
@@ -113,7 +115,7 @@ python -m pyright
 `kakao_adblocker/__init__.pyi`는 lazy export 패키지의 정적 타입 가시성을 제공합니다.  
 `legacy/`는 보관 자산이므로 활성 Pylance 품질 게이트에서 제외합니다. 기존 파일 상단 `pyright` 지시문은 개별 유지보수 시 참고용으로만 유지합니다.
 
-`scripts/dev_check.ps1`는 기본적으로 `python -m pyright` 후 `pytest -q`를 순서대로 실행합니다.
+`scripts/dev_check.ps1`는 기본적으로 `python -m pyright` 후 `pytest -q --basetemp .pytest_tmp`를 순서대로 실행합니다.
 - `-SkipTests`: 타입 검사만 수행
 - `-PythonExe <path>`: 사용할 Python 실행 파일 지정
 
@@ -162,7 +164,7 @@ python -m pyright
 - 복원 실패 초기화
 - 창 열기
 - 로그 폴더 열기
-- GitHub 리포 열기(수동)
+- GitHub 릴리스 열기(수동)
 - 종료
 
 ## 빌드
@@ -173,6 +175,7 @@ pyinstaller kakaotalk_adblock.spec
 
 `kakaotalk_adblock.spec`는 **onefile** 빌드 설정이며, 결과물은 `dist/KakaoTalkLayoutAdBlocker_v11.exe`로 생성됩니다.
 - `.spec`는 프로젝트 루트 기준 절대 경로를 사용하도록 보강되어, 빌드 실행 위치에 덜 민감합니다.
+- `.spec`는 현재 트레이 도안을 기반으로 한 고정 `.ico`를 사용해 EXE 아이콘을 명시합니다.
 - `.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `pystray`, `PIL`)를 `hiddenimports`로 명시하고, `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 패키징 누락을 방지합니다.
 - `.spec`는 `--self-check`의 동적 진단 경로를 위해 `tkinter`, `tkinter.ttk`, `tkinter.messagebox`도 명시적으로 포함해 GUI self-check와 일반 UI 경로의 패키징 해석을 고정합니다.
 - `.spec`는 레이아웃/Win32 핵심 모듈(`kakao_adblocker.layout_engine`, `kakao_adblocker.win32_api`)도 `hiddenimports`에 명시해 패키징 안정성을 보강했습니다.
@@ -207,7 +210,10 @@ PowerShell 스크립트(`scripts/build_release.ps1`)로 onefile 빌드 후 `sign
 powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign
 ```
 
-- 기본값으로 빌드 직후 생성된 EXE에 `--self-check` packaged smoke를 1회 수행합니다.
+- 기본값으로 빌드 직후 생성된 EXE에 `--self-check --json` packaged smoke를 1회 수행합니다.
+- packaged self-check는 `core` 실패만 빌드 실패로 간주하고, `optional` 실패는 경고로만 남깁니다.
+- interactive shell이 감지되면 추가로 `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...` startup smoke를 1회 수행합니다.
+- interactive shell이 없으면 startup smoke는 건너뛰고 빌드는 계속 진행합니다.
 - smoke를 건너뛰려면 `-SkipSmokeCheck`를 사용합니다.
 
 서명을 켜려면 아래 둘 중 하나를 설정하세요.

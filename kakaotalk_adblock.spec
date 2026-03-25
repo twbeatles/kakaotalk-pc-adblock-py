@@ -7,8 +7,11 @@ from PyInstaller.utils.hooks import collect_submodules
 _SPEC_PATH = Path(globals().get("__file__", "kakaotalk_adblock.spec")).resolve()
 PROJECT_ROOT = _SPEC_PATH.parent
 WINDOWS_VERSION_INFO = PROJECT_ROOT / "packaging" / "windows_version_info.txt"
+APP_ICON = PROJECT_ROOT / "packaging" / "app_icon.ico"
 if not WINDOWS_VERSION_INFO.exists():
     raise FileNotFoundError(f"Missing Windows version resource: {WINDOWS_VERSION_INFO}")
+if not APP_ICON.exists():
+    raise FileNotFoundError(f"Missing application icon: {APP_ICON}")
 
 # Keep lazy-imported core/runtime modules explicit so onefile packaging stays stable.
 # `--self-check` path also imports pystray/PIL/tkinter and probes logging bootstrap.
@@ -67,6 +70,7 @@ exe = EXE(
     [],
     name="KakaoTalkLayoutAdBlocker_v11",
     version=str(WINDOWS_VERSION_INFO),
+    icon=str(APP_ICON),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

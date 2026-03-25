@@ -1,4 +1,5 @@
 param(
+    [string]$PythonExe = "python",
     [string]$SpecPath = "kakaotalk_adblock.spec",
     [string]$ExeName = "KakaoTalkLayoutAdBlocker_v11.exe",
     [string]$DistDir = "dist",
@@ -68,16 +69,144 @@ function Invoke-Sign {
     }
 }
 
-function Invoke-SmokeCheck {
+function New-TempDir {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Prefix
+    )
+    $path = Join-Path ([System.IO.Path]::GetTempPath()) ("{0}-{1}" -f $Prefix, [System.Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $path | Out-Null
+    return $path
+}
+
+function Remove-TempDir {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+    if (-not (Test-Path $Path)) {
+        return
+    }
+    try {
+        Remove-Item -LiteralPath $Path -Recurse -Force
+    } catch {
+        Write-Warning "Failed to clean temp dir ${Path}: $($_.Exception.Message)"
+    }
+}
+
+function Test-InteractiveShell {
+    if ($env:CI) {
+        return $false
+    }
+    try {
+        return [Environment]::UserInteractive -and ((Get-Process -Id $PID).SessionId -gt 0)
+    } catch {
+        return $false
+    }
+}
+
+function Invoke-PackagedSelfCheck {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ExePath
     )
 
-    Write-Host "Running packaged smoke check (--self-check): $ExePath"
-    $proc = Start-Process -FilePath $ExePath -ArgumentList @("--self-check") -PassThru -Wait -WindowStyle Hidden
-    if ($proc.ExitCode -ne 0) {
-        throw "packaged --self-check failed with exit code $($proc.ExitCode)"
+    $tempAppData = New-TempDir -Prefix "ktalb-smoke-appdata"
+    $reportPath = Join-Path $tempAppData "self-check.json"
+    $previousAppData = $env:APPDATA
+    try {
+        $env:APPDATA = $tempAppData
+        Write-Host "Running packaged smoke check (--self-check --json): $ExePath"
+        $proc = Start-Process `
+            -FilePath $ExePath `
+            -ArgumentList @("--self-check", "--json", "--self-check-report", $reportPath) `
+            -PassThru `
+            -WindowStyle Hidden
+        if (-not $proc.WaitForExit(60000)) {
+            try {
+                $proc.Kill()
+            } catch {
+            }
+            throw "packaged --self-check timed out"
+        }
+        $exitCode = $proc.ExitCode
+    } finally {
+        $env:APPDATA = $previousAppData
+    }
+
+    if (-not (Test-Path $reportPath)) {
+        throw "packaged --self-check did not produce JSON report: $reportPath"
+    }
+    try {
+        $result = Get-Content $reportPath -Raw | ConvertFrom-Json
+        if ($null -eq $result.summary) {
+            throw "packaged --self-check JSON summary missing"
+        }
+        if ([int]$result.summary.exit_code -ne 0 -or $exitCode -ne 0) {
+            throw "packaged --self-check failed (exit_code=$($result.summary.exit_code), process_exit=$exitCode)"
+        }
+        if ([int]$result.summary.optional_failed -gt 0) {
+            Write-Warning "Optional self-check failures detected: $($result.summary.optional_failed)"
+        }
+    } finally {
+        Remove-TempDir -Path $tempAppData
+    }
+}
+
+function Invoke-StartupSmoke {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ExePath
+    )
+
+    if (-not (Test-InteractiveShell)) {
+        return [PSCustomObject]@{
+            status = "skipped"
+            reason = "interactive shell not detected"
+        }
+    }
+
+    $tempAppData = New-TempDir -Prefix "ktalb-startup-appdata"
+    $tracePath = Join-Path $tempAppData "startup-trace.json"
+    $previousAppData = $env:APPDATA
+    try {
+        $env:APPDATA = $tempAppData
+        Write-Host "Running packaged startup smoke (--startup-launch --minimized)..."
+        $proc = Start-Process `
+            -FilePath $ExePath `
+            -ArgumentList @("--startup-launch", "--minimized", "--startup-trace", $tracePath, "--exit-after-startup-ms", "1500") `
+            -PassThru `
+            -Wait `
+            -WindowStyle Hidden
+    } finally {
+        $env:APPDATA = $previousAppData
+    }
+    try {
+        if ($proc.ExitCode -ne 0) {
+            throw "packaged startup smoke failed with exit code $($proc.ExitCode)"
+        }
+        if (-not (Test-Path $tracePath)) {
+            throw "packaged startup smoke did not produce startup trace: $tracePath"
+        }
+
+        $trace = Get-Content $tracePath -Raw | ConvertFrom-Json
+        if (-not $trace.startup_launch) {
+            throw "startup trace did not record startup_launch=true"
+        }
+        if (-not $trace.shell_wait_attempted) {
+            throw "startup trace did not record shell wait"
+        }
+        if (-not $trace.tray_available) {
+            Write-Warning "Startup smoke completed but tray was unavailable on this host."
+        } elseif ($trace.tray_start_error) {
+            Write-Warning "Startup smoke completed with tray warning: $($trace.tray_start_error)"
+        }
+        return [PSCustomObject]@{
+            status = "completed"
+            reason = ""
+        }
+    } finally {
+        Remove-TempDir -Path $tempAppData
     }
 }
 
@@ -90,7 +219,7 @@ try {
     }
 
     Write-Host "Building with PyInstaller spec: $resolvedSpec"
-    python -m PyInstaller --noconfirm --clean --distpath $DistDir --workpath $WorkDir $resolvedSpec
+    & $PythonExe -m PyInstaller --noconfirm --clean --distpath $DistDir --workpath $WorkDir $resolvedSpec
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller build failed with exit code $LASTEXITCODE"
     }
@@ -103,7 +232,12 @@ try {
     if ($SkipSmokeCheck) {
         Write-Host "Skipping packaged smoke check (-SkipSmokeCheck)."
     } else {
-        Invoke-SmokeCheck -ExePath $exePath
+        Invoke-PackagedSelfCheck -ExePath $exePath
+        $startupSmoke = Invoke-StartupSmoke -ExePath $exePath
+        Write-Host "Startup smoke status: $($startupSmoke.status)"
+        if ($startupSmoke.reason) {
+            Write-Host "Startup smoke detail: $($startupSmoke.reason)"
+        }
     }
 
     if ($NoSign) {

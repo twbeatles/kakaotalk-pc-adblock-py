@@ -1,4 +1,6 @@
+import importlib.util
 import json
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -468,3 +470,71 @@ def test_ensure_runtime_files_preserves_existing_runtime_files(tmp_path: Path, m
     assert settings_path.read_text(encoding="utf-8") == '{"enabled": true}\n'
     assert rules_path.read_text(encoding="utf-8") == '{"popup_host_require_empty_text": true}\n'
     assert log_path.read_text(encoding="utf-8") == "existing-log"
+
+
+def test_config_import_does_not_create_appdata_dir(monkeypatch, tmp_path: Path):
+    appdata_root = tmp_path / "Roaming"
+    expected_dir = appdata_root / config_module.APPDATA_DIRNAME
+    module_path = Path(config_module.__file__).resolve()
+    mkdir_calls: list[str] = []
+    original_mkdir = Path.mkdir
+
+    def tracking_mkdir(self: Path, *args, **kwargs):
+        mkdir_calls.append(str(self))
+        return original_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setenv("APPDATA", str(appdata_root))
+    monkeypatch.setattr(Path, "mkdir", tracking_mkdir)
+
+    spec = importlib.util.spec_from_file_location("tests_config_import_probe", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+
+    assert module.APPDATA_DIR == str(expected_dir)
+    assert mkdir_calls == []
+    assert not expected_dir.exists()
+
+
+def test_runtime_path_helpers_are_lazy_until_create(monkeypatch, tmp_path: Path):
+    appdata_root = tmp_path / "Roaming"
+    expected_dir = appdata_root / config_module.APPDATA_DIRNAME
+
+    monkeypatch.setenv("APPDATA", str(appdata_root))
+
+    paths = config_module.get_runtime_paths()
+
+    assert paths.appdata_dir == str(expected_dir)
+    assert paths.settings_file == str(expected_dir / "layout_settings_v11.json")
+    assert paths.rules_file == str(expected_dir / "layout_rules_v11.json")
+    assert paths.log_file == str(expected_dir / "layout_adblock.log")
+    assert not expected_dir.exists()
+    assert config_module.resolve_app_data_dir() == str(expected_dir)
+    assert not expected_dir.exists()
+
+    created = config_module.get_runtime_paths(create=True)
+
+    assert created.appdata_dir == str(expected_dir)
+    assert expected_dir.exists()
+
+
+def test_default_runtime_save_uses_lazy_runtime_paths(monkeypatch, tmp_path: Path):
+    appdata_root = tmp_path / "Roaming"
+    expected_dir = appdata_root / config_module.APPDATA_DIRNAME
+
+    monkeypatch.setenv("APPDATA", str(appdata_root))
+
+    settings = LayoutSettingsV11(enabled=False, aggressive_mode=False)
+    settings.save()
+
+    assert expected_dir.exists()
+    assert json.loads((expected_dir / "layout_settings_v11.json").read_text(encoding="utf-8"))["enabled"] is False
+
+    loaded = LayoutSettingsV11.load()
+
+    assert loaded.enabled is False
+    assert loaded.aggressive_mode is False

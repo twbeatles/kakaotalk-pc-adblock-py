@@ -83,7 +83,7 @@
   - startup 토글에서 저장 실패 시 레지스트리 역롤백
   - aggressive mode 토글은 저장 성공 후 엔진에 즉시 반영
   - `_tick_status` 스케줄링(`root.after`)도 종료 경합 예외 비전파
-  - `로그 폴더 열기` / `GitHub 리포 열기` 실패도 상태 문자열 경고로 노출
+  - `로그 폴더 열기` / `GitHub 릴리스 열기` 실패도 상태 문자열 경고로 노출
 - `kakao_adblocker/services.py`
   - `ProcessInspector`, `StartupManager`, `ReleaseService`
   - `ProcessInspector.get_process_ids()`는 psutil 경로에서 per-process 예외 격리 처리
@@ -99,7 +99,8 @@
 - 패키지 루트 `kakao_adblocker`도 `hiddenimports`에 포함되어 lazy export 패키지 접근 경로를 고정
 - `pywinauto`, `comtypes`는 active v11 런타임 바깥의 legacy/UIA 의존성이므로 `.spec`의 `excludes`로 유지
 - popup parity(`popup_ad_classes` / `AdFitWebView`)는 기존 `config/event_engine` 내부 구현이라 추가 PyInstaller hook 없이 현재 spec으로 포장 가능
-- `scripts/build_release.ps1`는 기본값으로 built EXE에 `--self-check` packaged smoke를 1회 수행하며, 필요 시 `-SkipSmokeCheck`로 비활성화 가능
+- `scripts/build_release.ps1`는 기본값으로 built EXE에 `--self-check --json` packaged smoke를 1회 수행하며, core failure만 빌드 실패로 취급한다. 필요 시 `-SkipSmokeCheck`로 비활성화 가능
+- interactive shell이 감지되면 built EXE에 `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...` startup smoke를 추가 수행하고, 비interactive 환경에서는 skip 기록만 남기고 계속 진행한다
 
 ## 동작 규칙
 

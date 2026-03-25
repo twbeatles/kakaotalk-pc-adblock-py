@@ -320,7 +320,7 @@ class ShellService:
 
 
 class ReleaseService:
-    RELEASES_URL = "https://github.com/twbeatles/kakaotalk-pc-adblock-py"
+    RELEASES_URL = "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases"
 
     @staticmethod
     def open_releases_page() -> bool:

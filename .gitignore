@@ -8,6 +8,7 @@ window_inspection.log
 adblock.log
 
 .pytest_cache/
+.pytest_tmp/
 .pyright/
 .mypy_cache/
 .ruff_cache/
@@ -21,6 +22,7 @@ pip-wheel-metadata/
 
 build/
 dist/
+.tmp-packaged-*/
 window_dump_*.json
 Thumbs.db
 

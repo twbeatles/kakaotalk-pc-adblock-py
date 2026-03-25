@@ -10,7 +10,7 @@ from datetime import datetime
 from tkinter import messagebox, ttk
 from typing import Any, Callable, Optional, cast
 
-from .config import APP_NAME, APPDATA_DIR, LayoutSettingsV11, SETTINGS_FILE
+from .config import APP_NAME, LayoutSettingsV11, get_runtime_paths
 from .protocols import EngineLike, RootLike, StatusVarLike
 from .services import ReleaseService, ShellService, StartupManager
 
@@ -124,7 +124,7 @@ class TrayController:
         btn_row2 = ttk.Frame(wrapper)
         btn_row2.pack(fill="x", pady=6)
         ttk.Button(btn_row2, text="로그 폴더 열기", command=self.open_log_folder).pack(side="left")
-        ttk.Button(btn_row2, text="GitHub 리포", command=self.open_releases_page).pack(side="left", padx=(8, 0))
+        ttk.Button(btn_row2, text="GitHub 릴리스", command=self.open_releases_page).pack(side="left", padx=(8, 0))
 
         ttk.Button(wrapper, text="종료", command=self.shutdown).pack(anchor="e", pady=(14, 0))
 
@@ -207,7 +207,7 @@ class TrayController:
         previous = getattr(self.settings, attr_name)
         setattr(self.settings, attr_name, new_value)
         try:
-            self.settings.save(SETTINGS_FILE)
+            self.settings.save(get_runtime_paths().settings_file)
             return True
         except Exception:
             setattr(self.settings, attr_name, previous)
@@ -310,7 +310,7 @@ class TrayController:
         self._update_status(force=True)
 
     def open_log_folder(self) -> None:
-        if ShellService.open_folder(APPDATA_DIR):
+        if ShellService.open_folder(get_runtime_paths().appdata_dir):
             return
         self._report_ui_action_failure("open_log_folder", "log folder open failed")
 
@@ -386,15 +386,28 @@ class TrayController:
                 pystray_mod.MenuItem("복원 실패 초기화", self._menu_reset_restore_failures),
                 pystray_mod.MenuItem("창 열기", self._menu_show_window),
                 pystray_mod.MenuItem("로그 폴더 열기", self._menu_open_logs),
-                pystray_mod.MenuItem("GitHub 리포 열기", self._menu_open_release),
+                pystray_mod.MenuItem("GitHub 릴리스 열기", self._menu_open_release),
                 pystray_mod.MenuItem("종료", self._menu_exit),
             ),
         )
 
         def _setup_callback(_icon) -> None:
-            self._tray_running = True
-            self._tray_available = True
-            self._tray_ready_event.set()
+            try:
+                # pystray disables the default setup handler when a custom one is
+                # supplied, so visibility must be enabled explicitly here.
+                _icon.visible = True
+                self._tray_running = True
+                self._tray_available = True
+            except Exception as exc:
+                self._tray_start_error = f"{exc.__class__.__name__}: {exc}"
+                self._tray_running = False
+                self._tray_available = False
+                try:
+                    _icon.stop()
+                except Exception:
+                    pass
+            finally:
+                self._tray_ready_event.set()
 
         def _runner() -> None:
             try:
@@ -428,9 +441,10 @@ class TrayController:
 
     def stop_tray(self) -> None:
         self._tray_stopping = True
-        if self.icon:
+        icon = self.icon
+        if icon:
             try:
-                self.icon.stop()
+                icon.stop()
             except Exception:
                 pass
         thread = self._tray_thread
@@ -443,6 +457,7 @@ class TrayController:
         else:
             self._tray_stopping = False
         self._tray_thread = None
+        self.icon = None
         self._tray_running = False
         self._tray_available = False
         self._tray_ready_event.clear()

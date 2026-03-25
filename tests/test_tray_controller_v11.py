@@ -686,6 +686,7 @@ def test_setup_tray_marks_available_when_ready(monkeypatch):
     controller._setup_tray()
 
     assert controller.is_tray_available() is True
+    assert getattr(controller.icon, "visible", False) is True
     controller.stop_tray()
 
 
@@ -721,6 +722,51 @@ def test_setup_tray_marks_unavailable_on_ready_timeout(monkeypatch):
     controller._setup_tray()
 
     assert controller.is_tray_available() is False
+    controller.stop_tray()
+
+
+def test_setup_tray_marks_unavailable_when_icon_show_fails(monkeypatch):
+    import kakao_adblocker.ui as ui
+
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    monkeypatch.setattr(ui, "_load_tray_modules", lambda: True)
+
+    class FailingVisibleIcon:
+        def __init__(self, *_args, **_kwargs):
+            self._stop = threading.Event()
+
+        @property
+        def visible(self):
+            return False
+
+        @visible.setter
+        def visible(self, _value):
+            raise RuntimeError("show failed")
+
+        def run(self, setup=None):
+            if setup is not None:
+                setup(self)
+            self._stop.wait(1.0)
+
+        def stop(self):
+            self._stop.set()
+
+    ui.pystray = types.SimpleNamespace(
+        Icon=FailingVisibleIcon,
+        Menu=lambda *items: tuple(items),
+        MenuItem=lambda *args, **kwargs: (args, kwargs),
+    )
+
+    root = FakeRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    monkeypatch.setattr(controller, "_create_icon", lambda: object())
+
+    controller._setup_tray()
+
+    assert controller.is_tray_available() is False
+    assert "RuntimeError: show failed" in controller._tray_start_error
     controller.stop_tray()
 
 

@@ -20,7 +20,9 @@ _ATTR_EXPORTS: Dict[str, Tuple[str, str]] = {
     "LayoutSettingsV11": ("kakao_adblocker.config", "LayoutSettingsV11"),
     "LayoutRulesV11": ("kakao_adblocker.config", "LayoutRulesV11"),
     "resource_base_dir": ("kakao_adblocker.config", "resource_base_dir"),
+    "resolve_app_data_dir": ("kakao_adblocker.config", "resolve_app_data_dir"),
     "get_app_data_dir": ("kakao_adblocker.config", "get_app_data_dir"),
+    "get_runtime_paths": ("kakao_adblocker.config", "get_runtime_paths"),
     "ensure_runtime_files": ("kakao_adblocker.config", "ensure_runtime_files"),
     "consume_load_warnings": ("kakao_adblocker.config", "consume_load_warnings"),
     "LayoutOnlyEngine": ("kakao_adblocker.event_engine", "LayoutOnlyEngine"),
@@ -57,9 +59,12 @@ if TYPE_CHECKING:
         VERSION,
         LayoutRulesV11,
         LayoutSettingsV11,
+        RuntimePaths,
         consume_load_warnings,
         ensure_runtime_files,
         get_app_data_dir,
+        get_runtime_paths,
+        resolve_app_data_dir,
         resource_base_dir,
     )
     from .event_engine import EngineState, LayoutOnlyEngine, WindowInfo
@@ -112,7 +117,9 @@ __all__ = [
     "WM_CLOSE",
     "setup_logging",
     "resource_base_dir",
+    "resolve_app_data_dir",
     "get_app_data_dir",
+    "get_runtime_paths",
     "ensure_runtime_files",
     "consume_load_warnings",
 ]

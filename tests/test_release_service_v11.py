@@ -1,7 +1,7 @@
 from kakao_adblocker.services import ReleaseService
 
 
-def test_release_service_uses_repo_url(monkeypatch):
+def test_release_service_uses_releases_url(monkeypatch):
     called = {"url": ""}
     monkeypatch.setattr(
         "kakao_adblocker.services.ShellService.open_url",
@@ -9,4 +9,4 @@ def test_release_service_uses_repo_url(monkeypatch):
     )
     ok = ReleaseService.open_releases_page()
     assert ok is True
-    assert called["url"] == "https://github.com/twbeatles/kakaotalk-pc-adblock-py"
+    assert called["url"] == "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases"

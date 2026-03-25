@@ -15,15 +15,19 @@
 - Legacy script: `legacy/카카오톡 광고제거 v10.0.py` (deprecated notice only)
 - `--dump-tree` runs in a lightweight path without UI/tray module import
 - `--self-check` runs diagnostics only (no UI/tray/engine start)
+- `--self-check --json` emits structured diagnostics, and packaged smoke can persist the same payload via an internal report path
 - package `kakao_adblocker` exports are lazy-resolved via `__getattr__`
 - static analysis baseline is fixed by root `pyrightconfig.json`; active scope is `kakao_adblocker`, `tests`, and `kakaotalk_layout_adblock_v11.py`
 - preferred local verification entrypoint is `.\scripts\dev_check.ps1` (`-SkipTests` runs pyright only)
+- `scripts/dev_check.ps1` / `scripts/smoke_check.ps1` use `--basetemp .pytest_tmp` and clean the workspace-local pytest temp directory when possible
 
 ## Architecture
 
 - `config.py`
   - `LayoutSettingsV11`, `LayoutRulesV11`
   - AppData path: `%APPDATA%\KakaoTalkAdBlockerLayout`
+  - runtime path resolution is lazy via `resolve_app_data_dir()` and `get_runtime_paths()`
+  - compatibility aliases (`APPDATA_DIR`, `SETTINGS_FILE`, `RULES_FILE`, `LOG_FILE`) stay exported for callers, but internal runtime logic uses the helper lookups
   - advanced perf knobs: `idle_poll_interval_ms`, `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
   - missing new perf fields are backfilled with safe defaults
   - new rules flags: `hide_bottom_banner_without_token=false`, `close_empty_eva_child_requires_ad_signal=true`
@@ -78,7 +82,7 @@
   - startup toggle rolls registry back on settings-save failure
   - setting save failures roll back values (`enabled`, `run_on_startup`, `aggressive_mode`)
   - aggressive mode toggle is pushed into the engine immediately after a successful save
-  - `로그 폴더 열기` / `GitHub 리포 열기` failures surface as short UI warnings instead of failing silently
+  - `로그 폴더 열기` / `GitHub 릴리스 열기` failures surface as short UI warnings instead of failing silently
   - status text includes last error and last tick context
   - status text shows confirmed main-window count and appends candidate count only when larger
   - status text labels cumulative counters explicitly (`누적 숨김`, `누적 리사이즈`)
@@ -118,6 +122,7 @@
 ## Build Notes
 
 - `kakaotalk_adblock.spec` resolves entry script and data files from project-root absolute paths for stable `pyinstaller` invocation.
+- `kakaotalk_adblock.spec` also validates the packaged `.ico` asset and stamps the EXE with the tray-derived application icon.
 - `kakaotalk_adblock.spec` explicitly includes runtime modules (`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`, `tkinter`) in `hiddenimports`.
 - `kakaotalk_adblock.spec` also includes `kakao_adblocker.protocols` to keep typed runtime imports explicit in onefile packaging.
 - `kakaotalk_adblock.spec` also includes `collect_submodules("pystray")` and `collect_submodules("PIL")` to avoid onefile runtime import misses.
@@ -125,7 +130,8 @@
 - `kakaotalk_adblock.spec` excludes `pywinauto` and `comtypes` so archived legacy/UIA-only dependencies do not leak into the active v11 onefile bundle.
 - popup parity (`popup_ad_classes` / `AdFitWebView`), popup host guards, and logging fallback/probe stay inside existing modules, so no extra hidden-import or hook change is required.
 - `--self-check` now exercises dynamic Tk diagnostics and logging bootstrap probe, so explicit `tkinter` hidden imports keep onefile packaging deterministic.
-- `scripts/build_release.ps1` runs a packaged `--self-check` smoke by default after building; `-SkipSmokeCheck` disables that step.
+- `scripts/build_release.ps1` runs a packaged `--self-check --json` smoke by default after building with a temporary `%APPDATA%`; only `core` failures fail the build.
+- when an interactive shell is available, `scripts/build_release.ps1` also runs a packaged startup smoke with `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...`; otherwise it records a skipped startup smoke and continues.
 
 ## Legacy Archive
 

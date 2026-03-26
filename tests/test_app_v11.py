@@ -54,6 +54,13 @@ class FakeEngine:
         self.reported_warnings.append(message)
         self.events.append(f"warning:{message}")
 
+    def dump_window_tree(self, out_dir=None):
+        return "C:\\temp\\dump.json"
+
+    def dump_window_tree_series(self, out_dir=None, duration_ms=1000, interval_ms=100):
+        self.events.append(f"dump-series:{duration_ms}:{interval_ms}")
+        return "C:\\temp\\dump-series.json"
+
 
 class FakeController:
     last_instance = None
@@ -245,6 +252,33 @@ def test_dump_tree_path_skips_ui_loading(monkeypatch):
 
     assert rc == 0
     assert called["ui_load"] == 0
+
+
+def test_dump_tree_series_path_skips_ui_loading_and_passes_timing(monkeypatch):
+    class DumpEngine:
+        def __init__(self, *_args, **_kwargs):
+            self.calls = []
+
+        def dump_window_tree_series(self, out_dir=None, duration_ms=1000, interval_ms=100):
+            self.calls.append((out_dir, duration_ms, interval_ms))
+            return "C:\\temp\\dump-series.json"
+
+    called = {"ui_load": 0}
+    engine = DumpEngine()
+    monkeypatch.setattr(app.os, "name", "nt")
+    monkeypatch.setattr(app, "ensure_runtime_files", lambda: None)
+    monkeypatch.setattr(app.LayoutSettingsV11, "load", classmethod(lambda _cls: LayoutSettingsV11()))
+    monkeypatch.setattr(app.LayoutRulesV11, "load", classmethod(lambda _cls: LayoutRulesV11()))
+    monkeypatch.setattr(app, "consume_load_warnings", lambda: [])
+    monkeypatch.setattr(app, "setup_logging", lambda _level: logging.getLogger("test"))
+    monkeypatch.setattr(app, "LayoutOnlyEngine", lambda *_args, **_kwargs: engine)
+    monkeypatch.setattr(app, "_load_ui_dependencies", lambda: called.__setitem__("ui_load", called["ui_load"] + 1))
+
+    rc = app.main(["--dump-tree-series", "--dump-series-duration-ms", "250", "--dump-series-interval-ms", "25"])
+
+    assert rc == 0
+    assert called["ui_load"] == 0
+    assert engine.calls == [(None, 250, 25)]
 
 
 def test_main_reports_first_load_warning_to_engine(monkeypatch):

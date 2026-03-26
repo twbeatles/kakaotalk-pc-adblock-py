@@ -1,6 +1,8 @@
+import json
 import logging
 import threading
 import time
+from pathlib import Path
 
 from kakao_adblocker.config import LayoutRulesV11, LayoutSettingsV11
 from kakao_adblocker.event_engine import LayoutOnlyEngine
@@ -647,6 +649,11 @@ def test_engine_candidate_detection_supports_legacy_substring_signature():
     engine.scan_once()
     engine.apply_once()
 
+    assert 230 not in api.hide_calls
+
+    engine.scan_once()
+    engine.apply_once()
+
     assert 230 in api.hide_calls
 
 
@@ -1241,6 +1248,12 @@ def test_engine_empty_eva_child_with_legacy_ad_signal_is_closed():
     engine.apply_once()
 
     closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    assert 104 not in closed_handles
+
+    engine.scan_once()
+    engine.apply_once()
+
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
     assert 104 in closed_handles
 
 
@@ -1264,9 +1277,120 @@ def test_engine_restores_stale_hidden_legacy_window_when_signature_disappears():
     engine.scan_once()
     engine.apply_once()
 
+    assert api.windows[200]["visible"] is False
+
+    engine.scan_once()
+    engine.apply_once()
+
     assert api.windows[200]["visible"] is True
     assert 200 in api.show_calls
     assert all(identity[0] != 200 for identity in engine._hidden_windows)
+
+
+def test_engine_weak_aggressive_signal_requires_two_ticks():
+    api = FakeAPI()
+    api.windows[102]["rect"] = (0, 200, 500, 420)
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert 102 not in api.hide_calls
+    assert api.windows[102]["visible"] is True
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert 102 in api.hide_calls
+    assert api.windows[102]["visible"] is False
+
+
+def test_engine_hidden_window_restores_after_grace_elapsed(monkeypatch):
+    api = FakeAPI()
+    now = {"value": 100.0}
+    monkeypatch.setattr("kakao_adblocker.event_engine.time.time", lambda: now["value"])
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(hidden_restore_grace_ms=250),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+    assert api.windows[200]["visible"] is False
+
+    api.windows[201]["text"] = "Settings Panel"
+    now["value"] = 100.31
+    engine.scan_once()
+    engine.apply_once()
+
+    assert api.windows[200]["visible"] is True
+
+
+def test_engine_burst_scan_is_scheduled_for_new_candidates(monkeypatch):
+    api = FakeAPI()
+    provider_state = {"value": set()}
+    now = {"value": 10.0}
+
+    def provider(_name):
+        return set(provider_state["value"])
+
+    monkeypatch.setattr("kakao_adblocker.event_engine.time.time", lambda: now["value"])
+
+    settings = LayoutSettingsV11(
+        enabled=True,
+        poll_interval_ms=100,
+        burst_scan_iterations=3,
+        burst_scan_interval_ms=20,
+        aggressive_mode=True,
+    )
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=provider,
+    )
+
+    engine.scan_once()
+    provider_state["value"] = {42}
+    now["value"] = 10.3
+    engine.scan_once()
+
+    assert engine._is_burst_mode_active() is True
+    assert abs(engine._next_wait_interval_seconds() - 0.02) < 1e-9
+    assert abs(engine._next_wait_interval_seconds() - 0.02) < 1e-9
+    assert abs(engine._next_wait_interval_seconds() - 0.02) < 1e-9
+    assert abs(engine._next_wait_interval_seconds() - 0.1) < 1e-9
+
+
+def test_engine_dump_tree_series_includes_candidate_decisions(tmp_path):
+    api = FakeAPI()
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        LayoutSettingsV11(enabled=True, aggressive_mode=True),
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    path = engine.dump_window_tree_series(out_dir=str(tmp_path), duration_ms=0, interval_ms=20)
+
+    assert path is not None
+    payload = json.loads((tmp_path / Path(path).name).read_text(encoding="utf-8"))
+    assert len(payload["frames"]) == 1
+    assert payload["frames"][0]["candidates"]
+    assert any(candidate["action"] == "hide" for candidate in payload["frames"][0]["candidates"])
 
 
 def test_engine_error_log_map_is_pruned_when_many_unique_errors():

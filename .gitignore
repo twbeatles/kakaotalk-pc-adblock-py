@@ -24,6 +24,7 @@ build/
 dist/
 .tmp-packaged-*/
 window_dump_*.json
+window_dump_series_*.json
 Thumbs.db
 
 .venv/

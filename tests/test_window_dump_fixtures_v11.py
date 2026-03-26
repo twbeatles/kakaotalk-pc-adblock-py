@@ -188,6 +188,26 @@ def test_window_dump_fixture_popup_non_adfit_viewer_is_ignored_by_default():
     assert api.send_calls == []
 
 
+def test_window_dump_fixture_launch_ad_flash_banner_hides_immediately():
+    _payload, api, _engine = _run_fixture(
+        "launch_ad_flash_banner.json",
+        settings=LayoutSettingsV11(enabled=True, aggressive_mode=True),
+    )
+
+    assert 102 in api.hide_calls
+
+
+def test_window_dump_fixture_guarded_popup_adfit_viewer_is_ignored():
+    _payload, api, _engine = _run_fixture(
+        "guarded_popup_adfit_viewer.json",
+        settings=LayoutSettingsV11(enabled=True, aggressive_mode=False),
+        rules=LayoutRulesV11(popup_ad_classes=["AdFitWebView"]),
+    )
+
+    assert api.hide_calls == []
+    assert api.send_calls == []
+
+
 def test_window_dump_fixture_non_main_media_viewer_is_ignored():
     _payload, api, _engine = _run_fixture(
         "non_main_media_viewer.json",

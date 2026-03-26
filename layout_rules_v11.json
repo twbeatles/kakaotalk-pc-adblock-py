@@ -41,6 +41,8 @@
   "close_empty_eva_child_requires_ad_signal": true,
   "layout_shadow_padding_px": 2,
   "main_view_padding_px": 31,
+  "weak_signal_confirm_ticks": 2,
+  "hidden_restore_grace_ms": 250,
   "cache_ttl_seconds": 8.0,
   "log_rate_limit_seconds": 8.0
 }

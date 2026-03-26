@@ -67,6 +67,7 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 공격 모드를 끄면 aggressive hide로 숨긴 창은 즉시 복구되고, 즉시 재스캔/재적용이 수행됩니다.
 - 한 번 숨긴 창도 이후 aggressive/legacy 시그니처에서 벗어나면 자동 복구되어 stale hide가 누적되지 않습니다.
 - 상태 문자열의 `숨김`/`리사이즈` 수치는 누적값이며, UI 라벨도 `누적 숨김`/`누적 리사이즈`로 명시됩니다.
+- 핵심 런타임 모듈은 단일 파일이 아니라 패키지로 정리되었습니다: `kakao_adblocker/app/`, `kakao_adblocker/config/`, `kakao_adblocker/event_engine/`. 기존 import 경로(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`)는 그대로 유지됩니다.
 
 ## 실행
 
@@ -75,6 +76,8 @@ python kakaotalk_layout_adblock_v11.py
 python kakaotalk_layout_adblock_v11.py --minimized
 python kakaotalk_layout_adblock_v11.py --dump-tree
 python kakaotalk_layout_adblock_v11.py --dump-tree --dump-dir "C:\temp"
+python kakaotalk_layout_adblock_v11.py --dump-tree-series
+python kakaotalk_layout_adblock_v11.py --dump-tree-series --dump-dir "C:\temp" --dump-series-duration-ms 1500 --dump-series-interval-ms 50
 python kakaotalk_layout_adblock_v11.py --self-check
 python kakaotalk_layout_adblock_v11.py --self-check --json
 ```
@@ -130,6 +133,8 @@ python -m pyright
 - `idle_poll_interval_ms`: `200`
 - `pid_scan_interval_ms`: `200`
 - `cache_cleanup_interval_ms`: `1000`
+- `burst_scan_iterations`: `3`
+- `burst_scan_interval_ms`: `20`
 
 신규 성능 필드가 없는 구버전 설정 파일도 기본값으로 자동 보완되어 그대로 동작합니다.
 구버전 rules 파일에서 `ad_candidate_classes` 키가 없거나 타입이 잘못된 경우에도 `main_window_classes` 기반 폴백으로 무중단 호환됩니다.
@@ -141,6 +146,12 @@ python -m pyright
 - `popup_host_require_empty_text`: 기본값 `true`, 위 allowlist에 매치되지 않는 non-empty popup host title은 기본적으로 광고 popup 판정에서 제외
 - `hide_bottom_banner_without_token`: 기본값 `false`, token 없는 하단 배너 geometry-only hide를 opt-in으로 허용
 - `close_empty_eva_child_requires_ad_signal`: 기본값 `true`, empty `EVA_ChildWindow` close를 확인된 광고 신호가 있을 때로 제한
+- `weak_signal_confirm_ticks`: 기본값 `2`, weak signal을 hide/close로 확정하기 전 연속 확인 tick 수
+- `hidden_restore_grace_ms`: 기본값 `250`, 광고 신호가 1틱 흔들릴 때 즉시 복원하지 않도록 하는 grace
+
+`--dump-tree-series`는 단일 snapshot이 아니라 시간축 dump를 저장합니다.
+- 출력 파일명: `window_dump_series_YYYYMMDD-HHMMSS.json`
+- 각 frame은 기존 window tree와 함께 `candidates[]` (`hwnd`, `pid`, `class`, `signals`, `decision`, `action`)를 기록합니다.
 
 기존 `adblock_settings.json`, `ad_patterns.json`, `blocked_domains.txt`는 읽지 않습니다.
 
@@ -176,7 +187,7 @@ pyinstaller kakaotalk_adblock.spec
 `kakaotalk_adblock.spec`는 **onefile** 빌드 설정이며, 결과물은 `dist/KakaoTalkLayoutAdBlocker_v11.exe`로 생성됩니다.
 - `.spec`는 프로젝트 루트 기준 절대 경로를 사용하도록 보강되어, 빌드 실행 위치에 덜 민감합니다.
 - `.spec`는 현재 트레이 도안을 기반으로 한 고정 `.ico`를 사용해 EXE 아이콘을 명시합니다.
-- `.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `pystray`, `PIL`)를 `hiddenimports`로 명시하고, `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 패키징 누락을 방지합니다.
+- `.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `pystray`, `PIL`)를 `hiddenimports`로 명시하고, `collect_submodules("pystray"|"PIL")`와 함께 패키지화된 `app/config/event_engine` 하위 모듈도 수집해 onefile 패키징 누락을 방지합니다.
 - `.spec`는 `--self-check`의 동적 진단 경로를 위해 `tkinter`, `tkinter.ttk`, `tkinter.messagebox`도 명시적으로 포함해 GUI self-check와 일반 UI 경로의 패키징 해석을 고정합니다.
 - `.spec`는 레이아웃/Win32 핵심 모듈(`kakao_adblocker.layout_engine`, `kakao_adblocker.win32_api`)도 `hiddenimports`에 명시해 패키징 안정성을 보강했습니다.
 - `.spec`는 타입 경계 모듈(`kakao_adblocker.protocols`)도 `hiddenimports`에 포함해 모듈 해석 경로를 고정합니다.

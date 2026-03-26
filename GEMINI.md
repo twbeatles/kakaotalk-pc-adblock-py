@@ -23,14 +23,20 @@
 
 ## Architecture
 
-- `config.py`
+- `app/`
+  - `main`, CLI parser, self-check, startup trace helpers
+  - package facade preserves existing `kakao_adblocker.app` import surface and test monkeypatch points
+  - internal implementation is split into `cli.py`, `self_check.py`, `startup.py`
+- `config/`
   - `LayoutSettingsV11`, `LayoutRulesV11`
   - AppData path: `%APPDATA%\KakaoTalkAdBlockerLayout`
   - runtime path resolution is lazy via `resolve_app_data_dir()` and `get_runtime_paths()`
   - compatibility aliases (`APPDATA_DIR`, `SETTINGS_FILE`, `RULES_FILE`, `LOG_FILE`) stay exported for callers, but internal runtime logic uses the helper lookups
   - advanced perf knobs: `idle_poll_interval_ms`, `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
+  - burst scan knobs: `burst_scan_iterations`, `burst_scan_interval_ms`
   - missing new perf fields are backfilled with safe defaults
   - new rules flags: `hide_bottom_banner_without_token=false`, `close_empty_eva_child_requires_ad_signal=true`
+  - weak/restore tuning: `weak_signal_confirm_ticks=2`, `hidden_restore_grace_ms=250`
   - new rules keys: `popup_ad_classes=["AdFitWebView"]`, `popup_host_text_contains=[]`, `popup_host_require_empty_text=true`
   - rules loader falls back `ad_candidate_classes` to `main_window_classes` when missing/invalid
   - malformed/non-object JSON input is backed up as `*.broken-YYYYMMDD-HHMMSS` and then self-healed with default JSON
@@ -39,8 +45,9 @@
   - first-run runtime bootstrap for settings/rules/log now uses create-if-missing semantics so existing files are not overwritten
   - rules string integrity self-check warns on mojibake signatures / replacement char (`�`)
   - `consume_load_warnings()` exposes startup warnings to app layer
-- `event_engine.py`
+- `event_engine/`
   - `LayoutOnlyEngine`: single watch+apply polling loop
+  - packageized internals: `controller.py`, `scanner.py`, `signals.py`, `actions.py`, `dump.py`, `models.py`
   - when blocking is OFF, watch/apply both pause and loop waits in low-cost mode (`1.0s`)
   - main window detection uses `main_window_classes` from rules
   - candidate and confirmed main-window counts are tracked separately; apply uses confirmed handles only
@@ -59,6 +66,7 @@
   - `EngineState` includes `restore_failures` / `last_restore_error`
   - `WindowIdentity(hwnd,pid,class)` keyed caches protect against HWND reuse side effects
   - watch scan path avoids geometry/visibility calls; dump-tree path still collects full geometry
+  - `--dump-tree-series` stores frame-by-frame candidate decision previews alongside the tree dump
   - process-id scan and cache cleanup are interval-throttled for idle CPU savings
   - process scan warnings (psutil failure, tasklist fallback/failure) are propagated to status/log (`last_error`)
   - default idle->active detection target is <= 200ms
@@ -126,6 +134,7 @@
 - `kakaotalk_adblock.spec` explicitly includes runtime modules (`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`, `tkinter`) in `hiddenimports`.
 - `kakaotalk_adblock.spec` also includes `kakao_adblocker.protocols` to keep typed runtime imports explicit in onefile packaging.
 - `kakaotalk_adblock.spec` also includes `collect_submodules("pystray")` and `collect_submodules("PIL")` to avoid onefile runtime import misses.
+- `kakaotalk_adblock.spec` also includes `collect_submodules("kakao_adblocker.app")`, `collect_submodules("kakao_adblocker.config")`, and `collect_submodules("kakao_adblocker.event_engine")` so packageized runtime internals are bundled in onefile builds.
 - `kakaotalk_adblock.spec` includes package root `kakao_adblocker` so lazy exports remain importable in onefile builds and tooling paths.
 - `kakaotalk_adblock.spec` excludes `pywinauto` and `comtypes` so archived legacy/UIA-only dependencies do not leak into the active v11 onefile bundle.
 - popup parity (`popup_ad_classes` / `AdFitWebView`), popup host guards, and logging fallback/probe stay inside existing modules, so no extra hidden-import or hook change is required.

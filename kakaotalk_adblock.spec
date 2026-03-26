@@ -17,6 +17,7 @@ if not APP_ICON.exists():
 # `--self-check` path also imports pystray/PIL/tkinter and probes logging bootstrap.
 # Popup-removal parity (`popup_ad_classes` / `AdFitWebView`) and popup host text guards live in existing stdlib-backed modules.
 # Tray readiness/JSON self-heal/startup-warning/stale-hide recovery/logging-fallback changes are also stdlib-only.
+# Core runtime modules are now packageized (`kakao_adblocker.app/config/event_engine`), so collect submodules for those packages too.
 # v11 typing boundary module(`kakao_adblocker.protocols`) is imported by runtime modules.
 # Legacy-only deps (`pywinauto`, `comtypes`) stay excluded so onefile builds match the active v11 runtime surface.
 hiddenimports = [
@@ -40,6 +41,9 @@ hiddenimports = [
 ]
 hiddenimports += collect_submodules("pystray")
 hiddenimports += collect_submodules("PIL")
+hiddenimports += collect_submodules("kakao_adblocker.app")
+hiddenimports += collect_submodules("kakao_adblocker.config")
+hiddenimports += collect_submodules("kakao_adblocker.event_engine")
 # Keep package root importable when runtime, packaging, or tooling touches lazy exports.
 hiddenimports += ["kakao_adblocker"]
 

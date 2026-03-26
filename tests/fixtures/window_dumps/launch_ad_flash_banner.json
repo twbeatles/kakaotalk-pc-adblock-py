@@ -1,0 +1,70 @@
+{
+  "timestamp": "2026-03-26T00:00:00",
+  "pids": [
+    42
+  ],
+  "windows": [
+    {
+      "hwnd": 100,
+      "class": "EVA_Window_Dblclk",
+      "text": "카카오톡",
+      "pid": 42,
+      "visible": true,
+      "rect": [
+        0,
+        0,
+        500,
+        700
+      ],
+      "depth": 0,
+      "children": [
+        {
+          "hwnd": 101,
+          "class": "EVA_ChildWindow",
+          "text": "OnlineMainView_0x1",
+          "pid": 42,
+          "visible": true,
+          "rect": [
+            0,
+            0,
+            500,
+            669
+          ],
+          "depth": 1,
+          "children": []
+        },
+        {
+          "hwnd": 102,
+          "class": "Chrome_WidgetWin_1",
+          "text": "",
+          "pid": 42,
+          "visible": true,
+          "rect": [
+            0,
+            620,
+            500,
+            700
+          ],
+          "depth": 1,
+          "children": [
+            {
+              "hwnd": 103,
+              "class": "Static",
+              "text": "Advertisement",
+              "pid": 42,
+              "visible": true,
+              "rect": [
+                0,
+                620,
+                500,
+                700
+              ],
+              "depth": 2,
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

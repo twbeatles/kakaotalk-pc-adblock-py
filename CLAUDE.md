@@ -17,12 +17,18 @@
 
 ## 핵심 모듈
 
-- `kakao_adblocker/config.py`
+- `kakao_adblocker/app/`
+  - `main`, CLI parser, self-check, startup trace helper
+  - package facade는 기존 `kakao_adblocker.app` import surface와 test monkeypatch 지점을 유지
+  - 내부 구현은 `cli.py`, `self_check.py`, `startup.py`로 분리
+- `kakao_adblocker/config/`
   - `LayoutSettingsV11`, `LayoutRulesV11`
   - `%APPDATA%\KakaoTalkAdBlockerLayout` 경로 관리
   - 성능 설정: `idle_poll_interval_ms`, `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
+  - 신규 성능 설정: `burst_scan_iterations`, `burst_scan_interval_ms`
   - 신규 필드 누락 시 기본값 자동 보완(무중단 호환)
   - 신규 rules 플래그: `hide_bottom_banner_without_token=false`, `close_empty_eva_child_requires_ad_signal=true`
+  - 신규 rules 튜닝값: `weak_signal_confirm_ticks=2`, `hidden_restore_grace_ms=250`
   - 신규 rules 키: `popup_ad_classes=["AdFitWebView"]`, `popup_host_text_contains=[]`, `popup_host_require_empty_text=true`
   - rules 로드 시 `ad_candidate_classes`가 누락/비정상이면 `main_window_classes`로 폴백
   - JSON 파손(파싱 실패/최상위 타입 불일치) 시 `*.broken-YYYYMMDD-HHMMSS` 백업 생성 후 기본값 JSON으로 self-heal
@@ -32,8 +38,9 @@
   - 첫 실행 runtime bootstrap(settings/rules/log)은 create-if-missing 방식으로 처리해 기존 파일 덮어쓰기를 방지
   - rules 문자열 무결성 self-check(mojibake 시그니처/`�`) 경고
   - 앱 계층 전달용 `consume_load_warnings()` 제공
-- `kakao_adblocker/event_engine.py`
+- `kakao_adblocker/event_engine/`
   - `LayoutOnlyEngine`, `EngineState`
+  - 내부 구현은 `controller.py`, `scanner.py`, `signals.py`, `actions.py`, `dump.py`, `models.py`로 분리
   - 단일 watch+apply 루프(적응형 폴링), `main_window_classes` 기반 메인 윈도우 식별
   - 차단 OFF 상태에서는 watch/apply를 모두 일시중단하고 1.0초 저비용 대기
   - 광고 후보는 `ad_candidate_classes`(기본: `EVA_Window_Dblclk`, `EVA_Window`)와 레거시 시그니처(exact + substring)를 함께 사용해 필터링
@@ -53,6 +60,7 @@
   - `reset_restore_failures()`로 복원 실패 상태 수동 초기화 지원
   - `WindowIdentity(hwnd,pid,class)` 기반 text/custom-scroll/hidden-window 캐시로 HWND 재사용 오동작 방지
   - 스캔 경로는 경량 수집(`rect/visible` 미조회)으로 호출 부담 감소, `--dump-tree`만 상세 수집 사용
+  - `--dump-tree-series`는 frame별 candidate decision preview를 함께 저장
   - PID 스캔/캐시 정리 주기 스로틀 적용
   - PID 스캔 경고(psutil 실패, tasklist fallback/실패)를 상태(`last_error`)와 로그에 반영
   - 기본 설정 기준 idle->active 복귀 목표 지연 약 200ms
@@ -94,7 +102,7 @@
 
 ## 빌드 메모
 
-- `kakaotalk_adblock.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`, `tkinter`)을 `hiddenimports`로 명시하고 `collect_submodules("pystray"|"PIL")`를 함께 사용해 onefile 누락을 방지
+- `kakaotalk_adblock.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`, `tkinter`)을 `hiddenimports`로 명시하고 `collect_submodules("pystray"|"PIL")` 및 packageized `app/config/event_engine` 하위 모듈 수집을 함께 사용해 onefile 누락을 방지
 - 타입 경계 모듈 `kakao_adblocker.protocols`도 `hiddenimports`에 포함되어 onefile 모듈 누락 가능성을 줄임
 - 패키지 루트 `kakao_adblocker`도 `hiddenimports`에 포함되어 lazy export 패키지 접근 경로를 고정
 - `pywinauto`, `comtypes`는 active v11 런타임 바깥의 legacy/UIA 의존성이므로 `.spec`의 `excludes`로 유지

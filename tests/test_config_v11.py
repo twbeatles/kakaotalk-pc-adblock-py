@@ -38,6 +38,8 @@ def test_settings_load_with_type_coercion(tmp_path: Path):
     assert cfg.idle_poll_interval_ms == 200
     assert cfg.pid_scan_interval_ms == 200
     assert cfg.cache_cleanup_interval_ms == 1000
+    assert cfg.burst_scan_iterations == 3
+    assert cfg.burst_scan_interval_ms == 20
     assert cfg.aggressive_mode is True
     assert cfg.log_level == "INFO"
 
@@ -50,6 +52,8 @@ def test_settings_load_with_perf_bounds(tmp_path: Path):
                 "idle_poll_interval_ms": 1,
                 "pid_scan_interval_ms": 99999,
                 "cache_cleanup_interval_ms": 10,
+                "burst_scan_iterations": 99,
+                "burst_scan_interval_ms": 1,
             }
         ),
         encoding="utf-8",
@@ -59,6 +63,8 @@ def test_settings_load_with_perf_bounds(tmp_path: Path):
     assert cfg.idle_poll_interval_ms == 200
     assert cfg.pid_scan_interval_ms == 5000
     assert cfg.cache_cleanup_interval_ms == 250
+    assert cfg.burst_scan_iterations == 20
+    assert cfg.burst_scan_interval_ms == 10
 
 
 def test_rules_load_with_bounds(tmp_path: Path):
@@ -90,6 +96,8 @@ def test_rules_load_with_bounds(tmp_path: Path):
     assert rules.popup_host_require_empty_text is True
     assert rules.hide_bottom_banner_without_token is False
     assert rules.close_empty_eva_child_requires_ad_signal is True
+    assert rules.weak_signal_confirm_ticks == 2
+    assert rules.hidden_restore_grace_ms == 250
 
 
 def test_rules_load_falls_back_ad_candidate_classes_to_main_window_classes(tmp_path: Path):
@@ -208,6 +216,24 @@ def test_rules_load_with_new_boolean_flags(tmp_path: Path):
     assert rules.popup_host_require_empty_text is False
 
 
+def test_rules_load_with_signal_tuning_fields(tmp_path: Path):
+    path = tmp_path / "layout_rules_v11.json"
+    path.write_text(
+        json.dumps(
+            {
+                "weak_signal_confirm_ticks": 99,
+                "hidden_restore_grace_ms": -1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rules = LayoutRulesV11.load(str(path))
+
+    assert rules.weak_signal_confirm_ticks == 10
+    assert rules.hidden_restore_grace_ms == 0
+
+
 def test_settings_load_backs_up_malformed_json_and_records_warning(tmp_path: Path):
     path = tmp_path / "layout_settings_v11.json"
     path.write_text("{ not-json", encoding="utf-8")
@@ -309,6 +335,8 @@ def test_rules_default_strings_are_utf8_intact():
     assert "AdFitWebView" in rules.popup_ad_classes
     assert rules.popup_host_text_contains == []
     assert rules.popup_host_require_empty_text is True
+    assert rules.weak_signal_confirm_ticks == 2
+    assert rules.hidden_restore_grace_ms == 250
 
 
 def test_rules_load_warns_when_mojibake_signatures_detected(tmp_path: Path):
@@ -400,6 +428,8 @@ def test_rules_save_writes_json_atomically(tmp_path: Path):
     assert saved["popup_ad_classes"] == ["AdFitWebView"]
     assert saved["hide_bottom_banner_without_token"] is True
     assert saved["close_empty_eva_child_requires_ad_signal"] is False
+    assert saved["weak_signal_confirm_ticks"] == 2
+    assert saved["hidden_restore_grace_ms"] == 250
 
 
 def test_settings_save_preserves_existing_file_on_atomic_replace_failure(tmp_path: Path, monkeypatch):
@@ -533,6 +563,9 @@ def test_default_runtime_save_uses_lazy_runtime_paths(monkeypatch, tmp_path: Pat
 
     assert expected_dir.exists()
     assert json.loads((expected_dir / "layout_settings_v11.json").read_text(encoding="utf-8"))["enabled"] is False
+    saved = json.loads((expected_dir / "layout_settings_v11.json").read_text(encoding="utf-8"))
+    assert saved["burst_scan_iterations"] == 3
+    assert saved["burst_scan_interval_ms"] == 20
 
     loaded = LayoutSettingsV11.load()
 

@@ -1257,6 +1257,56 @@ def test_engine_empty_eva_child_with_legacy_ad_signal_is_closed():
     assert 104 in closed_handles
 
 
+def test_engine_empty_eva_child_ignores_unrelated_custom_scroll_when_closing():
+    api = FakeAPI()
+    api.windows[104] = {
+        "pid": 42,
+        "class": "EVA_ChildWindow",
+        "text": "",
+        "parent": 100,
+        "rect": (0, 600, 500, 620),
+        "visible": True,
+    }
+    api.windows[105] = {
+        "pid": 42,
+        "class": "Chrome_WidgetWin_1",
+        "text": "Chrome Legacy Window",
+        "parent": 100,
+        "rect": (0, 620, 500, 700),
+        "visible": True,
+    }
+    api.windows[106] = {
+        "pid": 42,
+        "class": "_EVA_CustomScrollCtrl",
+        "text": "",
+        "parent": 101,
+        "rect": (480, 0, 500, 620),
+        "visible": True,
+    }
+    api.children[100] = [101, 104, 105]
+    api.children[101] = [106]
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(close_empty_eva_child_requires_ad_signal=True),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    assert 104 not in closed_handles
+
+    engine.scan_once()
+    engine.apply_once()
+
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    assert 104 in closed_handles
+
+
 def test_engine_restores_stale_hidden_legacy_window_when_signature_disappears():
     api = FakeAPI()
     settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)

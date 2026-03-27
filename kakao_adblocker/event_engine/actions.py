@@ -48,7 +48,6 @@ class WindowActionExecutor:
             if not self.engine._scanner.is_confirmed_main_window(wnd):
                 continue
             parent_class_name = self.engine._get_class(wnd)
-            parent_identity = (wnd, pid, parent_class_name)
 
             children = self.engine._scanner.enum_children(wnd)
             parent_text = self.engine._get_text(wnd, pid, parent_class_name)
@@ -101,14 +100,14 @@ class WindowActionExecutor:
                     return
                 if class_name == self.engine.rules.eva_child_class and window_text == "" and parent_text != "":
                     with self.engine._cache_lock:
-                        has_custom_scroll = self.engine._custom_scroll_cache.get(parent_identity)
+                        has_custom_scroll = self.engine._custom_scroll_cache.get(identity)
                     if has_custom_scroll is None:
                         has_custom_scroll = self.engine._signals.class_name_starts_with(
-                            wnd,
+                            child,
                             self.engine.rules.custom_scroll_prefix,
                         )
                         with self.engine._cache_lock:
-                            self.engine._custom_scroll_cache[parent_identity] = has_custom_scroll
+                            self.engine._custom_scroll_cache[identity] = has_custom_scroll
                     close_decision = self.engine._signals.empty_eva_close_decision(
                         class_name,
                         window_text,

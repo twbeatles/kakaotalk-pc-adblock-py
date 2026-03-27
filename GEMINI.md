@@ -9,6 +9,22 @@
 - Non-Windows execution: fail-fast with message and exit code `2`
 - Polling model: adaptive (active 50ms / idle 200ms by default)
 
+## Ad-Blocking Algorithm Contract
+
+- Treat the v11 ad-blocking algorithm as a fixed maintenance contract, not as a free-form optimization target.
+- Keep the strategy `layout-only`; do not reintroduce hosts, DNS, registry, or network-level blocking behavior.
+- Preserve the current blurfx-aligned semantics:
+  - main-window identification
+  - legacy-signature top-level candidate hide
+  - subtree-token aggressive hide
+  - guarded popup dismiss
+  - confirmed-ad-signal empty `EVA_ChildWindow` close
+- Keep the empty `EVA_ChildWindow` custom-scroll guard scoped to the candidate child subtree, not the whole main window.
+- Keep token-less bottom `Chrome_WidgetWin_*` geometry-only hides disabled by default; only allow them through `hide_bottom_banner_without_token=true`.
+- Keep non-empty popup hosts blocked by default unless they match `popup_host_text_contains`.
+- If engine logic must change, require live dump evidence (`--dump-tree` / `--dump-tree-series`), a regression fixture/test, and matching `.md` updates in the same change.
+- Prefer rules/fixture/test updates first; treat core engine-algorithm changes as a last resort.
+
 ## Runtime Entry
 
 - Main script: `kakaotalk_layout_adblock_v11.py`
@@ -54,6 +70,7 @@
   - ad candidate filtering uses `ad_candidate_classes` (default: `EVA_Window_Dblclk`, `EVA_Window`) + legacy exact/substring signatures
   - non-main top-level KakaoTalk windows are scanned for direct-child popup classes, but default popup handling now requires an empty host title or an allowlisted title substring before dismissing `AdFitWebView`-style popups
   - popup dismiss validates actual close/hide/zero-size success and reports failures into `last_error` / log
+  - empty `EVA_ChildWindow` close keeps its custom-scroll guard/cache scoped to the candidate child identity/subtree, not the whole main window
   - empty-title main windows can still be detected via child signature fallback (`OnlineMainView` / `LockModeView`)
   - synchronous warm-up scan/apply on engine start runs only when enabled
   - empty-string text cache uses short TTL refresh to reduce startup detection lag
@@ -138,6 +155,7 @@
 - `kakaotalk_adblock.spec` includes package root `kakao_adblocker` so lazy exports remain importable in onefile builds and tooling paths.
 - `kakaotalk_adblock.spec` excludes `pywinauto` and `comtypes` so archived legacy/UIA-only dependencies do not leak into the active v11 onefile bundle.
 - popup parity (`popup_ad_classes` / `AdFitWebView`), popup host guards, and logging fallback/probe stay inside existing modules, so no extra hidden-import or hook change is required.
+- the empty `EVA_ChildWindow` subtree custom-scroll guard fix also stays inside `event_engine`, so current hidden-import coverage remains sufficient.
 - `--self-check` now exercises dynamic Tk diagnostics and logging bootstrap probe, so explicit `tkinter` hidden imports keep onefile packaging deterministic.
 - `scripts/build_release.ps1` runs a packaged `--self-check --json` smoke by default after building with a temporary `%APPDATA%`; only `core` failures fail the build.
 - when an interactive shell is available, `scripts/build_release.ps1` also runs a packaged startup smoke with `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...`; otherwise it records a skipped startup smoke and continues.

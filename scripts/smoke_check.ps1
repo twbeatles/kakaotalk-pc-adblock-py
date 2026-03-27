@@ -40,7 +40,7 @@ try {
         try {
             Remove-Item -Recurse -Force $pytestBaseTemp
         } catch {
-            Write-Warning "Failed to clean $pytestBaseTemp: $($_.Exception.Message)"
+            Write-Warning "Failed to clean ${pytestBaseTemp}: $($_.Exception.Message)"
         }
     }
     Pop-Location

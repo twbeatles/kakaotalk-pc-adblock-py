@@ -9,6 +9,18 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 폴링은 적응형으로 동작합니다: 활성 상태 `50ms`, 유휴 상태 `200ms`(기본값).
 - 기본 동작은 트레이 중심이며, 설정 창은 필요 시 열 수 있습니다.
 
+## 광고차단 알고리즘 고정 원칙
+
+- v11의 광고차단 알고리즘은 단순 구현 세부사항이 아니라 유지보수 대상 계약(contract)입니다.
+- 기본 전략은 계속 `layout-only`이며, `hosts/DNS/레지스트리/패킷 차단` 계열 기능을 다시 도입하지 않습니다.
+- 기본 탐지/차단 흐름은 `blurfx/KakaoTalkAdBlock` 계열 의미를 유지합니다: 메인 윈도우 식별, legacy signature hide, subtree token 기반 aggressive hide, guarded popup dismiss, confirmed ad signal 기반 empty `EVA_ChildWindow` close.
+- 기본값에서 token 없는 하단 `Chrome_WidgetWin_*` 패널 geometry-only hide는 허용하지 않습니다. 이 동작은 `hide_bottom_banner_without_token=true` opt-in일 때만 켭니다.
+- 기본값에서 non-empty popup host title은 allowlist(`popup_host_text_contains`)에 맞지 않으면 광고 popup으로 간주하지 않습니다.
+- empty `EVA_ChildWindow` close의 custom scroll guard는 메인 윈도우 전체가 아니라 해당 광고 후보 child subtree 기준으로 판단합니다.
+- 알고리즘 변경은 추측이나 체감만으로 하지 않습니다. 실제 `--dump-tree`/`--dump-tree-series` 덤프, 참고 구현 비교, 회귀 테스트/fixture 추가가 함께 있어야 합니다.
+- 단순 튜닝은 가능하면 rules(`layout_rules_v11.json`)와 fixture/test 보강으로 처리하고, 엔진 로직 자체 변경은 마지막 수단으로 제한합니다.
+- 알고리즘을 바꿨다면 관련 `.md` 문서와 테스트 fixture를 함께 갱신해 이후 유지보수에서 기본 동작이 흔들리지 않도록 해야 합니다.
+
 ## 최근 안정성 개선 (v11.0.x)
 
 - `--minimized` 또는 `start_minimized=true`로 시작할 때는 시작 안내 팝업을 띄우지 않습니다.
@@ -25,6 +37,7 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 공격 모드는 현재 윈도우 텍스트뿐 아니라 자식 subtree 텍스트의 ad token도 확인하지만, 기본값에서는 token 없는 하단 `Chrome_WidgetWin_*` 패널을 geometry만으로 숨기지 않습니다.
 - `hide_bottom_banner_without_token=true` rules opt-in을 켠 경우에만 기존 geometry-only 하단 배너 hide를 허용합니다.
 - 빈 `EVA_ChildWindow`의 `WM_CLOSE`는 같은 메인 윈도우 안에 legacy/aggressive 광고 신호가 확인될 때만 수행됩니다.
+- 빈 `EVA_ChildWindow` close의 custom scroll guard는 메인 윈도우 전체가 아니라 해당 candidate child subtree 기준으로 판정해, 메인 내부 다른 스크롤 컨트롤 때문에 광고 close가 막히지 않도록 정리했습니다.
 - 시작프로그램 토글 시 레지스트리 갱신 실패가 발생하면 설정 파일(`run_on_startup`)을 잘못 저장하지 않습니다.
 - 설정 파일 저장 실패가 발생하면 토글 값(`enabled`/`run_on_startup`/`aggressive_mode`)을 즉시 롤백해 UI 동작을 계속 유지합니다.
 - 시작프로그램 토글에서 레지스트리 변경 후 설정 저장이 실패하면 레지스트리도 즉시 역롤백해 상태 불일치를 줄입니다.
@@ -194,6 +207,7 @@ pyinstaller kakaotalk_adblock.spec
 - `.spec`는 패키지 루트(`kakao_adblocker`)도 `hiddenimports`에 포함해 lazy export 경로와 패키징 도구 경로를 함께 안정화합니다.
 - `.spec`는 active v11 런타임에 없는 보관용 의존성(`pywinauto`, `comtypes`)을 `excludes`에 넣어 legacy 아카이브가 onefile 번들에 섞이지 않게 유지합니다.
 - 이번 popup parity(`popup_ad_classes` / `AdFitWebView`) 보강은 기존 `config/event_engine` 경로 내부 구현이라 추가 hidden import 없이 동일 spec으로 빌드됩니다.
+- empty `EVA_ChildWindow` subtree custom-scroll guard 수정도 동일 `event_engine` 내부 구현이라 `.spec` hidden import 집합 변경 없이 현재 spec으로 유지합니다.
 - `.spec`는 `packaging/windows_version_info.txt`를 버전 리소스로 포함해 `CompanyName/ProductName/FileVersion` 등 PE 메타데이터를 채웁니다.
 - `--self-check` 진단 경로도 동일 hiddenimports 집합으로 별도 수정 없이 동작합니다.
 

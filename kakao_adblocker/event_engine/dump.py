@@ -178,7 +178,7 @@ class WindowDumpBuilder:
             for child, identity, class_name, window_text, child_rect, aggressive_decision in child_contexts:
                 if class_name == self.engine.rules.eva_child_class and window_text == "" and parent_text != "":
                     has_custom_scroll = self.engine._signals.class_name_starts_with(
-                        wnd,
+                        child,
                         self.engine.rules.custom_scroll_prefix,
                     )
                     close_decision = self.engine._signals.empty_eva_close_decision(

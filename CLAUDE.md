@@ -7,6 +7,22 @@
 - 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, 적응형 폴링 엔진(active 50ms / idle 200ms 기본)
 - 실행 정책: Windows 전용(비Windows에서는 fail-fast 종료 코드 `2`)
 
+## 광고차단 알고리즘 고정 규칙
+
+- v11 광고차단 알고리즘은 고정 계약으로 취급한다. 임의 리팩터링, 휴리스틱 완화/강화, 범용화 시도를 하지 않는다.
+- 기본 전략은 항상 `layout-only`다. `hosts/DNS/레지스트리/네트워크 차단` 계열 기능을 다시 추가하지 않는다.
+- 기본 알고리즘 의미는 `blurfx/KakaoTalkAdBlock` 계열과 일치시킨다:
+  - 메인 윈도우 식별
+  - legacy signature 기반 top-level candidate hide
+  - subtree token 기반 aggressive hide
+  - guarded popup dismiss
+  - confirmed ad signal 기반 empty `EVA_ChildWindow` close
+- empty `EVA_ChildWindow` close의 custom scroll guard는 메인 윈도우 전체가 아니라 해당 candidate child subtree 기준으로 유지한다.
+- token 없는 하단 `Chrome_WidgetWin_*` geometry-only hide는 기본값에서 금지하고, rules opt-in(`hide_bottom_banner_without_token=true`)일 때만 허용한다.
+- non-empty popup host title은 기본값에서 allowlist(`popup_host_text_contains`)에 맞지 않으면 dismiss하지 않는다.
+- 알고리즘 자체를 바꾸려면 반드시 실제 `--dump-tree`/`--dump-tree-series` 근거, fixture 또는 회귀 테스트, 관련 문서 갱신을 함께 남긴다.
+- 가능하면 rules/fixture/test를 조정하고, 엔진 로직 변경은 실제 회귀가 확인된 경우로 제한한다.
+
 ## 엔트리포인트
 
 - 실행: `kakaotalk_layout_adblock_v11.py`
@@ -46,6 +62,7 @@
   - 광고 후보는 `ad_candidate_classes`(기본: `EVA_Window_Dblclk`, `EVA_Window`)와 레거시 시그니처(exact + substring)를 함께 사용해 필터링
   - 비메인 top-level KakaoTalk window의 direct child가 `popup_ad_classes`와 매치되더라도, 기본값에서는 empty host title 또는 allowlist(`popup_host_text_contains`) 매치일 때만 parent/child popup을 정리
   - popup dismiss는 실제 close/hide/zero-size 성공 여부를 검증하고, 실패 시 상태(`last_error`)와 로그에 반영
+  - empty `EVA_ChildWindow` close의 custom-scroll guard/cache는 메인 윈도우 전체가 아니라 candidate child identity/subtree 기준으로 유지
   - 메인 윈도우 상태는 `candidate_main_window_count`(후보)와 `main_window_count`(확정)로 분리되며, 실제 apply는 확정 기준만 사용
   - 엔진 시작 시 enabled인 경우에만 동기 warm-up(scan+apply 1회)으로 초기 광고 깜빡임 완화
   - 빈 문자열 텍스트 캐시는 짧은 TTL로 재조회해 초기 UI 구성 구간 탐지 지연 완화
@@ -107,6 +124,7 @@
 - 패키지 루트 `kakao_adblocker`도 `hiddenimports`에 포함되어 lazy export 패키지 접근 경로를 고정
 - `pywinauto`, `comtypes`는 active v11 런타임 바깥의 legacy/UIA 의존성이므로 `.spec`의 `excludes`로 유지
 - popup parity(`popup_ad_classes` / `AdFitWebView`)는 기존 `config/event_engine` 내부 구현이라 추가 PyInstaller hook 없이 현재 spec으로 포장 가능
+- empty `EVA_ChildWindow` subtree custom-scroll guard 수정도 기존 `event_engine` 내부 구현이라 추가 hidden import 없이 현재 spec으로 유지
 - `scripts/build_release.ps1`는 기본값으로 built EXE에 `--self-check --json` packaged smoke를 1회 수행하며, core failure만 빌드 실패로 취급한다. 필요 시 `-SkipSmokeCheck`로 비활성화 가능
 - interactive shell이 감지되면 built EXE에 `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...` startup smoke를 추가 수행하고, 비interactive 환경에서는 skip 기록만 남기고 계속 진행한다
 

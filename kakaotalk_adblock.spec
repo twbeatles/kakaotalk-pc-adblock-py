@@ -16,6 +16,7 @@ if not APP_ICON.exists():
 # Keep lazy-imported core/runtime modules explicit so onefile packaging stays stable.
 # `--self-check` path also imports pystray/PIL/tkinter and probes logging bootstrap.
 # Popup-removal parity (`popup_ad_classes` / `AdFitWebView`) and popup host text guards live in existing stdlib-backed modules.
+# Empty `EVA_ChildWindow` subtree custom-scroll guard/cache behavior also stays inside existing `event_engine` modules.
 # Tray readiness/JSON self-heal/startup-warning/stale-hide recovery/logging-fallback changes are also stdlib-only.
 # Core runtime modules are now packageized (`kakao_adblocker.app/config/event_engine`), so collect submodules for those packages too.
 # v11 typing boundary module(`kakao_adblocker.protocols`) is imported by runtime modules.

@@ -141,11 +141,16 @@ class WindowActionExecutor:
                     if aggressive_confirmed and aggressive_decision.action == ACTION_HIDE:
                         if self.engine._is_stopping():
                             return
-                        if self.engine._is_hidden_identity(identity):
+                        hidden_ok, hide_applied = self.ensure_window_hidden(
+                            child,
+                            pid,
+                            class_name,
+                            hide_reason=aggressive_decision.hide_reason,
+                        )
+                        if hidden_ok:
                             matched_hidden_identities.add(identity)
-                        elif self.hide_window(child, pid, class_name, hide_reason=aggressive_decision.hide_reason):
-                            matched_hidden_identities.add(identity)
-                            hidden += 1
+                            if hide_applied:
+                                hidden += 1
 
         for wnd in candidates:
             if self.engine._is_stopping():
@@ -168,11 +173,16 @@ class WindowActionExecutor:
                 if legacy_decision.matched and self.engine._is_hidden_identity(identity):
                     matched_hidden_identities.add(identity)
                 if legacy_confirmed and legacy_decision.action == ACTION_HIDE:
-                    if self.engine._is_hidden_identity(identity):
+                    hidden_ok, hide_applied = self.ensure_window_hidden(
+                        wnd,
+                        pid,
+                        class_name,
+                        hide_reason=legacy_decision.hide_reason,
+                    )
+                    if hidden_ok:
                         matched_hidden_identities.add(identity)
-                    elif self.hide_window(wnd, pid, class_name, hide_reason=legacy_decision.hide_reason):
-                        matched_hidden_identities.add(identity)
-                        hidden += 1
+                        if hide_applied:
+                            hidden += 1
 
         popup_hidden, popup_closed = self.remove_popup_ads(kakao_pids, now=now)
         hidden += popup_hidden
@@ -327,6 +337,12 @@ class WindowActionExecutor:
             self.engine._hidden_windows.pop(identity, None)
         self.engine._note_candidate_snapshot(identity, None)
         return False
+
+    def ensure_window_hidden(self, hwnd: int, pid: int, class_name: str, hide_reason: str) -> tuple[bool, bool]:
+        identity = (hwnd, pid, class_name)
+        if self.engine._is_hidden_identity(identity) and not self.engine.api.is_window_visible(hwnd):
+            return True, False
+        return self.hide_window(hwnd, pid, class_name, hide_reason=hide_reason), True
 
     def restore_no_longer_matched_hidden_windows(
         self,

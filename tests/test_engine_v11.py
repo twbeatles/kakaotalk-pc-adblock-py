@@ -265,6 +265,35 @@ def test_engine_restores_hidden_windows_on_stop():
     assert api.windows[200]["visible"] is True
 
 
+def test_engine_rehides_tracked_windows_if_kakaotalk_reshows_them():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+    assert api.windows[102]["visible"] is False
+    assert api.windows[200]["visible"] is False
+
+    # Simulate KakaoTalk making the same ad HWNDs visible again after minimize/restore.
+    api.windows[102]["visible"] = True
+    api.windows[200]["visible"] = True
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert api.windows[102]["visible"] is False
+    assert api.windows[200]["visible"] is False
+    assert api.hide_calls.count(102) >= 2
+    assert api.hide_calls.count(200) >= 2
+
+
 def test_engine_stop_records_warning_when_watch_thread_join_times_out():
     class HungThread:
         def join(self, timeout=None):

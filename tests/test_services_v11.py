@@ -218,6 +218,53 @@ def test_startup_manager_sync_registration_command_updates_stale_value(monkeypat
     assert FakeWinreg.written == [r'"C:\Apps\KakaoTalkLayoutAdBlocker_v11.exe" --startup-launch --minimized']
 
 
+def test_startup_manager_probe_registration_command_not_registered(monkeypatch):
+    monkeypatch.setattr(services.StartupManager, "get_registered_command", staticmethod(lambda: None))
+
+    ok, detail = services.StartupManager.probe_registration_command()
+
+    assert ok is True
+    assert "등록 안 됨" in detail
+
+
+def test_startup_manager_probe_registration_command_detects_stale_command(monkeypatch):
+    monkeypatch.setattr(
+        services.StartupManager,
+        "get_registered_command",
+        staticmethod(lambda: r'"C:\Apps\KakaoTalkLayoutAdBlocker_v11.exe" --minimized'),
+    )
+    monkeypatch.setattr(
+        services.StartupManager,
+        "build_command",
+        staticmethod(lambda: r'"C:\Apps\KakaoTalkLayoutAdBlocker_v11.exe" --startup-launch --minimized'),
+    )
+    monkeypatch.setattr(services.Path, "exists", lambda _path: True)
+
+    ok, detail = services.StartupManager.probe_registration_command()
+
+    assert ok is False
+    assert "명령 불일치" in detail
+
+
+def test_startup_manager_probe_registration_command_detects_missing_target(monkeypatch):
+    monkeypatch.setattr(
+        services.StartupManager,
+        "get_registered_command",
+        staticmethod(lambda: r'"C:\Missing\App.exe" --startup-launch --minimized'),
+    )
+    monkeypatch.setattr(
+        services.StartupManager,
+        "build_command",
+        staticmethod(lambda: r'"C:\Apps\KakaoTalkLayoutAdBlocker_v11.exe" --startup-launch --minimized'),
+    )
+    monkeypatch.setattr(services.Path, "exists", lambda _path: False)
+
+    ok, detail = services.StartupManager.probe_registration_command()
+
+    assert ok is False
+    assert "대상 누락" in detail
+
+
 def test_startup_manager_wait_for_shell_ready_requires_stable_shell(monkeypatch):
     class FakeFindWindow:
         def __init__(self):

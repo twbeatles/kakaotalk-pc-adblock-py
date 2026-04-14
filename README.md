@@ -27,11 +27,13 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 트레이(pystray/Pillow) 모듈을 사용할 수 없는 환경에서는 `--minimized`/`start_minimized` 요청을 무시하고 창을 강제로 표시합니다.
 - 트레이를 사용할 수 없는 상태에서 창 닫기(X)는 숨김이 아니라 앱 종료로 동작합니다.
 - 트레이 가용성은 준비 신호 기반으로 판정되며, 시작 타임아웃/런타임 비정상 종료 시 트레이 모드를 비활성화하고 창 접근 경로를 복구합니다.
+- 트레이 시작 실패/런타임 중단 후에는 3초 간격 최대 3회 자동 재시도를 수행합니다. 시작 최소화 fallback 중 복구되면 창을 다시 숨기고, 런타임 중단 복구에서는 창을 계속 표시합니다.
 - 엔진이 `layout_rules_v11.json`의 `main_window_classes`를 실제 메인 윈도우 탐지에 반영합니다.
+- 메인 윈도우 판정은 `top-level + main class + child signature`를 강한 가드로 유지하면서, title이 비어있지 않더라도 `main_window_titles`에 없을 때 child signature fallback으로 확정할 수 있습니다.
 - 광고 후보 탐지는 `ad_candidate_classes`를 분리 적용하고, 최상위 후보는 `Chrome Legacy Window` 시그니처를 만족할 때만 처리합니다.
 - 레거시 광고 시그니처는 exact(`chrome_legacy_title`)와 substring(`chrome_legacy_title_contains`)을 함께 지원합니다.
 - 기본 광고 후보 클래스는 `EVA_Window_Dblclk`, `EVA_Window`이며, 구버전 rules에서 `ad_candidate_classes`가 누락/비정상이면 `main_window_classes`로 폴백합니다.
-- 비메인 top-level 카카오톡 창의 direct child가 `popup_ad_classes`(기본값: `AdFitWebView`)와 일치하더라도, 기본값에서는 popup host title이 비어있는 경우에만 광고 popup으로 간주해 parent/child를 `WM_CLOSE + SW_HIDE + zero-size` 처리합니다.
+- 비메인 top-level 카카오톡 창의 descendant(기본 depth `2`)가 `popup_ad_classes`(기본값: `AdFitWebView`)와 일치하더라도, 기본값에서는 popup host title이 비어있거나 allowlist에 맞을 때만 host window와 matched popup descendant만 `WM_CLOSE + SW_HIDE + zero-size` 처리합니다.
 - popup dismiss는 실제 close/hide/zero-size 성공 여부를 검증하며, 실패 시 상태 문자열(`last_error`)과 로그에 반영됩니다.
 - 공격 모드에서 짧은 토큰(예: `Ad`)은 단어 경계 기준으로 매칭하여 오탐(`ReadLater`, `Header` 등)을 줄였습니다.
 - 공격 모드는 현재 윈도우 텍스트뿐 아니라 자식 subtree 텍스트의 ad token도 확인하지만, 기본값에서는 token 없는 하단 `Chrome_WidgetWin_*` 패널을 geometry만으로 숨기지 않습니다.
@@ -42,6 +44,7 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 설정 파일 저장 실패가 발생하면 토글 값(`enabled`/`run_on_startup`/`aggressive_mode`)을 즉시 롤백해 UI 동작을 계속 유지합니다.
 - 시작프로그램 토글에서 레지스트리 변경 후 설정 저장이 실패하면 레지스트리도 즉시 역롤백해 상태 불일치를 줄입니다.
 - 앱 시작 시 `run_on_startup`은 레지스트리 상태를 기준으로 1회 동기화됩니다.
+- 앱 시작 시 Run 등록이 켜져 있으면 등록 명령을 함께 검증하고, stale/mismatch 상태면 `sync_registration_command()`로 자동 복구를 시도합니다.
 - 시작 시 `run_on_startup` 동기화 저장이 실패해도 값 롤백 후 예외 없이 계속 동작합니다.
 - 차단 OFF 전환 또는 앱 종료 시, 이전에 숨김/이동한 광고 창은 즉시 원복됩니다.
 - 차단 OFF 상태에서는 watch/apply 루프를 모두 일시중단하고, ON 전환 시 즉시 재개합니다.
@@ -57,7 +60,7 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - PID 탐지 경고(예: psutil 실패, tasklist fallback/실패)는 상태 문자열(`last_error`)과 로그에 반영됩니다.
 - `--dump-tree` 경로는 UI/트레이 모듈을 지연 로딩하여 시작 오버헤드를 최소화합니다.
 - `--self-check` 경로는 UI/엔진을 기동하지 않고 환경 진단(APPDATA, logging bootstrap, tasklist, 레지스트리, `tkinter/Tk` 부팅, 트레이 모듈 import)만 수행합니다.
-- `--self-check`의 시작프로그램 진단은 Run 레지스트리 `읽기/쓰기` 접근을 함께 점검합니다.
+- `--self-check`의 시작프로그램 진단은 Run 레지스트리 `읽기/쓰기` 접근과 Run 등록 명령 유효성을 함께 점검합니다.
 - 로그 파일 핸들러 초기화가 실패하면 stderr fallback logger로 계속 기동하고, 해당 경고를 상태 문자열에도 반영합니다.
 - UI 실행 경로는 `try/finally` cleanup으로 예외 발생 시에도 `stop_tray()/engine.stop()`를 보장합니다.
 - 기본 설정(`idle_poll_interval_ms=200`) 기준으로 유휴 복귀 지연은 최대 약 200ms를 목표로 합니다.
@@ -79,7 +82,7 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 빈 텍스트 캐시는 짧은 TTL로 빠르게 재조회해 초기 UI 구성 구간의 탐지 지연을 줄였습니다.
 - 공격 모드를 끄면 aggressive hide로 숨긴 창은 즉시 복구되고, 즉시 재스캔/재적용이 수행됩니다.
 - 한 번 숨긴 창도 이후 aggressive/legacy 시그니처에서 벗어나면 자동 복구되어 stale hide가 누적되지 않습니다.
-- 상태 문자열의 `숨김`/`리사이즈` 수치는 누적값이며, UI 라벨도 `누적 숨김`/`누적 리사이즈`로 명시됩니다.
+- 상태 문자열의 `숨김`/`닫힘`/`리사이즈` 수치는 누적값이며, UI/트레이 라벨도 `누적 숨김`/`누적 닫힘`/`누적 리사이즈`로 명시됩니다.
 - 핵심 런타임 모듈은 단일 파일이 아니라 패키지로 정리되었습니다: `kakao_adblocker/app/`, `kakao_adblocker/config/`, `kakao_adblocker/event_engine/`. 기존 import 경로(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`)는 그대로 유지됩니다.
 
 ## 실행
@@ -154,7 +157,8 @@ python -m pyright
 `layout_rules_v11.json` 기본 템플릿에는 `chrome_legacy_title_contains` 키가 포함되어 substring 시그니처 조정이 가능합니다.
 추가 rules 키:
 
-- `popup_ad_classes`: 기본값 `["AdFitWebView"]`, non-main top-level popup host의 direct child class 매칭 목록
+- `popup_ad_classes`: 기본값 `["AdFitWebView"]`, non-main top-level popup host subtree의 popup class 매칭 목록
+- `popup_search_depth`: 기본값 `2`, popup class 탐색 시 descendant depth 상한
 - `popup_host_text_contains`: 기본값 `[]`, non-empty popup host title을 광고 popup으로 허용할 substring 목록
 - `popup_host_require_empty_text`: 기본값 `true`, 위 allowlist에 매치되지 않는 non-empty popup host title은 기본적으로 광고 popup 판정에서 제외
 - `hide_bottom_banner_without_token`: 기본값 `false`, token 없는 하단 배너 geometry-only hide를 opt-in으로 허용
@@ -239,7 +243,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign
 - packaged self-check는 `core` 실패만 빌드 실패로 간주하고, `optional` 실패는 경고로만 남깁니다.
 - interactive shell이 감지되면 추가로 `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...` startup smoke를 1회 수행합니다.
 - interactive shell이 없으면 startup smoke는 건너뛰고 빌드는 계속 진행합니다.
+- `-StrictStartupSmoke`를 함께 주면 interactive startup smoke가 실제 수행된 경우에만 `tray_available=false` 또는 `tray_start_error!=empty`를 빌드 실패로 승격합니다.
 - smoke를 건너뛰려면 `-SkipSmokeCheck`를 사용합니다.
+
+## CI
+
+- GitHub Actions(`.github/workflows/windows-ci.yml`)는 hosted `windows-latest`에서 `python -m pyright`, `pytest -q --basetemp .pytest_tmp`, `python kakaotalk_layout_adblock_v11.py --self-check --json`, `powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign -SkipSmokeCheck`를 실행합니다.
+- hosted Windows CI는 정적 분석/테스트/패키징 게이트만 담당하며, interactive tray/startup smoke는 로컬 수동 검증 또는 실제 릴리스 호스트에서 수행하는 것을 기준으로 합니다.
 
 서명을 켜려면 아래 둘 중 하나를 설정하세요.
 

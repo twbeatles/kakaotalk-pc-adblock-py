@@ -102,6 +102,7 @@ class LayoutRulesV11:
     chrome_legacy_title_contains: List[str] = field(default_factory=lambda: ["Chrome Legacy Window"])
     chrome_widget_prefixes: List[str] = field(default_factory=lambda: ["Chrome_WidgetWin_"])
     popup_ad_classes: List[str] = field(default_factory=lambda: ["AdFitWebView"])
+    popup_search_depth: int = 2
     popup_host_text_contains: List[str] = field(default_factory=list)
     popup_host_require_empty_text: bool = True
     aggressive_ad_tokens: List[str] = field(default_factory=lambda: ["Ad", "AdFit", "Advertisement", "광고"])
@@ -174,6 +175,12 @@ class LayoutRulesV11:
                 defaults.chrome_widget_prefixes,
             ),
             popup_ad_classes=config_module._coerce_str_list(raw.get("popup_ad_classes"), defaults.popup_ad_classes),
+            popup_search_depth=config_module._coerce_int(
+                raw.get("popup_search_depth"),
+                defaults.popup_search_depth,
+                minimum=1,
+                maximum=2,
+            ),
             popup_host_text_contains=config_module._coerce_str_list(
                 raw.get("popup_host_text_contains"),
                 defaults.popup_host_text_contains,

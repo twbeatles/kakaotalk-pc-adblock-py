@@ -5,7 +5,8 @@ param(
     [string]$DistDir = "dist",
     [string]$WorkDir = "build",
     [switch]$NoSign,
-    [switch]$SkipSmokeCheck
+    [switch]$SkipSmokeCheck,
+    [switch]$StrictStartupSmoke
 )
 
 $ErrorActionPreference = "Stop"
@@ -163,6 +164,8 @@ function Invoke-StartupSmoke {
         return [PSCustomObject]@{
             status = "skipped"
             reason = "interactive shell not detected"
+            tray_available = $null
+            tray_start_error = ""
         }
     }
 
@@ -196,14 +199,21 @@ function Invoke-StartupSmoke {
         if (-not $trace.shell_wait_attempted) {
             throw "startup trace did not record shell wait"
         }
+        $trayAvailable = [bool]$trace.tray_available
+        $trayStartError = ""
+        if ($null -ne $trace.tray_start_error) {
+            $trayStartError = [string]$trace.tray_start_error
+        }
         if (-not $trace.tray_available) {
             Write-Warning "Startup smoke completed but tray was unavailable on this host."
-        } elseif ($trace.tray_start_error) {
-            Write-Warning "Startup smoke completed with tray warning: $($trace.tray_start_error)"
+        } elseif ($trayStartError) {
+            Write-Warning "Startup smoke completed with tray warning: $trayStartError"
         }
         return [PSCustomObject]@{
             status = "completed"
             reason = ""
+            tray_available = $trayAvailable
+            tray_start_error = $trayStartError
         }
     } finally {
         Remove-TempDir -Path $tempAppData
@@ -237,6 +247,14 @@ try {
         Write-Host "Startup smoke status: $($startupSmoke.status)"
         if ($startupSmoke.reason) {
             Write-Host "Startup smoke detail: $($startupSmoke.reason)"
+        }
+        if ($StrictStartupSmoke -and $startupSmoke.status -eq "completed") {
+            if (-not $startupSmoke.tray_available) {
+                throw "Strict startup smoke failed: tray unavailable during interactive startup smoke"
+            }
+            if ($startupSmoke.tray_start_error) {
+                throw "Strict startup smoke failed: $($startupSmoke.tray_start_error)"
+            }
         }
     }
 

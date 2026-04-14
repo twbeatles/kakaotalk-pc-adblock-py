@@ -169,7 +169,7 @@ def test_main_ignores_minimized_when_tray_unavailable(monkeypatch):
     assert engine is not None
     assert controller.hidden_called is False
     assert controller.shown_called is True
-    assert engine.reported_warnings[-1] == "tray unavailable, minimized ignored"
+    assert engine.reported_warnings == []
 
 
 def test_main_waits_for_shell_and_schedules_tray_refresh_on_startup_launch(monkeypatch):
@@ -380,6 +380,7 @@ def test_self_check_path_skips_engine_and_ui(monkeypatch):
     monkeypatch.setattr(app, "probe_logging_setup", lambda: (True, "ok"))
     monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_registration_command", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app, "_check_tk_boot", lambda: (True, "ok"))
     monkeypatch.setattr(app, "_check_tray_import", lambda: (True, "ok"))
 
@@ -397,6 +398,7 @@ def test_self_check_json_uses_same_checks_and_optional_failures_are_nonfatal(mon
     monkeypatch.setattr(app, "probe_logging_setup", lambda: (True, "ok"))
     monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (False, "tasklist denied")))
     monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (False, "registry denied")))
+    monkeypatch.setattr(app.StartupManager, "probe_registration_command", staticmethod(lambda: (False, "startup stale")))
     monkeypatch.setattr(app, "_check_tk_boot", lambda: (True, "ok"))
     monkeypatch.setattr(app, "_check_tray_import", lambda: (True, "ok"))
 
@@ -411,6 +413,7 @@ def test_self_check_json_uses_same_checks_and_optional_failures_are_nonfatal(mon
         "로그 초기화",
         "tasklist 실행",
         "Run 레지스트리 읽기/쓰기 접근",
+        "Run 등록 명령 유효성",
         "Tk UI 부팅",
         "트레이 모듈 import",
     }
@@ -419,7 +422,7 @@ def test_self_check_json_uses_same_checks_and_optional_failures_are_nonfatal(mon
     assert rc_json == 0
     assert set(check["name"] for check in payload["checks"]) == expected_names
     assert payload["summary"]["core_failed"] == 0
-    assert payload["summary"]["optional_failed"] == 2
+    assert payload["summary"]["optional_failed"] == 3
     for name in expected_names:
         assert name in text
 
@@ -431,6 +434,7 @@ def test_self_check_json_can_write_report_file(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(app, "probe_logging_setup", lambda: (True, "ok"))
     monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_registration_command", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app, "_check_tk_boot", lambda: (True, "ok"))
     monkeypatch.setattr(app, "_check_tray_import", lambda: (True, "ok"))
 
@@ -450,6 +454,7 @@ def test_self_check_json_report_skips_stdout_when_frozen(monkeypatch, capsys, tm
     monkeypatch.setattr(app, "probe_logging_setup", lambda: (True, "ok"))
     monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_registration_command", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app, "_check_tk_boot", lambda: (True, "ok"))
     monkeypatch.setattr(app, "_check_tray_import", lambda: (True, "ok"))
 
@@ -468,6 +473,7 @@ def test_self_check_json_fails_when_core_check_fails(monkeypatch, capsys):
     monkeypatch.setattr(app, "probe_logging_setup", lambda: (True, "ok"))
     monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_registration_command", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app, "_check_tk_boot", lambda: (True, "ok"))
     monkeypatch.setattr(app, "_check_tray_import", lambda: (True, "ok"))
 
@@ -505,6 +511,7 @@ def test_self_check_fails_when_tk_boot_check_fails(monkeypatch):
     monkeypatch.setattr(app, "probe_logging_setup", lambda: (True, "ok"))
     monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_registration_command", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app, "_check_tk_boot", lambda: (False, "tk failed"))
     monkeypatch.setattr(app, "_check_tray_import", lambda: (True, "ok"))
 
@@ -519,6 +526,7 @@ def test_self_check_fails_when_logging_probe_fails(monkeypatch):
     monkeypatch.setattr(app, "probe_logging_setup", lambda: (False, "log failed"))
     monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_registration_command", staticmethod(lambda: (True, "ok")))
     monkeypatch.setattr(app, "_check_tk_boot", lambda: (True, "ok"))
     monkeypatch.setattr(app, "_check_tray_import", lambda: (True, "ok"))
 

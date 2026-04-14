@@ -86,8 +86,19 @@ class WindowDumpBuilder:
         return {
             "timestamp": datetime.now().isoformat(),
             "pids": sorted(pids),
+            "main_windows": self.inspect_main_windows_for_dump(pids),
             "windows": [self.dump_node(root.hwnd, 0, 6) for root in roots],
         }
+
+    def inspect_main_windows_for_dump(self, pids: Set[int]) -> List[Dict[str, object]]:
+        windows = self.engine._scanner.collect_windows(pids) if pids else []
+        payloads = [
+            self.engine._scanner.main_window_debug_payload(item.hwnd, item=item)
+            for item in windows
+            if self.engine._scanner.is_main_window_candidate(item)
+        ]
+        payloads.sort(key=lambda item: cast(int, item["hwnd"]))
+        return payloads
 
     def inspect_candidates_for_dump(
         self,
@@ -106,7 +117,8 @@ class WindowDumpBuilder:
         for item in windows:
             if not self.engine._scanner.is_main_window_candidate(item):
                 continue
-            if self.engine._scanner.is_confirmed_main_window(item.hwnd, item=item):
+            detection = self.engine._scanner.main_window_debug_payload(item.hwnd, item=item)
+            if bool(detection["confirmed"]):
                 main_handles.add(item.hwnd)
 
         for item in windows:
@@ -260,19 +272,12 @@ class WindowDumpBuilder:
             if not self.engine.api.is_window_visible(item.hwnd):
                 continue
             popup_guard = self.engine._signals.popup_host_guard_status(item.text)
-            for child in self.engine._scanner.enum_children(item.hwnd):
-                if not self.engine.api.is_window(child):
-                    continue
-                if self.engine.api.get_parent(child) != item.hwnd:
-                    continue
-                if not self.engine.api.is_window_visible(child):
-                    continue
-                class_name = self.engine._get_class(child)
-                if class_name not in self.engine._popup_ad_class_set:
-                    continue
+            for child, depth, class_name in self.engine._scanner.find_popup_matches(item.hwnd):
                 identity = (child, self.engine.api.get_window_thread_process_id(child), class_name)
                 popup_signals = self.engine._signals.blank_signals()
-                popup_signals["popup_direct_class"] = True
+                popup_signals["popup_direct_class"] = depth == 1
+                popup_signals["popup_descendant_class"] = True
+                popup_signals["popup_match_depth"] = depth
                 popup_signals["popup_host_guard"] = popup_guard
                 popup_decision = (
                     self.engine._signals.decision_dismiss_popup(popup_signals)

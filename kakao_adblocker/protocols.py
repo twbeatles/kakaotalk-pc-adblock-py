@@ -64,6 +64,7 @@ class EngineStateLike(Protocol):
     candidate_main_window_count: int
     main_window_count: int
     hidden_windows: int
+    closed_windows: int
     resized_windows: int
     last_error: str
     last_tick: float

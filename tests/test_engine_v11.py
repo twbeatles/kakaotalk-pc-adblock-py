@@ -192,6 +192,25 @@ def test_engine_detects_main_window_with_empty_title_using_child_signature():
     assert 101 in resized_handles
 
 
+def test_engine_detects_main_window_with_unfamiliar_title_using_child_signature():
+    api = FakeAPI()
+    api.windows[100]["text"] = "업데이트 안내"
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    rules = LayoutRulesV11()
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+
+    assert engine.state.main_window_count == 1
+    assert engine.state.candidate_main_window_count >= 1
+
+
 def test_engine_candidate_and_confirmed_main_window_counts_are_tracked_separately():
     api = FakeAPI()
     api.windows[150] = {
@@ -505,6 +524,136 @@ def test_engine_popup_ad_class_with_non_empty_host_title_is_ignored_by_default()
     assert 240 not in api.hide_calls
     assert 241 not in api.hide_calls
     assert api.send_calls == []
+
+
+def test_engine_nested_popup_ad_class_is_closed_at_depth_two():
+    api = FakeAPI()
+    api.windows[240] = {
+        "pid": 42,
+        "class": "EVA_Window",
+        "text": "",
+        "parent": 0,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.windows[241] = {
+        "pid": 42,
+        "class": "WrapperPanel",
+        "text": "",
+        "parent": 240,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.windows[242] = {
+        "pid": 42,
+        "class": "AdFitWebView",
+        "text": "",
+        "parent": 241,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.children[240] = [241]
+    api.children[241] = [242]
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    rules = LayoutRulesV11(popup_ad_classes=["AdFitWebView"], popup_search_depth=2)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    assert 240 in closed_handles
+    assert 242 in closed_handles
+    assert 241 not in closed_handles
+
+
+def test_engine_nested_popup_ad_class_is_ignored_beyond_depth_limit():
+    api = FakeAPI()
+    api.windows[240] = {
+        "pid": 42,
+        "class": "EVA_Window",
+        "text": "",
+        "parent": 0,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.windows[241] = {
+        "pid": 42,
+        "class": "WrapperPanel",
+        "text": "",
+        "parent": 240,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.windows[242] = {
+        "pid": 42,
+        "class": "AdFitWebView",
+        "text": "",
+        "parent": 241,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.children[240] = [241]
+    api.children[241] = [242]
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    rules = LayoutRulesV11(popup_ad_classes=["AdFitWebView"], popup_search_depth=1)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert 240 not in api.hide_calls
+    assert 242 not in api.hide_calls
+    assert api.send_calls == []
+
+
+def test_engine_allowlisted_non_empty_popup_host_is_dismissed():
+    api = FakeAPI()
+    api.windows[240] = {
+        "pid": 42,
+        "class": "EVA_Window",
+        "text": "광고 미리보기",
+        "parent": 0,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.windows[241] = {
+        "pid": 42,
+        "class": "AdFitWebView",
+        "text": "",
+        "parent": 240,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.children[240] = [241]
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    rules = LayoutRulesV11(popup_ad_classes=["AdFitWebView"], popup_host_text_contains=["광고"])
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    assert 240 in closed_handles
+    assert 241 in closed_handles
 
 
 def test_engine_popup_ad_class_reports_failure_when_hide_and_zero_size_fail():
@@ -1470,6 +1619,27 @@ def test_engine_dump_tree_series_includes_candidate_decisions(tmp_path):
     assert len(payload["frames"]) == 1
     assert payload["frames"][0]["candidates"]
     assert any(candidate["action"] == "hide" for candidate in payload["frames"][0]["candidates"])
+
+
+def test_engine_dump_tree_records_child_signature_fallback_context(tmp_path):
+    api = FakeAPI()
+    api.windows[100]["text"] = "업데이트 안내"
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        LayoutSettingsV11(enabled=True, aggressive_mode=False),
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    path = engine.dump_window_tree(out_dir=str(tmp_path))
+
+    assert path is not None
+    payload = json.loads((tmp_path / Path(path).name).read_text(encoding="utf-8"))
+    assert any(
+        item["hwnd"] == 100 and item["confirmation"] == "child-signature-fallback"
+        for item in payload["main_windows"]
+    )
 
 
 def test_engine_error_log_map_is_pruned_when_many_unique_errors():

@@ -4,6 +4,7 @@ import csv
 import ctypes
 import io
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -159,6 +160,51 @@ class StartupManager:
                 winreg_mod.CloseKey(key)
         except Exception:
             return None
+
+    @staticmethod
+    def _split_command(command: str) -> list[str]:
+        if not command:
+            return []
+        try:
+            tokens = shlex.split(command, posix=False)
+        except Exception:
+            return []
+        return [token[1:-1] if len(token) >= 2 and token[0] == token[-1] == '"' else token for token in tokens]
+
+    @staticmethod
+    def _command_target_paths(command: str) -> list[str]:
+        tokens = StartupManager._split_command(command)
+        if not tokens:
+            return []
+        targets = [tokens[0]]
+        for token in tokens[1:]:
+            normalized = token.lower()
+            if normalized.startswith("-") or normalized.startswith("/"):
+                break
+            targets.append(token)
+            if len(targets) >= 2:
+                break
+        return targets
+
+    @staticmethod
+    def registration_health() -> tuple[str, str]:
+        command = StartupManager.get_registered_command()
+        if not command:
+            return "not_registered", "Run 등록 안 됨"
+        expected = StartupManager.build_command()
+        targets = StartupManager._command_target_paths(command)
+        missing_targets = [target for target in targets if target and not Path(target).exists()]
+        if missing_targets:
+            missing_text = ", ".join(missing_targets)
+            return "missing_target", f"Run 등록 대상 누락: {missing_text}"
+        if command != expected:
+            return "stale_command", "Run 등록 명령 불일치"
+        return "healthy", "Run 등록 명령 정상"
+
+    @staticmethod
+    def probe_registration_command() -> Tuple[bool, str]:
+        status, detail = StartupManager.registration_health()
+        return status in {"healthy", "not_registered"}, detail
 
     @staticmethod
     def sync_registration_command() -> bool:

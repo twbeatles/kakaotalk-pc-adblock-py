@@ -26,6 +26,9 @@ dist/
 .tmp-packaged-*/
 window_dump_*.json
 window_dump_series_*.json
+self-check.json
+startup-trace.json
+bootstrap-argv-report.json
 Thumbs.db
 
 .venv/

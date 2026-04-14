@@ -60,22 +60,61 @@ class WindowScanner:
         self.engine.api.enum_child_windows(parent_hwnd, lambda hwnd: children.append(hwnd) or True)
         return children
 
-    def is_main_window_candidate(self, item: WindowInfo) -> bool:
+    def enum_descendants(self, parent_hwnd: int, max_depth: int) -> List[Tuple[int, int]]:
+        if max_depth <= 0 or not self.engine.api.is_window(parent_hwnd):
+            return []
+        descendants: List[Tuple[int, int]] = []
+        queue: List[Tuple[int, int]] = [(child, 1) for child in self.enum_children(parent_hwnd)]
+        index = 0
+        while index < len(queue):
+            hwnd, depth = queue[index]
+            index += 1
+            descendants.append((hwnd, depth))
+            if depth >= max_depth:
+                continue
+            for child in self.enum_children(hwnd):
+                queue.append((child, depth + 1))
+        return descendants
+
+    def find_popup_matches(self, host_hwnd: int) -> List[Tuple[int, int, str]]:
+        matches: List[Tuple[int, int, str]] = []
+        for hwnd, depth in self.enum_descendants(host_hwnd, int(self.engine.rules.popup_search_depth)):
+            if not self.engine.api.is_window(hwnd):
+                continue
+            if not self.engine.api.is_window_visible(hwnd):
+                continue
+            class_name = self.engine._get_class(hwnd)
+            if class_name not in self.engine._popup_ad_class_set:
+                continue
+            matches.append((hwnd, depth, class_name))
+        return matches
+
+    def structural_main_window_candidate(self, item: WindowInfo) -> bool:
         if item.class_name not in self.engine._main_window_class_set:
             return False
-        if item.parent_hwnd != 0:
-            return False
-        if item.text and not self.engine._is_main_title(item.text):
-            return False
-        return True
+        return item.parent_hwnd == 0
 
-    def is_confirmed_main_window(self, hwnd: int, item: Optional[WindowInfo] = None) -> bool:
-        if item is not None and not self.is_main_window_candidate(item):
-            return False
+    def main_window_title_matches(self, text: str) -> bool:
+        return bool(text) and self.engine._is_main_title(text)
+
+    def is_main_window_candidate(self, item: WindowInfo) -> bool:
+        return self.structural_main_window_candidate(item)
+
+    def main_window_debug_payload(self, hwnd: int, item: Optional[WindowInfo] = None) -> Dict[str, object]:
         if item is None:
             pid = self.engine.api.get_window_thread_process_id(hwnd)
             if pid <= 0:
-                return False
+                return {
+                    "hwnd": hwnd,
+                    "pid": 0,
+                    "class": "",
+                    "text": "",
+                    "structural_candidate": False,
+                    "title_match": False,
+                    "child_signature": False,
+                    "confirmed": False,
+                    "confirmation": "rejected",
+                }
             class_name = self.engine._get_class(hwnd)
             item = WindowInfo(
                 hwnd=hwnd,
@@ -86,9 +125,27 @@ class WindowScanner:
                 rect=None,
                 visible=False,
             )
-            if not self.is_main_window_candidate(item):
-                return False
-        return self.has_main_view_signature(hwnd)
+        structural_candidate = self.structural_main_window_candidate(item)
+        title_match = self.main_window_title_matches(item.text)
+        child_signature = structural_candidate and self.has_main_view_signature(item.hwnd)
+        confirmed = structural_candidate and child_signature
+        confirmation = "rejected"
+        if confirmed:
+            confirmation = "title-and-child-signature" if title_match else "child-signature-fallback"
+        return {
+            "hwnd": item.hwnd,
+            "pid": item.pid,
+            "class": item.class_name,
+            "text": item.text,
+            "structural_candidate": structural_candidate,
+            "title_match": title_match,
+            "child_signature": child_signature,
+            "confirmed": confirmed,
+            "confirmation": confirmation,
+        }
+
+    def is_confirmed_main_window(self, hwnd: int, item: Optional[WindowInfo] = None) -> bool:
+        return bool(self.main_window_debug_payload(hwnd, item=item)["confirmed"])
 
     def is_main_window(self, child_handles: List[int]) -> bool:
         for hwnd in child_handles:
@@ -127,8 +184,15 @@ class WindowScanner:
             if not self.is_main_window_candidate(item):
                 continue
             candidate_main_handles.add(item.hwnd)
-            if self.is_confirmed_main_window(item.hwnd, item=item):
+            detection = self.main_window_debug_payload(item.hwnd, item=item)
+            if bool(detection["confirmed"]):
                 main_handles.add(item.hwnd)
+                if str(detection["confirmation"]) == "child-signature-fallback":
+                    self.engine.logger.debug(
+                        "main window confirmed by child signature fallback hwnd=%s title=%r",
+                        item.hwnd,
+                        item.text,
+                    )
 
         for item in windows:
             if self.engine._is_stopping():

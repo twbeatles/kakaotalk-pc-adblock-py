@@ -53,7 +53,7 @@
   - missing new perf fields are backfilled with safe defaults
   - new rules flags: `hide_bottom_banner_without_token=false`, `close_empty_eva_child_requires_ad_signal=true`
   - weak/restore tuning: `weak_signal_confirm_ticks=2`, `hidden_restore_grace_ms=250`
-  - new rules keys: `popup_ad_classes=["AdFitWebView"]`, `popup_host_text_contains=[]`, `popup_host_require_empty_text=true`
+  - new rules keys: `popup_ad_classes=["AdFitWebView"]`, `popup_search_depth=2`, `popup_host_text_contains=[]`, `popup_host_require_empty_text=true`
   - rules loader falls back `ad_candidate_classes` to `main_window_classes` when missing/invalid
   - malformed/non-object JSON input is backed up as `*.broken-YYYYMMDD-HHMMSS` and then self-healed with default JSON
   - inverted banner bounds (`banner_min_height_px > banner_max_height_px`) are auto-normalized
@@ -68,10 +68,10 @@
   - main window detection uses `main_window_classes` from rules
   - candidate and confirmed main-window counts are tracked separately; apply uses confirmed handles only
   - ad candidate filtering uses `ad_candidate_classes` (default: `EVA_Window_Dblclk`, `EVA_Window`) + legacy exact/substring signatures
-  - non-main top-level KakaoTalk windows are scanned for direct-child popup classes, but default popup handling now requires an empty host title or an allowlisted title substring before dismissing `AdFitWebView`-style popups
+  - non-main top-level KakaoTalk windows are scanned for popup descendants up to `popup_search_depth`; default popup handling still requires an empty host title or an allowlisted title substring before dismissing `AdFitWebView`-style popups
   - popup dismiss validates actual close/hide/zero-size success and reports failures into `last_error` / log
   - empty `EVA_ChildWindow` close keeps its custom-scroll guard/cache scoped to the candidate child identity/subtree, not the whole main window
-  - empty-title main windows can still be detected via child signature fallback (`OnlineMainView` / `LockModeView`)
+  - main windows keep the strong `top-level + main class + child signature` guard; title mismatch can still confirm via child signature fallback (`OnlineMainView` / `LockModeView`)
   - synchronous warm-up scan/apply on engine start runs only when enabled
   - empty-string text cache uses short TTL refresh to reduce startup detection lag
   - hidden/moved windows are restored when blocking is disabled or engine stops
@@ -101,16 +101,19 @@
   - startup notice is skipped when launching minimized
   - minimized-start requests are ignored when tray modules are unavailable
   - tray readiness is confirmed via startup signal; startup timeout (`1.5s`) disables tray mode
+  - tray startup failure and unexpected tray runtime exit both schedule fixed recovery retries (`3` attempts, `3000ms` interval)
   - unexpected tray runtime exit disables tray mode and restores main window visibility
+  - startup fallback visibility is tracked so successful tray recovery can auto-hide the window again only during startup-minimized recovery
   - window close action switches from hide to shutdown when tray is unavailable
   - startup setting is synchronized from registry on app start
+  - when Run registration is enabled, startup command health is probed and stale/missing command lines are auto-repaired when possible
   - startup toggle rolls registry back on settings-save failure
   - setting save failures roll back values (`enabled`, `run_on_startup`, `aggressive_mode`)
   - aggressive mode toggle is pushed into the engine immediately after a successful save
   - `로그 폴더 열기` / `GitHub 릴리스 열기` failures surface as short UI warnings instead of failing silently
   - status text includes last error and last tick context
   - status text shows confirmed main-window count and appends candidate count only when larger
-  - status text labels cumulative counters explicitly (`누적 숨김`, `누적 리사이즈`)
+  - status text labels cumulative counters explicitly (`누적 숨김`, `누적 닫힘`, `누적 리사이즈`)
   - status text includes restore failure count/context when present
   - controller-local UI warnings (`tray unavailable`, startup registry rollback issues) surface when engine error is absent
   - pystray/Pillow are loaded lazily and retried after TTL (30s) when import fails
@@ -123,7 +126,8 @@
   - psutil init/loop failure falls back to `tasklist` scan
   - `ProcessInspector.consume_last_warning()` provides scan diagnostics to the engine
   - `StartupManager.probe_access()` validates both Run-registry read and write access
-  - diagnostics helpers: `ProcessInspector.probe_tasklist()`, `StartupManager.probe_access()`
+  - `StartupManager.registration_health()` classifies `not_registered`, `healthy`, `stale_command`, `missing_target`
+  - diagnostics helpers: `ProcessInspector.probe_tasklist()`, `StartupManager.probe_access()`, `StartupManager.probe_registration_command()`
 - `win32_api.py`
   - user32 API bindings explicitly define `argtypes/restype`
   - exposes `get_last_error()` for debug telemetry on ShowWindow/SetWindowPos failures
@@ -159,6 +163,13 @@
 - `--self-check` now exercises dynamic Tk diagnostics and logging bootstrap probe, so explicit `tkinter` hidden imports keep onefile packaging deterministic.
 - `scripts/build_release.ps1` runs a packaged `--self-check --json` smoke by default after building with a temporary `%APPDATA%`; only `core` failures fail the build.
 - when an interactive shell is available, `scripts/build_release.ps1` also runs a packaged startup smoke with `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...`; otherwise it records a skipped startup smoke and continues.
+- `-StrictStartupSmoke` only upgrades tray-unavailable / tray-start-warning startup smoke results to a build failure when the interactive startup smoke actually ran.
+
+## CI
+
+- GitHub Actions workflow `.github/workflows/windows-ci.yml` runs on `push` and `pull_request` with hosted `windows-latest`.
+- CI covers `python -m pyright`, `pytest -q --basetemp .pytest_tmp`, `python kakaotalk_layout_adblock_v11.py --self-check --json`, and `scripts/build_release.ps1 -NoSign -SkipSmokeCheck`.
+- Hosted CI intentionally skips interactive tray/startup validation; that remains a local/manual or release-host check.
 
 ## Legacy Archive
 

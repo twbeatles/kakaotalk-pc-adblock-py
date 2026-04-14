@@ -25,6 +25,7 @@
   "popup_ad_classes": [
     "AdFitWebView"
   ],
+  "popup_search_depth": 2,
   "popup_host_text_contains": [],
   "popup_host_require_empty_text": true,
   "aggressive_ad_tokens": [

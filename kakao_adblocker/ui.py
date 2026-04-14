@@ -23,14 +23,16 @@ _TRAY_IMPORT_RETRY_TTL_SECONDS = 30.0
 _TRAY_READY_TIMEOUT_SECONDS = 1.5
 _TRAY_READY_TIMEOUT_MINIMIZED_SECONDS = 8.0
 _STARTUP_TRAY_REFRESH_DELAY_MS = 3000
+_TRAY_RECOVERY_RETRY_DELAY_MS = 3000
+_TRAY_RECOVERY_MAX_ATTEMPTS = 3
 
 
-def _load_tray_modules() -> bool:
+def _load_tray_modules(force_retry: bool = False) -> bool:
     global pystray, Image, ImageDraw, PYSTRAY_AVAILABLE, _LAST_TRAY_IMPORT_FAILURE_AT
     if PYSTRAY_AVAILABLE:
         return True
     now = time.time()
-    if _LAST_TRAY_IMPORT_FAILURE_AT is not None:
+    if not force_retry and _LAST_TRAY_IMPORT_FAILURE_AT is not None:
         if (now - _LAST_TRAY_IMPORT_FAILURE_AT) < _TRAY_IMPORT_RETRY_TTL_SECONDS:
             return False
     try:
@@ -81,6 +83,9 @@ class TrayController:
         self._ui_queue_batch_size = 32
         self._status_label: Any = None
         self._startup_tray_refresh_scheduled = False
+        self._tray_recovery_attempts_remaining = 0
+        self._tray_recovery_scheduled = False
+        self._startup_rehide_on_tray_recovery = False
         try:
             if isinstance(self.root, tk.Misc):
                 self._status_var: StatusVarLike = tk.StringVar(master=self.root, value="상태: 초기화")
@@ -135,6 +140,9 @@ class TrayController:
         self._tray_available = False
         self._tray_start_error = ""
         self._tray_stopping = False
+        self._tray_recovery_attempts_remaining = 0
+        self._tray_recovery_scheduled = False
+        self._startup_rehide_on_tray_recovery = False
         if _load_tray_modules():
             ready_timeout_seconds = _TRAY_READY_TIMEOUT_MINIMIZED_SECONDS if startup_minimized else _TRAY_READY_TIMEOUT_SECONDS
             self._setup_tray(ready_timeout_seconds=ready_timeout_seconds)
@@ -143,13 +151,18 @@ class TrayController:
                     self.logger.warning("tray mode disabled: %s", self._tray_start_error)
                     self._set_ui_warning(f"tray unavailable: {self._tray_start_error}")
                 else:
+                    self._tray_start_error = "startup timeout"
                     self.logger.warning("tray mode disabled: tray startup timeout")
                     self._set_ui_warning("tray unavailable: startup timeout")
+                self._begin_tray_recovery(auto_hide_on_success=startup_minimized)
             else:
+                self._reset_tray_recovery_state()
                 self._clear_ui_warning(("tray unavailable:",))
         else:
             self.logger.warning("pystray is unavailable; tray mode disabled")
+            self._tray_start_error = "pystray import failed"
             self._set_ui_warning("tray unavailable: pystray import failed")
+            self._begin_tray_recovery(auto_hide_on_success=startup_minimized)
         self._configure_close_behavior()
         self._tick_status()
 
@@ -239,7 +252,7 @@ class TrayController:
         candidate_main_count = int(getattr(state, "candidate_main_window_count", state.main_window_count) or 0)
         base = (
             f"상태: {mode} | PID {state.kakao_pid_count} | 메인윈도우 {state.main_window_count} | "
-            f"누적 숨김 {state.hidden_windows} | 누적 리사이즈 {state.resized_windows}"
+            f"누적 숨김 {state.hidden_windows} | 누적 닫힘 {state.closed_windows} | 누적 리사이즈 {state.resized_windows}"
         )
         if candidate_main_count > state.main_window_count:
             base = f"{base} | 후보 {candidate_main_count}"
@@ -356,8 +369,59 @@ class TrayController:
             self._startup_tray_refresh_scheduled = False
             self.logger.debug("Startup tray refresh scheduling skipped")
 
+    def _reset_tray_recovery_state(self) -> None:
+        self._tray_recovery_attempts_remaining = 0
+        self._tray_recovery_scheduled = False
+        self._startup_rehide_on_tray_recovery = False
+
+    def _begin_tray_recovery(self, *, auto_hide_on_success: bool) -> None:
+        if self._tray_stopping:
+            return
+        self._tray_recovery_attempts_remaining = _TRAY_RECOVERY_MAX_ATTEMPTS
+        if auto_hide_on_success:
+            self._startup_rehide_on_tray_recovery = True
+        self._schedule_next_tray_recovery()
+
+    def _schedule_next_tray_recovery(self) -> None:
+        if self._tray_recovery_scheduled:
+            return
+        if self._tray_available or self._tray_stopping or self._tray_recovery_attempts_remaining <= 0:
+            return
+        if not hasattr(self.root, "after"):
+            return
+        self._tray_recovery_scheduled = True
+        try:
+            self.root.after(_TRAY_RECOVERY_RETRY_DELAY_MS, self._retry_tray_start)
+        except Exception:
+            self._tray_recovery_scheduled = False
+            self.logger.debug("Tray recovery scheduling skipped")
+
+    def _retry_tray_start(self) -> None:
+        self._tray_recovery_scheduled = False
+        if not self._ui_queue_running or self._tray_available or self._tray_stopping:
+            return
+        if self._tray_recovery_attempts_remaining <= 0:
+            return
+        self._tray_recovery_attempts_remaining -= 1
+        if _load_tray_modules(force_retry=True):
+            self._setup_tray(ready_timeout_seconds=_TRAY_READY_TIMEOUT_SECONDS)
+        else:
+            self._tray_start_error = "pystray import failed"
+        if self._tray_available:
+            self._clear_ui_warning(("tray unavailable:",))
+            if self._startup_rehide_on_tray_recovery and self._is_window_visible():
+                self.hide_window()
+            self._reset_tray_recovery_state()
+            return
+        message = self._tray_start_error or "tray recovery failed"
+        self._set_ui_warning(f"tray unavailable: {message}")
+        if self._tray_recovery_attempts_remaining > 0:
+            self._schedule_next_tray_recovery()
+
     def shutdown(self) -> None:
         self._ui_queue_running = False
+        self._tray_recovery_attempts_remaining = 0
+        self._tray_recovery_scheduled = False
         self.stop_tray()
         self.engine.stop()
         try:
@@ -507,10 +571,12 @@ class TrayController:
         if self._tray_stopping:
             return
         self._tray_available = False
+        self._startup_rehide_on_tray_recovery = False
         self._set_ui_warning("tray unavailable: tray runtime stopped unexpectedly")
         self.logger.warning("Tray runtime stopped unexpectedly; forcing main window visible")
         if not self._is_window_visible():
             self.show_window()
+        self._begin_tray_recovery(auto_hide_on_success=False)
 
     def _refresh_tray_after_startup_launch(self) -> None:
         self._startup_tray_refresh_scheduled = False
@@ -523,12 +589,14 @@ class TrayController:
         self.stop_tray()
         self._setup_tray(ready_timeout_seconds=_TRAY_READY_TIMEOUT_SECONDS)
         if self._tray_available:
+            self._reset_tray_recovery_state()
             self._clear_ui_warning(("tray unavailable:",))
             return
         message = self._tray_start_error or "startup refresh failed"
         self._set_ui_warning(f"tray unavailable: {message}")
         if window_was_hidden:
             self.show_window()
+        self._begin_tray_recovery(auto_hide_on_success=window_was_hidden)
 
     def _menu_toggle_blocking(self, _icon, _item) -> None:
         self._safe_after(self.toggle_blocking)
@@ -572,9 +640,15 @@ class TrayController:
 
     def _sync_startup_setting(self) -> None:
         actual = StartupManager.is_enabled()
-        if actual and not StartupManager.sync_registration_command():
-            self.logger.warning("Failed to refresh startup registration command")
-            self._set_ui_warning("startup command refresh failed")
+        if actual:
+            registration_ok, registration_detail = StartupManager.probe_registration_command()
+            if not registration_ok:
+                if StartupManager.sync_registration_command():
+                    self.logger.info("Startup registration command refreshed: %s", registration_detail)
+                    self._clear_ui_warning(("startup ",))
+                else:
+                    self.logger.warning("Failed to refresh startup registration command: %s", registration_detail)
+                    self._set_ui_warning("startup command refresh failed")
         if self.settings.run_on_startup == actual:
             return
         if not self._save_setting_attr("run_on_startup", actual):

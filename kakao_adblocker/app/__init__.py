@@ -119,6 +119,7 @@ def _self_check_specs() -> list[tuple[str, str, Callable[[], tuple[bool, str]]]]
         ("로그 초기화", "core", probe_logging_setup),
         ("tasklist 실행", "optional", ProcessInspector.probe_tasklist),
         ("Run 레지스트리 읽기/쓰기 접근", "optional", StartupManager.probe_access),
+        ("Run 등록 명령 유효성", "optional", StartupManager.probe_registration_command),
         ("Tk UI 부팅", "core", _check_tk_boot),
         ("트레이 모듈 import", "core", _check_tray_import),
     ]
@@ -250,12 +251,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             engine.report_warning(priority_warning)
 
         controller.start(startup_minimized=requested_minimized)
-        should_start_minimized = requested_minimized
-        if requested_minimized and not controller.is_tray_available():
-            warning = "tray unavailable, minimized ignored"
-            logger.warning(warning)
-            engine.report_warning(warning)
-            should_start_minimized = False
+        should_start_minimized = requested_minimized and controller.is_tray_available()
 
         if not requested_minimized:
             controller.show_startup_notice()

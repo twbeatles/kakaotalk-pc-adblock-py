@@ -218,24 +218,20 @@ class WindowActionExecutor:
                 continue
             popup_guard = self.engine._signals.popup_host_guard_status(item.text)
 
-            for child in self.engine._scanner.enum_children(item.hwnd):
+            for child, depth, class_name in self.engine._scanner.find_popup_matches(item.hwnd):
                 if self.engine._is_stopping():
                     return hidden, closed
                 if not self.engine.api.is_window(child):
                     continue
-                if self.engine.api.get_parent(child) != item.hwnd:
-                    continue
-                if not self.engine.api.is_window_visible(child):
-                    continue
-                if self.engine._get_class(child) not in self.engine._popup_ad_class_set:
-                    continue
                 child_identity = (
                     child,
                     self.engine.api.get_window_thread_process_id(child),
-                    self.engine._get_class(child),
+                    class_name,
                 )
                 popup_signals = self.engine._signals.blank_signals()
-                popup_signals["popup_direct_class"] = True
+                popup_signals["popup_direct_class"] = depth == 1
+                popup_signals["popup_descendant_class"] = True
+                popup_signals["popup_match_depth"] = depth
                 popup_signals["popup_host_guard"] = popup_guard
                 popup_decision = (
                     self.engine._signals.decision_dismiss_popup(popup_signals)

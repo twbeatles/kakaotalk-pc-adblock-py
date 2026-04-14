@@ -1,0 +1,46 @@
+name: windows-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install Dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Pyright
+        shell: pwsh
+        run: python -m pyright
+
+      - name: Pytest
+        shell: pwsh
+        run: pytest -q --basetemp .pytest_tmp
+
+      - name: Self Check
+        shell: pwsh
+        run: python kakaotalk_layout_adblock_v11.py --self-check --json
+
+      - name: Build Release
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign -SkipSmokeCheck
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KakaoTalkLayoutAdBlocker_v11
+          path: dist/KakaoTalkLayoutAdBlocker_v11.exe

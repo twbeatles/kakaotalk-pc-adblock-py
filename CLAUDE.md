@@ -20,6 +20,7 @@
 - empty `EVA_ChildWindow` close의 custom scroll guard는 메인 윈도우 전체가 아니라 해당 candidate child subtree 기준으로 유지한다.
 - token 없는 하단 `Chrome_WidgetWin_*` geometry-only hide는 기본값에서 금지하고, rules opt-in(`hide_bottom_banner_without_token=true`)일 때만 허용한다.
 - non-empty popup host title은 기본값에서 allowlist(`popup_host_text_contains`)에 맞지 않으면 dismiss하지 않는다.
+- popup class 탐색은 direct child만 보지 않고 `popup_search_depth` 범위의 descendant까지 허용하되, 기본값은 `2`를 넘기지 않는다.
 - 알고리즘 자체를 바꾸려면 반드시 실제 `--dump-tree`/`--dump-tree-series` 근거, fixture 또는 회귀 테스트, 관련 문서 갱신을 함께 남긴다.
 - 가능하면 rules/fixture/test를 조정하고, 엔진 로직 변경은 실제 회귀가 확인된 경우로 제한한다.
 
@@ -45,7 +46,7 @@
   - 신규 필드 누락 시 기본값 자동 보완(무중단 호환)
   - 신규 rules 플래그: `hide_bottom_banner_without_token=false`, `close_empty_eva_child_requires_ad_signal=true`
   - 신규 rules 튜닝값: `weak_signal_confirm_ticks=2`, `hidden_restore_grace_ms=250`
-  - 신규 rules 키: `popup_ad_classes=["AdFitWebView"]`, `popup_host_text_contains=[]`, `popup_host_require_empty_text=true`
+  - 신규 rules 키: `popup_ad_classes=["AdFitWebView"]`, `popup_search_depth=2`, `popup_host_text_contains=[]`, `popup_host_require_empty_text=true`
   - rules 로드 시 `ad_candidate_classes`가 누락/비정상이면 `main_window_classes`로 폴백
   - JSON 파손(파싱 실패/최상위 타입 불일치) 시 `*.broken-YYYYMMDD-HHMMSS` 백업 생성 후 기본값 JSON으로 self-heal
   - rules 로드 시 `banner_min_height_px > banner_max_height_px` 역전값을 자동 교정(swap)하고 경고 기록
@@ -60,13 +61,13 @@
   - 단일 watch+apply 루프(적응형 폴링), `main_window_classes` 기반 메인 윈도우 식별
   - 차단 OFF 상태에서는 watch/apply를 모두 일시중단하고 1.0초 저비용 대기
   - 광고 후보는 `ad_candidate_classes`(기본: `EVA_Window_Dblclk`, `EVA_Window`)와 레거시 시그니처(exact + substring)를 함께 사용해 필터링
-  - 비메인 top-level KakaoTalk window의 direct child가 `popup_ad_classes`와 매치되더라도, 기본값에서는 empty host title 또는 allowlist(`popup_host_text_contains`) 매치일 때만 parent/child popup을 정리
+  - 비메인 top-level KakaoTalk window의 descendant(depth<=`popup_search_depth`)가 `popup_ad_classes`와 매치되더라도, 기본값에서는 empty host title 또는 allowlist(`popup_host_text_contains`) 매치일 때만 host와 matched popup descendant만 정리
   - popup dismiss는 실제 close/hide/zero-size 성공 여부를 검증하고, 실패 시 상태(`last_error`)와 로그에 반영
   - empty `EVA_ChildWindow` close의 custom-scroll guard/cache는 메인 윈도우 전체가 아니라 candidate child identity/subtree 기준으로 유지
   - 메인 윈도우 상태는 `candidate_main_window_count`(후보)와 `main_window_count`(확정)로 분리되며, 실제 apply는 확정 기준만 사용
   - 엔진 시작 시 enabled인 경우에만 동기 warm-up(scan+apply 1회)으로 초기 광고 깜빡임 완화
   - 빈 문자열 텍스트 캐시는 짧은 TTL로 재조회해 초기 UI 구성 구간 탐지 지연 완화
-  - 메인 윈도우 제목이 빈 경우 자식 시그니처(`OnlineMainView`/`LockModeView`) 기반 fallback 탐지 지원
+  - 메인 윈도우는 `top-level + main class + child signature`를 강한 가드로 유지하고, title이 비어있지 않아도 `main_window_titles` 불일치 시 자식 시그니처(`OnlineMainView`/`LockModeView`) fallback 탐지를 허용
   - 차단 OFF/엔진 종료 시 숨김·이동 창 원복
   - `stop()` 시작 이후에는 새 hide/close/apply 작업이 봉쇄되어, join timeout 이후에도 복원 직후 재은닉이 발생하지 않도록 정리
   - aggressive hide 창은 공격 모드 OFF 시 즉시 원복 후 재스캔/재적용
@@ -96,12 +97,14 @@
   - 트레이 비가용 시 최소화 시작 요청을 무시하고 창을 강제 표시
   - 트레이 시작은 준비 신호 기반으로 판정하며 시작 타임아웃(1.5초) 시 비활성화
   - 트레이 런타임 비정상 종료 시 트레이를 비활성화하고 메인 창 복구
+  - 트레이 시작 실패/런타임 중단 후 3초 간격 최대 3회 재시도, startup fallback 중 성공 시 자동 재은닉
   - 트레이 비가용 시 창 닫기(X)는 숨김이 아니라 종료로 처리
   - 시작 시 `run_on_startup` 값을 레지스트리 상태로 1회 동기화
+  - 시작 시 Run 등록이 enabled면 등록 명령 stale/missing 여부를 함께 검사하고 자동 복구를 시도
   - 상태 문자열에 마지막 오류/갱신시각 표시
   - 엔진 오류가 없을 때는 tray unavailable/startup rollback 같은 UI 계층 경고를 상태 문자열에 짧게 노출
   - 상태 문자열의 `메인윈도우`는 확정 count이며, 후보가 더 많을 때만 `후보 N`을 추가 표기
-  - 상태 문자열의 `누적 숨김`/`누적 리사이즈` 라벨로 누적 카운터 의미를 명시
+  - 상태 문자열의 `누적 숨김`/`누적 닫힘`/`누적 리사이즈` 라벨로 누적 카운터 의미를 명시
   - pystray/Pillow 지연 로딩 + 실패 TTL(30초) 자동 재시도
   - 트레이 콜백은 queue 디스패치(`_safe_after` -> main-thread drain)로 처리
   - 설정 저장 실패 시 토글 값 롤백(`enabled`/`run_on_startup`/`aggressive_mode`)
@@ -127,6 +130,8 @@
 - empty `EVA_ChildWindow` subtree custom-scroll guard 수정도 기존 `event_engine` 내부 구현이라 추가 hidden import 없이 현재 spec으로 유지
 - `scripts/build_release.ps1`는 기본값으로 built EXE에 `--self-check --json` packaged smoke를 1회 수행하며, core failure만 빌드 실패로 취급한다. 필요 시 `-SkipSmokeCheck`로 비활성화 가능
 - interactive shell이 감지되면 built EXE에 `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...` startup smoke를 추가 수행하고, 비interactive 환경에서는 skip 기록만 남기고 계속 진행한다
+- `-StrictStartupSmoke`는 interactive startup smoke가 실제 수행된 경우에만 tray unavailable / tray start warning을 빌드 실패로 승격한다
+- GitHub Actions workflow `.github/workflows/windows-ci.yml`는 hosted Windows에서 pyright, pytest, self-check JSON, no-sign packaging build만 검증하고, interactive tray/startup smoke는 강제하지 않는다
 
 ## 동작 규칙
 
@@ -136,10 +141,10 @@
 4. `LockModeView`: `width=parent-2`, `height=parent`
 5. `Chrome Legacy Window` 하위 광고 서브윈도우 숨김
 6. 공격 모드에서 `Chrome_WidgetWin_* + ad token` 또는 subtree token이 확인된 하단 배너 후보만 숨기고, geometry-only hide는 rules opt-in일 때만 허용
-7. 비메인 top-level 창의 direct child가 `AdFitWebView` 등 `popup_ad_classes`에 매치되더라도 기본값에서는 empty host title 또는 allowlist match일 때만 popup parent/child를 close/hide/zero-size 처리
+7. 비메인 top-level 창의 descendant(depth<=`popup_search_depth`)가 `AdFitWebView` 등 `popup_ad_classes`에 매치되더라도 기본값에서는 empty host title 또는 allowlist match일 때만 host와 matched popup descendant만 close/hide/zero-size 처리
 8. 시작프로그램 토글은 레지스트리 갱신 성공 시에만 설정 파일에 반영
 9. `--dump-tree`는 UI 모듈을 로딩하지 않는 경량 경로로 동작
-10. `--self-check`는 UI/엔진을 기동하지 않고 APPDATA/logging bootstrap/tasklist/레지스트리/`tkinter/Tk`/트레이 import 환경 진단만 수행
+10. `--self-check`는 UI/엔진을 기동하지 않고 APPDATA/logging bootstrap/tasklist/레지스트리/Run 등록 명령/`tkinter/Tk`/트레이 import 환경 진단만 수행
 11. 시작 경고 상태 반영은 `복구 실패 > 자동 복구 > 기타` 우선순위로 1건 노출
 
 ## 설정 파일

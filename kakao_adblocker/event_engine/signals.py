@@ -40,6 +40,8 @@ class SignalEvaluator:
         return {
             "legacy_signature": "",
             "popup_direct_class": False,
+            "popup_descendant_class": False,
+            "popup_match_depth": 0,
             "chrome_widget_bottom_banner": False,
             "subtree_ad_token": False,
             "empty_eva_child": False,
@@ -52,6 +54,7 @@ class SignalEvaluator:
             (
                 bool(signals.get("legacy_signature")),
                 bool(signals.get("popup_direct_class")),
+                bool(signals.get("popup_descendant_class")),
                 bool(signals.get("chrome_widget_bottom_banner")),
                 bool(signals.get("subtree_ad_token")),
                 bool(signals.get("empty_eva_child")),

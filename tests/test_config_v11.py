@@ -92,6 +92,7 @@ def test_rules_load_with_bounds(tmp_path: Path):
     assert rules.cache_ttl_seconds >= 0.1
     assert rules.chrome_legacy_title_contains == ["Chrome Legacy Window"]
     assert rules.popup_ad_classes == ["AdFitWebView"]
+    assert rules.popup_search_depth == 2
     assert rules.popup_host_text_contains == []
     assert rules.popup_host_require_empty_text is True
     assert rules.hide_bottom_banner_without_token is False
@@ -178,6 +179,22 @@ def test_rules_load_coerces_popup_ad_classes(tmp_path: Path):
     rules = LayoutRulesV11.load(str(path))
 
     assert rules.popup_ad_classes == ["AdFitWebView", "PopupWebView"]
+
+
+def test_rules_load_coerces_popup_search_depth(tmp_path: Path):
+    path = tmp_path / "layout_rules_v11.json"
+    path.write_text(
+        json.dumps(
+            {
+                "popup_search_depth": 99,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rules = LayoutRulesV11.load(str(path))
+
+    assert rules.popup_search_depth == 2
 
 
 def test_rules_load_coerces_popup_host_text_contains(tmp_path: Path):
@@ -333,6 +350,7 @@ def test_rules_default_strings_are_utf8_intact():
     assert "광고" in rules.aggressive_ad_tokens
     assert "Chrome Legacy Window" in rules.chrome_legacy_title_contains
     assert "AdFitWebView" in rules.popup_ad_classes
+    assert rules.popup_search_depth == 2
     assert rules.popup_host_text_contains == []
     assert rules.popup_host_require_empty_text is True
     assert rules.weak_signal_confirm_ticks == 2
@@ -426,6 +444,7 @@ def test_rules_save_writes_json_atomically(tmp_path: Path):
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved["main_window_titles"] == ["CustomTitle"]
     assert saved["popup_ad_classes"] == ["AdFitWebView"]
+    assert saved["popup_search_depth"] == 2
     assert saved["hide_bottom_banner_without_token"] is True
     assert saved["close_empty_eva_child_requires_ad_signal"] is False
     assert saved["weak_signal_confirm_ticks"] == 2

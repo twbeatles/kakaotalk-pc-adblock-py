@@ -113,7 +113,8 @@ def _build_fallback_logger(level: str, reason: str) -> tuple[logging.Logger, str
     return logger, warning
 
 
-def _self_check_specs() -> list[tuple[str, str, Callable[[], tuple[bool, str]]]]:
+def _self_check_specs(strict: bool = False) -> list[tuple[str, str, Callable[[], tuple[bool, str]]]]:
+    tray_severity = "core" if strict else "optional"
     return [
         ("APPDATA 접근/쓰기", "core", _check_appdata_writable),
         ("로그 초기화", "core", probe_logging_setup),
@@ -121,15 +122,15 @@ def _self_check_specs() -> list[tuple[str, str, Callable[[], tuple[bool, str]]]]
         ("Run 레지스트리 읽기/쓰기 접근", "optional", StartupManager.probe_access),
         ("Run 등록 명령 유효성", "optional", StartupManager.probe_registration_command),
         ("Tk UI 부팅", "core", _check_tk_boot),
-        ("트레이 모듈 import", "core", _check_tray_import),
+        ("트레이 모듈 import", tray_severity, _check_tray_import),
     ]
 
 
-def _run_self_check(as_json: bool = False, report_path: str | None = None) -> int:
+def _run_self_check(as_json: bool = False, report_path: str | None = None, strict: bool = False) -> int:
     records: list[SelfCheckRecord] = []
     if report_path:
         write_self_check_report(records, report_path, completed=False, write_text_report=_write_text_report)
-    for label, severity, fn in _self_check_specs():
+    for label, severity, fn in _self_check_specs(strict=strict):
         ok, detail = fn()
         records.append(SelfCheckRecord(name=label, ok=ok, severity=severity, detail=detail))
         if report_path:
@@ -188,7 +189,11 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     args = build_parser().parse_args(argv if argv is not None else sys.argv[1:])
     if args.self_check:
-        return _run_self_check(as_json=bool(args.json), report_path=args.self_check_report)
+        return _run_self_check(
+            as_json=bool(args.json),
+            report_path=args.self_check_report,
+            strict=bool(args.strict_self_check),
+        )
 
     ensure_runtime_files()
     settings = LayoutSettingsV11.load()

@@ -86,6 +86,10 @@ class FakeAPI:
         self.send_calls.append((hwnd, msg, wparam, lparam))
         return 1
 
+    def send_message_timeout(self, hwnd, msg, wparam=0, lparam=0, timeout_ms=500) -> tuple[bool, int]:
+        self.send_calls.append((hwnd, msg, wparam, lparam))
+        return True, 1
+
     def get_last_error(self) -> int:
         return 0
 
@@ -313,6 +317,83 @@ def test_engine_rehides_tracked_windows_if_kakaotalk_reshows_them():
     assert api.hide_calls.count(200) >= 2
 
 
+def test_engine_set_enabled_false_blocks_inflight_apply_hide():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    engine.scan_once()
+    entered = threading.Event()
+    release = threading.Event()
+    original_hide_window = engine._actions.hide_window
+
+    def delayed_hide_window(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=3.0)
+        return original_hide_window(*args, **kwargs)
+
+    engine._actions.hide_window = delayed_hide_window
+    apply_thread = threading.Thread(target=engine.apply_once)
+    apply_thread.start()
+    assert entered.wait(timeout=3.0)
+
+    disable_thread = threading.Thread(target=lambda: engine.set_enabled(False))
+    disable_thread.start()
+    time.sleep(0.05)
+    release.set()
+    apply_thread.join(timeout=3.0)
+    disable_thread.join(timeout=3.0)
+
+    assert not apply_thread.is_alive()
+    assert not disable_thread.is_alive()
+    assert api.hide_calls == []
+    assert engine.state.enabled is False
+
+
+def test_engine_set_aggressive_mode_false_blocks_inflight_aggressive_hide():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+    engine.scan_once()
+    entered = threading.Event()
+    release = threading.Event()
+    original_hide_window = engine._actions.hide_window
+
+    def delayed_hide_window(hwnd, pid, class_name, hide_reason):
+        if hide_reason == "aggressive":
+            entered.set()
+            assert release.wait(timeout=3.0)
+        return original_hide_window(hwnd, pid, class_name, hide_reason)
+
+    engine._actions.hide_window = delayed_hide_window
+    apply_thread = threading.Thread(target=engine.apply_once)
+    apply_thread.start()
+    assert entered.wait(timeout=3.0)
+
+    mode_thread = threading.Thread(target=lambda: engine.set_aggressive_mode(False))
+    mode_thread.start()
+    time.sleep(0.05)
+    release.set()
+    apply_thread.join(timeout=3.0)
+    mode_thread.join(timeout=3.0)
+
+    assert not apply_thread.is_alive()
+    assert not mode_thread.is_alive()
+    assert 102 not in api.hide_calls
+    assert settings.aggressive_mode is False
+
+
 def test_engine_stop_records_warning_when_watch_thread_join_times_out():
     class HungThread:
         def join(self, timeout=None):
@@ -441,7 +522,7 @@ def test_engine_candidate_detection_requires_class_and_legacy_signature():
     assert 210 not in api.hide_calls
 
 
-def test_engine_popup_ad_class_is_closed_hidden_and_not_restored():
+def test_engine_popup_ad_class_is_closed_hidden_and_restored_when_disabled():
     api = FakeAPI()
     api.windows[240] = {
         "pid": 42,
@@ -480,13 +561,19 @@ def test_engine_popup_ad_class_is_closed_hidden_and_not_restored():
     assert 241 in api.hide_calls
     assert (240, 0, 0, 0, 0) in api.set_pos_calls
     assert (241, 0, 0, 0, 0) in api.set_pos_calls
-    assert all(identity[0] not in {240, 241} for identity in engine._hidden_windows)
+    assert any(identity[0] == 240 for identity in engine._hidden_windows)
+    assert any(identity[0] == 241 for identity in engine._hidden_windows)
+    assert engine.state.popup_close_requests == 2
+    assert engine.state.popup_hide_fallbacks == 2
+    assert engine.state.popup_zero_size_fallbacks == 2
 
     engine.set_enabled(False)
     engine.stop()
 
-    assert 240 not in api.show_calls
-    assert 241 not in api.show_calls
+    assert 240 in api.show_calls
+    assert 241 in api.show_calls
+    assert api.windows[240]["visible"] is True
+    assert api.windows[241]["visible"] is True
 
 
 def test_engine_popup_ad_class_with_non_empty_host_title_is_ignored_by_default():
@@ -701,6 +788,51 @@ def test_engine_popup_ad_class_reports_failure_when_hide_and_zero_size_fail():
     assert engine.state.hidden_windows == 0
     assert engine.state.closed_windows == 0
     assert "popup-dismiss: hwnd=" in engine.state.last_error
+
+
+def test_engine_popup_close_timeout_reports_error_and_uses_fallback():
+    api = FakeAPI()
+    api.windows[240] = {
+        "pid": 42,
+        "class": "EVA_Window",
+        "text": "",
+        "parent": 0,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.windows[241] = {
+        "pid": 42,
+        "class": "AdFitWebView",
+        "text": "",
+        "parent": 240,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.children[240] = [241]
+
+    def timeout_send(hwnd, msg, wparam=0, lparam=0, timeout_ms=500):
+        api.send_calls.append((hwnd, msg, wparam, lparam))
+        return False, 0
+
+    api.send_message_timeout = timeout_send
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False),
+        LayoutRulesV11(popup_ad_classes=["AdFitWebView"]),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert "popup-dismiss: hwnd=" in engine.state.last_error
+    assert "close timeout/failure" in engine.state.last_error
+    assert 240 in api.hide_calls
+    assert 241 in api.hide_calls
+    assert engine.state.popup_close_requests == 2
+    assert engine.state.popup_hide_fallbacks == 2
+    assert engine.state.popup_zero_size_fallbacks == 2
 
 
 def test_engine_aggressive_mode_does_not_hide_bottom_widget_without_token_by_default():
@@ -1485,6 +1617,52 @@ def test_engine_empty_eva_child_ignores_unrelated_custom_scroll_when_closing():
     assert 104 in closed_handles
 
 
+def test_engine_empty_eva_child_rechecks_custom_scroll_between_ticks():
+    api = FakeAPI()
+    api.windows[104] = {
+        "pid": 42,
+        "class": "EVA_ChildWindow",
+        "text": "",
+        "parent": 100,
+        "rect": (0, 600, 500, 620),
+        "visible": True,
+    }
+    api.windows[105] = {
+        "pid": 42,
+        "class": "Chrome_WidgetWin_1",
+        "text": "Chrome Legacy Window",
+        "parent": 100,
+        "rect": (0, 620, 500, 700),
+        "visible": True,
+    }
+    api.children[100] = [101, 104, 105]
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False),
+        LayoutRulesV11(close_empty_eva_child_requires_ad_signal=True),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    api.windows[106] = {
+        "pid": 42,
+        "class": "_EVA_CustomScrollCtrl",
+        "text": "",
+        "parent": 104,
+        "rect": (480, 0, 500, 620),
+        "visible": True,
+    }
+    api.children[104] = [106]
+    engine.scan_once()
+    engine.apply_once()
+
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    assert 104 not in closed_handles
+
+
 def test_engine_restores_stale_hidden_legacy_window_when_signature_disappears():
     api = FakeAPI()
     settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
@@ -1565,6 +1743,31 @@ def test_engine_hidden_window_restores_after_grace_elapsed(monkeypatch):
     assert api.windows[200]["visible"] is True
 
 
+def test_engine_hidden_aggressive_window_uses_fresh_text_for_restore(monkeypatch):
+    api = FakeAPI()
+    now = {"value": 100.0}
+    monkeypatch.setattr("kakao_adblocker.event_engine.time.time", lambda: now["value"])
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True),
+        LayoutRulesV11(hidden_restore_grace_ms=250, cache_ttl_seconds=8.0),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+    assert api.windows[102]["visible"] is False
+
+    api.windows[102]["text"] = "Footer Panel"
+    now["value"] = 100.31
+    engine.scan_once()
+    engine.apply_once()
+
+    assert api.windows[102]["visible"] is True
+    assert 102 in api.show_calls
+
+
 def test_engine_burst_scan_is_scheduled_for_new_candidates(monkeypatch):
     api = FakeAPI()
     provider_state = {"value": set()}
@@ -1619,6 +1822,46 @@ def test_engine_dump_tree_series_includes_candidate_decisions(tmp_path):
     assert len(payload["frames"]) == 1
     assert payload["frames"][0]["candidates"]
     assert any(candidate["action"] == "hide" for candidate in payload["frames"][0]["candidates"])
+
+
+def test_engine_dump_tree_series_includes_popup_host_and_descendant_candidates(tmp_path):
+    api = FakeAPI()
+    api.windows[240] = {
+        "pid": 42,
+        "class": "EVA_Window",
+        "text": "",
+        "parent": 0,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.windows[241] = {
+        "pid": 42,
+        "class": "AdFitWebView",
+        "text": "",
+        "parent": 240,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.children[240] = [241]
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        LayoutSettingsV11(enabled=True, aggressive_mode=False),
+        LayoutRulesV11(popup_ad_classes=["AdFitWebView"]),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    path = engine.dump_window_tree_series(out_dir=str(tmp_path), duration_ms=0, interval_ms=20)
+
+    assert path is not None
+    payload = json.loads((tmp_path / Path(path).name).read_text(encoding="utf-8"))
+    candidates = payload["frames"][0]["candidates"]
+    popup_dismiss_hwnds = {
+        candidate["hwnd"]
+        for candidate in candidates
+        if candidate["action"] == "dismiss_popup"
+    }
+    assert {240, 241}.issubset(popup_dismiss_hwnds)
 
 
 def test_engine_dump_tree_records_child_signature_fallback_context(tmp_path):

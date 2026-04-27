@@ -76,12 +76,12 @@ class WindowScanner:
                 queue.append((child, depth + 1))
         return descendants
 
-    def find_popup_matches(self, host_hwnd: int) -> List[Tuple[int, int, str]]:
+    def find_popup_matches(self, host_hwnd: int, require_visible: bool = True) -> List[Tuple[int, int, str]]:
         matches: List[Tuple[int, int, str]] = []
         for hwnd, depth in self.enum_descendants(host_hwnd, int(self.engine.rules.popup_search_depth)):
             if not self.engine.api.is_window(hwnd):
                 continue
-            if not self.engine.api.is_window_visible(hwnd):
+            if require_visible and not self.engine.api.is_window_visible(hwnd):
                 continue
             class_name = self.engine._get_class(hwnd)
             if class_name not in self.engine._popup_ad_class_set:

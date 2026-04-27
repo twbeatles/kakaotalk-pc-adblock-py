@@ -35,6 +35,10 @@ try {
     Write-Host "7. Restore failure reset: trigger/observe restore failure and verify '복원 실패 초기화' clears the counters."
     Write-Host "8. Logging startup fallback: simulate log-file lock/permission issue and verify startup survives with status/log warning."
     Write-Host "9. Tk/logging self-check: break Tk runtime or logging bootstrap intentionally and verify --self-check reports failure."
+    Write-Host "10. Popup fallback restore: verify a popup that survives WM_CLOSE but is hidden/zero-sized is restored when blocking is turned OFF."
+    Write-Host "11. Hung close handling: simulate or observe an unresponsive popup close and verify the engine reports timeout without freezing."
+    Write-Host "12. Dynamic custom-scroll guard: verify an empty EVA child is not closed if a custom scroll child appears between ticks."
+    Write-Host "13. Strict self-check: run --self-check --strict-self-check --json in release validation and verify tray import failure is core."
 } finally {
     if (Test-Path $pytestBaseTemp) {
         try {

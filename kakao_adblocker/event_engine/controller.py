@@ -44,6 +44,7 @@ class LayoutOnlyEngine:
         self._state_lock = threading.Lock()
         self._data_lock = threading.Lock()
         self._cache_lock = threading.Lock()
+        self._scan_apply_lock = threading.RLock()
         self._error_log_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
@@ -60,7 +61,6 @@ class LayoutOnlyEngine:
         self._last_cache_cleanup: float = 0.0
         self._last_activity: float = 0.0
         self._hidden_windows: Dict[WindowIdentity, HiddenWindowSnapshot] = {}
-        self._custom_scroll_cache: Dict[WindowIdentity, bool] = {}
         self._candidate_states: Dict[WindowIdentity, CandidateState] = {}
         self._burst_scans_remaining = 0
 
@@ -87,6 +87,9 @@ class LayoutOnlyEngine:
             self._state.resized_windows = 0
             self._state.hidden_windows = 0
             self._state.closed_windows = 0
+            self._state.popup_close_requests = 0
+            self._state.popup_hide_fallbacks = 0
+            self._state.popup_zero_size_fallbacks = 0
             self._state.candidate_main_window_count = 0
             self._state.restore_failures = 0
             self._state.last_restore_error = ""
@@ -124,7 +127,11 @@ class LayoutOnlyEngine:
             self._set_error("stop: watch thread did not terminate within 2.0s")
             self.logger.warning("Watch thread join timed out during stop")
         self._watch_thread = None
-        self._restore_hidden_windows(reason="stop")
+        if timed_out:
+            self._restore_hidden_windows(reason="stop")
+        else:
+            with self._scan_apply_lock:
+                self._restore_hidden_windows(reason="stop")
         with self._state_lock:
             self._state.running = False
 
@@ -135,18 +142,20 @@ class LayoutOnlyEngine:
             was_enabled = self._state.enabled
             self._state.enabled = enabled_value
         if was_enabled and not enabled_value:
-            self._restore_hidden_windows(reason="disabled")
-            self._clear_scan_state()
+            with self._scan_apply_lock:
+                self._restore_hidden_windows(reason="disabled")
+                self._clear_scan_state()
         self._wake_event.set()
 
     def set_aggressive_mode(self, enabled: bool) -> None:
         enabled_value = bool(enabled)
         self.settings.aggressive_mode = enabled_value
         if not enabled_value:
-            self._restore_hidden_windows(
-                reason="aggressive-disabled",
-                target_hide_reasons={HIDE_REASON_AGGRESSIVE},
-            )
+            with self._scan_apply_lock:
+                self._restore_hidden_windows(
+                    reason="aggressive-disabled",
+                    target_hide_reasons={HIDE_REASON_AGGRESSIVE},
+                )
         if self._is_enabled():
             self.force_scan()
             self._wake_event.set()
@@ -177,10 +186,12 @@ class LayoutOnlyEngine:
         self._apply_once()
 
     def _watch_once(self) -> None:
-        self._scanner.watch_once()
+        with self._scan_apply_lock:
+            self._scanner.watch_once()
 
     def _apply_once(self) -> None:
-        self._actions.apply_once()
+        with self._scan_apply_lock:
+            self._actions.apply_once()
 
     def _active_poll_interval_seconds(self) -> float:
         return max(int(self.settings.poll_interval_ms), 50) / 1000.0
@@ -203,6 +214,9 @@ class LayoutOnlyEngine:
     def _is_enabled(self) -> bool:
         with self._state_lock:
             return self._state.enabled
+
+    def _can_mutate_windows(self) -> bool:
+        return self._is_enabled() and not self._is_stopping()
 
     def _is_active_mode(self, now: Optional[float] = None) -> bool:
         now_value = now or time.time()
@@ -337,6 +351,14 @@ class LayoutOnlyEngine:
             return self.api.get_window_text(hwnd) or ""
         return self._get_cached(self._text_cache, identity, lambda: self.api.get_window_text(hwnd))
 
+    def _get_text_fresh(self, hwnd: int, pid: Optional[int] = None, class_name: Optional[str] = None) -> str:
+        value = self.api.get_window_text(hwnd) or ""
+        identity = self._window_identity(hwnd, pid, class_name)
+        if identity is not None:
+            with self._cache_lock:
+                self._text_cache[identity] = (time.time(), value)
+        return value
+
     def _get_class(self, hwnd: int) -> str:
         return self.api.get_class_name(hwnd) or ""
 
@@ -373,9 +395,6 @@ class LayoutOnlyEngine:
 
             self._hidden_windows = {
                 key: snap for key, snap in self._hidden_windows.items() if self._is_identity_alive(key)
-            }
-            self._custom_scroll_cache = {
-                key: val for key, val in self._custom_scroll_cache.items() if self._is_identity_alive(key)
             }
             self._candidate_states = {
                 key: state for key, state in self._candidate_states.items() if self._is_identity_alive(key)
@@ -432,10 +451,14 @@ class LayoutOnlyEngine:
     def _hide_window(self, hwnd: int, pid: int, class_name: str, hide_reason: str) -> bool:
         return self._actions.hide_window(hwnd, pid, class_name, hide_reason)
 
-    def _dismiss_popup_window(self, hwnd: int) -> tuple[int, int]:
+    def _dismiss_popup_window(self, hwnd: int) -> tuple[int, int, int, int, int]:
         return self._actions.dismiss_popup_window(hwnd)
 
-    def _remove_popup_ads(self, kakao_pids: Set[int], now: Optional[float] = None) -> tuple[int, int]:
+    def _remove_popup_ads(
+        self,
+        kakao_pids: Set[int],
+        now: Optional[float] = None,
+    ) -> tuple[int, int, int, int, int, Set[WindowIdentity]]:
         return self._actions.remove_popup_ads(kakao_pids, now=now)
 
     def dump_window_tree(self, out_dir: Optional[str] = None) -> Optional[str]:

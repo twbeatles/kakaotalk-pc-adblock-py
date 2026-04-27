@@ -25,6 +25,7 @@ class _FakeUser32:
         self.ShowWindow = _FakeFunc()
         self.SetWindowPos = _FakeFunc()
         self.SendMessageW = _FakeFunc()
+        self.SendMessageTimeoutW = _FakeFunc()
         self.UpdateWindow = _FakeFunc()
 
 
@@ -40,6 +41,7 @@ def test_bind_signatures_sets_argtypes_and_restypes():
     assert api.user32.GetClassNameW.restype == ctypes.c_int
     assert api.user32.GetWindowTextW.restype == ctypes.c_int
     assert api.user32.SetWindowPos.restype == wintypes.BOOL
+    assert api.user32.SendMessageTimeoutW.restype == getattr(wintypes, "LRESULT", ctypes.c_long)
 
 
 def test_get_last_error_returns_zero_when_unavailable():
@@ -47,6 +49,7 @@ def test_get_last_error_returns_zero_when_unavailable():
     api.available = False
 
     assert api.get_last_error() == 0
+    assert api.send_message_timeout(100, 0x10) == (False, 0)
 
 
 def test_get_last_error_reads_ctypes_when_available(monkeypatch):

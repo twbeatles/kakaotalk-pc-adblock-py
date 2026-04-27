@@ -28,6 +28,9 @@ class EngineState:
     resized_windows: int = 0
     hidden_windows: int = 0
     closed_windows: int = 0
+    popup_close_requests: int = 0
+    popup_hide_fallbacks: int = 0
+    popup_zero_size_fallbacks: int = 0
     last_tick: float = 0.0
     last_error: str = ""
     restore_failures: int = 0

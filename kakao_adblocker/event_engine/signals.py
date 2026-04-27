@@ -74,6 +74,16 @@ class SignalEvaluator:
     def decision_dismiss_popup(self, signals: Dict[str, object]) -> AdDecision:
         return AdDecision(signals=signals, decision=DECISION_STRONG, action=ACTION_DISMISS_POPUP)
 
+    def popup_dismiss_decision(self, popup_guard: str, depth: int) -> AdDecision:
+        popup_signals = self.blank_signals()
+        popup_signals["popup_direct_class"] = depth == 1
+        popup_signals["popup_descendant_class"] = True
+        popup_signals["popup_match_depth"] = depth
+        popup_signals["popup_host_guard"] = popup_guard
+        if popup_guard == POPUP_GUARD_ALLOW:
+            return self.decision_dismiss_popup(popup_signals)
+        return self.decision_none(popup_signals)
+
     def update_candidate_state_store(
         self,
         state_store: dict[tuple[int, int, str], CandidateState],
@@ -201,9 +211,10 @@ class SignalEvaluator:
         self,
         hwnd: int,
         max_depth: int = 8,
-        memo: Optional[Dict[Tuple[int, int], bool]] = None,
+        memo: Optional[Dict[Tuple[int, int, bool], bool]] = None,
+        fresh_text: bool = False,
     ) -> bool:
-        cache_key = (hwnd, max_depth)
+        cache_key = (hwnd, max_depth, fresh_text)
         if memo is not None and cache_key in memo:
             return memo[cache_key]
         if max_depth < 0 or not self.engine.api.is_window(hwnd):
@@ -212,12 +223,17 @@ class SignalEvaluator:
             return False
         pid = self.engine.api.get_window_thread_process_id(hwnd)
         class_name = self.engine._get_class(hwnd)
-        if self.engine._layout.contains_ad_token(self.engine._get_text(hwnd, pid, class_name)):
+        text = (
+            self.engine._get_text_fresh(hwnd, pid, class_name)
+            if fresh_text
+            else self.engine._get_text(hwnd, pid, class_name)
+        )
+        if self.engine._layout.contains_ad_token(text):
             if memo is not None:
                 memo[cache_key] = True
             return True
         for child in self.engine._scanner.enum_children(hwnd):
-            if self.subtree_contains_ad_token(child, max_depth - 1, memo=memo):
+            if self.subtree_contains_ad_token(child, max_depth - 1, memo=memo, fresh_text=fresh_text):
                 if memo is not None:
                     memo[cache_key] = True
                 return True

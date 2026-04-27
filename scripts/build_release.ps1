@@ -106,6 +106,38 @@ function Test-InteractiveShell {
     }
 }
 
+function Test-VersionMetadata {
+    $pathsFile = Join-Path $repoRoot "kakao_adblocker\config\paths.py"
+    $versionInfoFile = Join-Path $repoRoot "packaging\windows_version_info.txt"
+    $pathsText = Get-Content $pathsFile -Raw
+    $versionInfoText = Get-Content $versionInfoFile -Raw
+
+    $versionMatch = [regex]::Match($pathsText, 'VERSION\s*=\s*"([^"]+)"')
+    if (-not $versionMatch.Success) {
+        throw "VERSION not found in $pathsFile"
+    }
+    $version = $versionMatch.Groups[1].Value
+    $parts = @($version.Split(".") | ForEach-Object { [int]$_ })
+    if ($parts.Count -ne 3) {
+        throw "VERSION must be major.minor.patch: $version"
+    }
+    $resourceVersion = "$version.0"
+    $tupleText = "($($parts[0]), $($parts[1]), $($parts[2]), 0)"
+
+    if ($versionInfoText -notmatch [regex]::Escape("filevers=$tupleText")) {
+        throw "windows_version_info.txt filevers does not match VERSION $version"
+    }
+    if ($versionInfoText -notmatch [regex]::Escape("prodvers=$tupleText")) {
+        throw "windows_version_info.txt prodvers does not match VERSION $version"
+    }
+    if ($versionInfoText -notmatch [regex]::Escape('FileVersion", u"' + $resourceVersion)) {
+        throw "windows_version_info.txt FileVersion does not match VERSION $version"
+    }
+    if ($versionInfoText -notmatch [regex]::Escape('ProductVersion", u"' + $resourceVersion)) {
+        throw "windows_version_info.txt ProductVersion does not match VERSION $version"
+    }
+}
+
 function Invoke-PackagedSelfCheck {
     param(
         [Parameter(Mandatory = $true)]
@@ -117,10 +149,10 @@ function Invoke-PackagedSelfCheck {
     $previousAppData = $env:APPDATA
     try {
         $env:APPDATA = $tempAppData
-        Write-Host "Running packaged smoke check (--self-check --json): $ExePath"
+        Write-Host "Running packaged smoke check (--self-check --strict-self-check --json): $ExePath"
         $proc = Start-Process `
             -FilePath $ExePath `
-            -ArgumentList @("--self-check", "--json", "--self-check-report", $reportPath) `
+            -ArgumentList @("--self-check", "--strict-self-check", "--json", "--self-check-report", $reportPath) `
             -PassThru `
             -WindowStyle Hidden
         if (-not $proc.WaitForExit(60000)) {
@@ -222,6 +254,8 @@ function Invoke-StartupSmoke {
 
 Push-Location $repoRoot
 try {
+    Test-VersionMetadata
+
     $signingConfig = $null
     if (-not $NoSign) {
         # Fail fast before build when signing prerequisites are missing.

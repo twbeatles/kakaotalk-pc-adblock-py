@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Set, Tuple, cast
 
 from ..protocols import Rect, WindowIdentity
+from .constants import POPUP_GUARD_ALLOW
 from .models import AdDecision, CandidateState
 
 if TYPE_CHECKING:
@@ -111,7 +112,7 @@ class WindowDumpBuilder:
         candidates: Set[int] = set()
         legacy_text_memo: Dict[Tuple[int, str, int], bool] = {}
         legacy_contains_memo: Dict[Tuple[int, str, int], bool] = {}
-        ad_token_memo: Dict[Tuple[int, int], bool] = {}
+        ad_token_memo: Dict[Tuple[int, int, bool], bool] = {}
         payloads: List[Dict[str, object]] = []
 
         for item in windows:
@@ -274,16 +275,23 @@ class WindowDumpBuilder:
             popup_guard = self.engine._signals.popup_host_guard_status(item.text)
             for child, depth, class_name in self.engine._scanner.find_popup_matches(item.hwnd):
                 identity = (child, self.engine.api.get_window_thread_process_id(child), class_name)
-                popup_signals = self.engine._signals.blank_signals()
-                popup_signals["popup_direct_class"] = depth == 1
-                popup_signals["popup_descendant_class"] = True
-                popup_signals["popup_match_depth"] = depth
-                popup_signals["popup_host_guard"] = popup_guard
-                popup_decision = (
-                    self.engine._signals.decision_dismiss_popup(popup_signals)
-                    if popup_guard == "allow"
-                    else self.engine._signals.decision_none(popup_signals)
-                )
+                host_identity = (item.hwnd, item.pid, item.class_name)
+                popup_decision = self.engine._signals.popup_dismiss_decision(popup_guard, depth)
+                if popup_guard == POPUP_GUARD_ALLOW:
+                    host_state, host_confirmed = self.engine._signals.update_candidate_state_store(
+                        preview_states,
+                        host_identity,
+                        popup_decision,
+                        now,
+                    )
+                    payloads.append(
+                        self.engine._signals.candidate_payload(
+                            host_identity,
+                            popup_decision,
+                            host_state,
+                            confirmed=host_confirmed,
+                        )
+                    )
                 popup_state, popup_confirmed = self.engine._signals.update_candidate_state_store(
                     preview_states,
                     identity,

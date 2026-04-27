@@ -13,6 +13,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dump-series-duration-ms", type=int, default=1000, help="Total duration for --dump-tree-series")
     parser.add_argument("--dump-series-interval-ms", type=int, default=100, help="Interval between frames for --dump-tree-series")
     parser.add_argument("--self-check", action="store_true", help="Run environment self-check and exit")
+    parser.add_argument("--strict-self-check", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--json", action="store_true", help="Emit JSON for supported diagnostics paths")
     parser.add_argument("--self-check-report", type=str, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--startup-trace", type=str, default=None, help=argparse.SUPPRESS)

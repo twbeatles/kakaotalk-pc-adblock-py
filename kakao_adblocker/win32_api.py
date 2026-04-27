@@ -12,6 +12,7 @@ SWP_NOMOVE = 0x0002
 SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
 WM_CLOSE = 0x0010
+SMTO_ABORTIFHUNG = 0x0002
 
 
 class Win32API:
@@ -38,8 +39,10 @@ class Win32API:
         uint_t = wintypes.UINT
         dword_t = wintypes.DWORD
         lresult_t = getattr(wintypes, "LRESULT", ctypes.c_long)
+        dword_ptr_value_t = getattr(wintypes, "DWORD_PTR", ctypes.c_size_t)
         rect_ptr_t = ctypes.POINTER(wintypes.RECT)
         dword_ptr_t = ctypes.POINTER(wintypes.DWORD)
+        dword_ptr_value_ptr_t = ctypes.POINTER(dword_ptr_value_t)
 
         self.user32.EnumWindows.argtypes = [self.WNDENUMPROC, lparam_t]
         self.user32.EnumWindows.restype = bool_t
@@ -92,6 +95,17 @@ class Win32API:
             wintypes.LPARAM,
         ]
         self.user32.SendMessageW.restype = lresult_t
+
+        self.user32.SendMessageTimeoutW.argtypes = [
+            hwnd_t,
+            uint_t,
+            wintypes.WPARAM,
+            wintypes.LPARAM,
+            uint_t,
+            uint_t,
+            dword_ptr_value_ptr_t,
+        ]
+        self.user32.SendMessageTimeoutW.restype = lresult_t
 
         self.user32.UpdateWindow.argtypes = [hwnd_t]
         self.user32.UpdateWindow.restype = bool_t
@@ -208,6 +222,31 @@ class Win32API:
             return 0
         return int(self.user32.SendMessageW(hwnd, msg, wparam, lparam))
 
+    def send_message_timeout(
+        self,
+        hwnd: int,
+        msg: int,
+        wparam: int = 0,
+        lparam: int = 0,
+        timeout_ms: int = 500,
+    ) -> tuple[bool, int]:
+        if not self.available:
+            return False, 0
+        result_type = getattr(wintypes, "DWORD_PTR", ctypes.c_size_t)
+        result = result_type(0)
+        ok = bool(
+            self.user32.SendMessageTimeoutW(
+                hwnd,
+                msg,
+                wparam,
+                lparam,
+                SMTO_ABORTIFHUNG,
+                max(int(timeout_ms), 1),
+                ctypes.byref(result),
+            )
+        )
+        return ok, int(result.value)
+
     def update_window(self, hwnd: int) -> bool:
         if not self.available:
             return False
@@ -228,4 +267,5 @@ __all__ = [
     "SWP_NOZORDER",
     "SWP_NOACTIVATE",
     "WM_CLOSE",
+    "SMTO_ABORTIFHUNG",
 ]

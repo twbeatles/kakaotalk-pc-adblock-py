@@ -10,13 +10,23 @@ from PyInstaller.utils.hooks import collect_submodules
 
 _SPEC_PATH = Path(globals().get("__file__", "legacy/specs/kakaotalk_adblock_v10.spec")).resolve()
 PROJECT_ROOT = _SPEC_PATH.parents[2]
+WINDOWS_VERSION_INFO = PROJECT_ROOT / "packaging" / "windows_version_info.txt"
+APP_ICON = PROJECT_ROOT / "packaging" / "app_icon.ico"
+if not WINDOWS_VERSION_INFO.exists():
+    raise FileNotFoundError(f"Missing Windows version resource: {WINDOWS_VERSION_INFO}")
+if not APP_ICON.exists():
+    raise FileNotFoundError(f"Missing application icon: {APP_ICON}")
 
+# Compatibility shim: mirror the active v11 spec hidden-import surface.
 hiddenimports = [
     "psutil",
     "PIL",
     "PIL.Image",
     "PIL.ImageDraw",
     "pystray",
+    "tkinter",
+    "tkinter.ttk",
+    "tkinter.messagebox",
     "kakao_adblocker",
     "kakao_adblocker.app",
     "kakao_adblocker.config",
@@ -30,6 +40,9 @@ hiddenimports = [
 ]
 hiddenimports += collect_submodules("pystray")
 hiddenimports += collect_submodules("PIL")
+hiddenimports += collect_submodules("kakao_adblocker.app")
+hiddenimports += collect_submodules("kakao_adblocker.config")
+hiddenimports += collect_submodules("kakao_adblocker.event_engine")
 
 a = Analysis(
     [str(PROJECT_ROOT / "kakaotalk_layout_adblock_v11.py")],
@@ -56,6 +69,8 @@ exe = EXE(
     a.datas,
     [],
     name="KakaoTalkLayoutAdBlocker_v11",
+    version=str(WINDOWS_VERSION_INFO),
+    icon=str(APP_ICON),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

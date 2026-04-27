@@ -43,6 +43,15 @@ class Win32ApiLike(LayoutApiLike, Protocol):
 
     def send_message(self, hwnd: int, msg: int, wparam: int = 0, lparam: int = 0) -> int: ...
 
+    def send_message_timeout(
+        self,
+        hwnd: int,
+        msg: int,
+        wparam: int = 0,
+        lparam: int = 0,
+        timeout_ms: int = 500,
+    ) -> tuple[bool, int]: ...
+
     def get_last_error(self) -> int: ...
 
 
@@ -65,6 +74,9 @@ class EngineStateLike(Protocol):
     main_window_count: int
     hidden_windows: int
     closed_windows: int
+    popup_close_requests: int
+    popup_hide_fallbacks: int
+    popup_zero_size_fallbacks: int
     resized_windows: int
     last_error: str
     last_tick: float

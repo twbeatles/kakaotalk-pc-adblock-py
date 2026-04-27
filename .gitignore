@@ -29,6 +29,10 @@ window_dump_series_*.json
 self-check.json
 startup-trace.json
 bootstrap-argv-report.json
+*.broken-*
+.layout_settings_v11.json*.tmp
+.layout_rules_v11.json*.tmp
+.selfcheck-write.tmp
 Thumbs.db
 
 .venv/

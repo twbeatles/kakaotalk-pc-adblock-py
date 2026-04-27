@@ -256,6 +256,14 @@ class TrayController:
         )
         if candidate_main_count > state.main_window_count:
             base = f"{base} | 후보 {candidate_main_count}"
+        popup_close_requests = int(getattr(state, "popup_close_requests", 0) or 0)
+        popup_hide_fallbacks = int(getattr(state, "popup_hide_fallbacks", 0) or 0)
+        popup_zero_size_fallbacks = int(getattr(state, "popup_zero_size_fallbacks", 0) or 0)
+        if popup_close_requests or popup_hide_fallbacks or popup_zero_size_fallbacks:
+            base = (
+                f"{base} | popup 닫기 {popup_close_requests}"
+                f"/숨김 {popup_hide_fallbacks}/제로 {popup_zero_size_fallbacks}"
+            )
         restore_failures = int(getattr(state, "restore_failures", 0) or 0)
         if restore_failures > 0:
             restore_error = str(getattr(state, "last_restore_error", "") or "")

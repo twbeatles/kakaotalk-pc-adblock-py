@@ -31,6 +31,7 @@
 - Legacy script: `legacy/카카오톡 광고제거 v10.0.py` (deprecated notice only)
 - `--dump-tree` runs in a lightweight path without UI/tray module import
 - `--self-check` runs diagnostics only (no UI/tray/engine start)
+- default `--self-check` treats tray import failure as optional; `--strict-self-check` upgrades it to core failure for packaging/release validation
 - `--self-check --json` emits structured diagnostics, and packaged smoke can persist the same payload via an internal report path
 - package `kakao_adblocker` exports are lazy-resolved via `__getattr__`
 - static analysis baseline is fixed by root `pyrightconfig.json`; active scope is `kakao_adblocker`, `tests`, and `kakaotalk_layout_adblock_v11.py`
@@ -69,12 +70,14 @@
   - candidate and confirmed main-window counts are tracked separately; apply uses confirmed handles only
   - ad candidate filtering uses `ad_candidate_classes` (default: `EVA_Window_Dblclk`, `EVA_Window`) + legacy exact/substring signatures
   - non-main top-level KakaoTalk windows are scanned for popup descendants up to `popup_search_depth`; default popup handling still requires an empty host title or an allowlisted title substring before dismissing `AdFitWebView`-style popups
-  - popup dismiss validates actual close/hide/zero-size success and reports failures into `last_error` / log
-  - empty `EVA_ChildWindow` close keeps its custom-scroll guard/cache scoped to the candidate child identity/subtree, not the whole main window
+  - popup dismiss uses `SendMessageTimeoutW` for `WM_CLOSE` with the default 500ms timeout, validates actual close/hide/zero-size success, and reports failures into `last_error` / log
+  - if a popup survives `WM_CLOSE` and hide/zero-size fallback is applied, the fallback is tracked as a `popup` hidden snapshot and restored on OFF/stop or when the popup signal disappears
+  - empty `EVA_ChildWindow` close keeps its custom-scroll guard scoped to the candidate child identity/subtree and recalculates it per apply tick, not from a persistent cache
   - main windows keep the strong `top-level + main class + child signature` guard; title mismatch can still confirm via child signature fallback (`OnlineMainView` / `LockModeView`)
   - synchronous warm-up scan/apply on engine start runs only when enabled
   - empty-string text cache uses short TTL refresh to reduce startup detection lag
   - hidden/moved windows are restored when blocking is disabled or engine stops
+  - scan/apply and OFF/aggressive-OFF/stop restore paths are serialized by a single-flight lock
   - once stop begins, new hide/close/apply work is blocked so a timed-out join does not re-hide windows after restore
   - aggressive-hide windows are restored immediately when aggressive mode is turned OFF, followed by an immediate rescan/reapply
   - hidden windows are automatically restored when they no longer match aggressive/legacy signatures, preventing stale hides
@@ -82,8 +85,9 @@
   - restore failures keep snapshots for retry on next restore cycle
   - `EngineState` includes `restore_failures` / `last_restore_error`
   - `WindowIdentity(hwnd,pid,class)` keyed caches protect against HWND reuse side effects
+  - hidden/candidate aggressive subtree checks bypass stale non-empty text cache with fresh text reads so token disappearance can restore after `hidden_restore_grace_ms`
   - watch scan path avoids geometry/visibility calls; dump-tree path still collects full geometry
-  - `--dump-tree-series` stores frame-by-frame candidate decision previews alongside the tree dump
+  - `--dump-tree-series` stores frame-by-frame candidate decision previews alongside the tree dump, including both popup host and matched popup descendant candidates
   - process-id scan and cache cleanup are interval-throttled for idle CPU savings
   - process scan warnings (psutil failure, tasklist fallback/failure) are propagated to status/log (`last_error`)
   - default idle->active detection target is <= 200ms
@@ -114,6 +118,7 @@
   - status text includes last error and last tick context
   - status text shows confirmed main-window count and appends candidate count only when larger
   - status text labels cumulative counters explicitly (`누적 숨김`, `누적 닫힘`, `누적 리사이즈`)
+  - popup close request / hide fallback / zero-size fallback counters are tracked separately and shown only when nonzero
   - status text includes restore failure count/context when present
   - controller-local UI warnings (`tray unavailable`, startup registry rollback issues) surface when engine error is absent
   - pystray/Pillow are loaded lazily and retried after TTL (30s) when import fails
@@ -146,7 +151,7 @@
 - `layout_settings_v11.json`
 - `layout_rules_v11.json`
 - `kakaotalk_adblock.spec`
-- `legacy/specs/kakaotalk_adblock_v10.spec` (legacy spec archive)
+- `legacy/specs/kakaotalk_adblock_v10.spec` (legacy filename compatibility shim for the active v11 spec surface)
 
 ## Build Notes
 
@@ -158,10 +163,10 @@
 - `kakaotalk_adblock.spec` also includes `collect_submodules("kakao_adblocker.app")`, `collect_submodules("kakao_adblocker.config")`, and `collect_submodules("kakao_adblocker.event_engine")` so packageized runtime internals are bundled in onefile builds.
 - `kakaotalk_adblock.spec` includes package root `kakao_adblocker` so lazy exports remain importable in onefile builds and tooling paths.
 - `kakaotalk_adblock.spec` excludes `pywinauto` and `comtypes` so archived legacy/UIA-only dependencies do not leak into the active v11 onefile bundle.
-- popup parity (`popup_ad_classes` / `AdFitWebView`), popup host guards, and logging fallback/probe stay inside existing modules, so no extra hidden-import or hook change is required.
-- the empty `EVA_ChildWindow` subtree custom-scroll guard fix also stays inside `event_engine`, so current hidden-import coverage remains sufficient.
-- `--self-check` now exercises dynamic Tk diagnostics and logging bootstrap probe, so explicit `tkinter` hidden imports keep onefile packaging deterministic.
-- `scripts/build_release.ps1` runs a packaged `--self-check --json` smoke by default after building with a temporary `%APPDATA%`; only `core` failures fail the build.
+- popup parity (`popup_ad_classes` / `AdFitWebView`), `SendMessageTimeoutW` close timeout, popup fallback restore tracking, popup host guards, and logging fallback/probe stay inside existing modules, so no extra hidden-import or hook change is required.
+- the empty `EVA_ChildWindow` subtree custom-scroll guard remains tick-local inside `event_engine`, so current hidden-import coverage remains sufficient.
+- `--self-check` / `--strict-self-check` exercise dynamic Tk diagnostics and logging bootstrap probe, so explicit `tkinter` hidden imports keep onefile packaging deterministic.
+- `scripts/build_release.ps1` verifies `kakao_adblocker.config.VERSION` matches `packaging/windows_version_info.txt`, then runs a packaged `--self-check --strict-self-check --json` smoke by default after building with a temporary `%APPDATA%`; only `core` failures fail the build.
 - when an interactive shell is available, `scripts/build_release.ps1` also runs a packaged startup smoke with `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...`; otherwise it records a skipped startup smoke and continues.
 - `-StrictStartupSmoke` only upgrades tray-unavailable / tray-start-warning startup smoke results to a build failure when the interactive startup smoke actually ran.
 

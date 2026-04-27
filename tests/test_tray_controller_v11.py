@@ -53,6 +53,9 @@ class FakeState:
     main_window_count: int = 1
     hidden_windows: int = 2
     closed_windows: int = 1
+    popup_close_requests: int = 0
+    popup_hide_fallbacks: int = 0
+    popup_zero_size_fallbacks: int = 0
     resized_windows: int = 3
     last_error: str = ""
     last_tick: float = 0.0

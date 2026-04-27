@@ -427,6 +427,45 @@ def test_self_check_json_uses_same_checks_and_optional_failures_are_nonfatal(mon
         assert name in text
 
 
+def test_self_check_tray_import_failure_is_optional_by_default(monkeypatch, capsys):
+    monkeypatch.setattr(app.os, "name", "nt")
+    monkeypatch.setattr(app, "_check_appdata_writable", lambda: (True, "ok"))
+    monkeypatch.setattr(app, "probe_logging_setup", lambda: (True, "ok"))
+    monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_registration_command", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app, "_check_tk_boot", lambda: (True, "ok"))
+    monkeypatch.setattr(app, "_check_tray_import", lambda: (False, "pystray missing"))
+
+    rc = app.main(["--self-check", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    tray_check = next(check for check in payload["checks"] if check["name"] == "트레이 모듈 import")
+    assert tray_check["severity"] == "optional"
+    assert payload["summary"]["core_failed"] == 0
+    assert payload["summary"]["optional_failed"] == 1
+
+
+def test_strict_self_check_treats_tray_import_failure_as_core(monkeypatch, capsys):
+    monkeypatch.setattr(app.os, "name", "nt")
+    monkeypatch.setattr(app, "_check_appdata_writable", lambda: (True, "ok"))
+    monkeypatch.setattr(app, "probe_logging_setup", lambda: (True, "ok"))
+    monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_registration_command", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app, "_check_tk_boot", lambda: (True, "ok"))
+    monkeypatch.setattr(app, "_check_tray_import", lambda: (False, "pystray missing"))
+
+    rc = app.main(["--self-check", "--strict-self-check", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    tray_check = next(check for check in payload["checks"] if check["name"] == "트레이 모듈 import")
+    assert tray_check["severity"] == "core"
+    assert payload["summary"]["core_failed"] == 1
+
+
 def test_self_check_json_can_write_report_file(monkeypatch, capsys, tmp_path):
     report_path = tmp_path / "self-check.json"
     monkeypatch.setattr(app.os, "name", "nt")

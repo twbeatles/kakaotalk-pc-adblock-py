@@ -5,7 +5,14 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 from ..protocols import Rect, WindowIdentity
 from ..win32_api import SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, WM_CLOSE
-from .constants import ACTION_HIDE, POPUP_GUARD_ALLOW, RESTORE_MISS_THRESHOLD
+from .constants import (
+    ACTION_HIDE,
+    DEFAULT_CLOSE_TIMEOUT_MS,
+    HIDE_REASON_AGGRESSIVE,
+    HIDE_REASON_POPUP,
+    POPUP_GUARD_ALLOW,
+    RESTORE_MISS_THRESHOLD,
+)
 from .models import AdDecision, CandidateState, HiddenWindowSnapshot
 
 if TYPE_CHECKING:
@@ -17,7 +24,7 @@ class WindowActionExecutor:
         self.engine = engine
 
     def apply_once(self) -> None:
-        if not self.engine._is_enabled() or self.engine._is_stopping():
+        if not self.engine._can_mutate_windows():
             return
 
         with self.engine._data_lock:
@@ -28,11 +35,15 @@ class WindowActionExecutor:
         resized = 0
         hidden = 0
         closed = 0
+        popup_close_requests = 0
+        popup_hide_fallbacks = 0
+        popup_zero_size_fallbacks = 0
         now = time.time()
         matched_hidden_identities: Set[WindowIdentity] = set()
         legacy_text_memo: Dict[Tuple[int, str, int], bool] = {}
         legacy_contains_memo: Dict[Tuple[int, str, int], bool] = {}
-        ad_token_memo: Dict[Tuple[int, int], bool] = {}
+        ad_token_memo: Dict[Tuple[int, int, bool], bool] = {}
+        custom_scroll_memo: Dict[WindowIdentity, bool] = {}
 
         for wnd in main_handles:
             if self.engine._is_stopping():
@@ -62,6 +73,7 @@ class WindowActionExecutor:
                 if self.engine.api.get_parent(child) != wnd:
                     continue
                 class_name = self.engine._get_class(child)
+                identity = (child, pid, class_name)
                 window_text = self.engine._get_text(child, pid, class_name)
                 child_rect: Optional[Rect] = None
                 aggressive_decision = self.engine._signals.decision_none()
@@ -69,7 +81,15 @@ class WindowActionExecutor:
                 if self.engine.settings.aggressive_mode:
                     child_rect = self.engine.api.get_window_rect(child)
                     if child_rect:
-                        has_ad_token = self.engine._signals.subtree_contains_ad_token(child, memo=ad_token_memo)
+                        has_prior_state = (
+                            self.engine._candidate_state(identity) is not None
+                            or self.engine._is_hidden_identity(identity)
+                        )
+                        has_ad_token = self.engine._signals.subtree_contains_ad_token(
+                            child,
+                            memo=ad_token_memo,
+                            fresh_text=has_prior_state,
+                        )
                         aggressive_decision = self.engine._signals.aggressive_hide_decision(
                             class_name,
                             child_rect,
@@ -87,7 +107,7 @@ class WindowActionExecutor:
                 child_contexts.append(
                     (
                         child,
-                        (child, pid, class_name),
+                        identity,
                         class_name,
                         window_text,
                         child_rect,
@@ -99,15 +119,13 @@ class WindowActionExecutor:
                 if self.engine._is_stopping():
                     return
                 if class_name == self.engine.rules.eva_child_class and window_text == "" and parent_text != "":
-                    with self.engine._cache_lock:
-                        has_custom_scroll = self.engine._custom_scroll_cache.get(identity)
+                    has_custom_scroll = custom_scroll_memo.get(identity)
                     if has_custom_scroll is None:
                         has_custom_scroll = self.engine._signals.class_name_starts_with(
                             child,
                             self.engine.rules.custom_scroll_prefix,
                         )
-                        with self.engine._cache_lock:
-                            self.engine._custom_scroll_cache[identity] = has_custom_scroll
+                        custom_scroll_memo[identity] = has_custom_scroll
                     close_decision = self.engine._signals.empty_eva_close_decision(
                         class_name,
                         window_text,
@@ -118,16 +136,16 @@ class WindowActionExecutor:
                     if close_decision.matched or self.engine._candidate_state(identity) is not None:
                         _close_state, close_confirmed = self.engine._update_candidate_state(identity, close_decision, now)
                         if close_confirmed:
-                            if self.engine._is_stopping():
+                            if not self.engine._can_mutate_windows():
                                 return
-                            self.engine.api.send_message(child, WM_CLOSE, 0, 0)
-                            closed += 1
+                            if self.close_window(child, "empty-eva-close"):
+                                closed += 1
                     elif self.engine._signals.has_relevant_signal(close_decision):
                         self.engine._update_candidate_state(identity, close_decision, now)
                     if close_decision.matched and self.engine._is_hidden_identity(identity):
                         matched_hidden_identities.add(identity)
 
-                if self.engine._is_stopping():
+                if not self.engine._can_mutate_windows():
                     return
                 if self.engine._layout.apply_view_resize(child, window_text, parent_rect):
                     resized += 1
@@ -139,7 +157,7 @@ class WindowActionExecutor:
                     if aggressive_decision.matched and self.engine._is_hidden_identity(identity):
                         matched_hidden_identities.add(identity)
                     if aggressive_confirmed and aggressive_decision.action == ACTION_HIDE:
-                        if self.engine._is_stopping():
+                        if not self.engine._can_mutate_windows():
                             return
                         hidden_ok, hide_applied = self.ensure_window_hidden(
                             child,
@@ -173,6 +191,8 @@ class WindowActionExecutor:
                 if legacy_decision.matched and self.engine._is_hidden_identity(identity):
                     matched_hidden_identities.add(identity)
                 if legacy_confirmed and legacy_decision.action == ACTION_HIDE:
+                    if not self.engine._can_mutate_windows():
+                        return
                     hidden_ok, hide_applied = self.ensure_window_hidden(
                         wnd,
                         pid,
@@ -184,9 +204,17 @@ class WindowActionExecutor:
                         if hide_applied:
                             hidden += 1
 
-        popup_hidden, popup_closed = self.remove_popup_ads(kakao_pids, now=now)
+        (
+            popup_hidden,
+            popup_closed,
+            popup_close_requests,
+            popup_hide_fallbacks,
+            popup_zero_size_fallbacks,
+            popup_matched_identities,
+        ) = self.remove_popup_ads(kakao_pids, now=now)
         hidden += popup_hidden
         closed += popup_closed
+        matched_hidden_identities.update(popup_matched_identities)
 
         self.restore_no_longer_matched_hidden_windows(matched_hidden_identities, now=now)
 
@@ -194,33 +222,91 @@ class WindowActionExecutor:
             self.engine._state.resized_windows += resized
             self.engine._state.hidden_windows += hidden
             self.engine._state.closed_windows += closed
+            self.engine._state.popup_close_requests += popup_close_requests
+            self.engine._state.popup_hide_fallbacks += popup_hide_fallbacks
+            self.engine._state.popup_zero_size_fallbacks += popup_zero_size_fallbacks
             self.engine._state.last_tick = now
 
         self.engine._maybe_cleanup_caches(now)
 
-    def remove_popup_ads(self, kakao_pids: Set[int], now: Optional[float] = None) -> Tuple[int, int]:
-        if not kakao_pids or not self.engine._popup_ad_class_set or self.engine._is_stopping():
-            return 0, 0
+    def close_window(self, hwnd: int, reason: str) -> bool:
+        if not self.engine._can_mutate_windows() or hwnd <= 0 or not self.engine.api.is_window(hwnd):
+            return False
+        ok, _result = self.engine.api.send_message_timeout(
+            hwnd,
+            WM_CLOSE,
+            0,
+            0,
+            timeout_ms=DEFAULT_CLOSE_TIMEOUT_MS,
+        )
+        if not ok:
+            self.engine._set_error(f"{reason}: hwnd={hwnd} close timeout/failure win32err={self.engine._api_last_error()}")
+        return ok
+
+    def _capture_hidden_snapshot(
+        self,
+        hwnd: int,
+        pid: int,
+        class_name: str,
+        hide_reason: str,
+    ) -> Optional[HiddenWindowSnapshot]:
+        if pid <= 0 or not self.engine.api.is_window(hwnd):
+            return None
+        return HiddenWindowSnapshot(
+            was_visible=bool(self.engine.api.is_window_visible(hwnd)),
+            rect=self.engine.api.get_window_rect(hwnd),
+            pid=pid,
+            class_name=class_name,
+            hide_reason=hide_reason,
+        )
+
+    def _track_hidden_snapshot(self, identity: WindowIdentity, snapshot: HiddenWindowSnapshot) -> None:
+        with self.engine._cache_lock:
+            self.engine._hidden_windows.setdefault(identity, snapshot)
+            tracked_snapshot = self.engine._hidden_windows.get(identity)
+        self.engine._note_candidate_snapshot(identity, tracked_snapshot)
+
+    def _is_hidden_with_reason(self, identity: WindowIdentity, hide_reason: str) -> bool:
+        with self.engine._cache_lock:
+            snapshot = self.engine._hidden_windows.get(identity)
+        return bool(snapshot and snapshot.hide_reason == hide_reason)
+
+    def remove_popup_ads(
+        self,
+        kakao_pids: Set[int],
+        now: Optional[float] = None,
+    ) -> Tuple[int, int, int, int, int, Set[WindowIdentity]]:
+        if not kakao_pids or not self.engine._popup_ad_class_set or not self.engine._can_mutate_windows():
+            return 0, 0, 0, 0, 0, set()
 
         hidden = 0
         closed = 0
+        close_requests = 0
+        hide_fallbacks = 0
+        zero_size_fallbacks = 0
+        matched_identities: Set[WindowIdentity] = set()
         handled_hwnds: Set[int] = set()
         decision_time = now or time.time()
 
         for item in self.engine._scanner.collect_windows(kakao_pids):
             if self.engine._is_stopping():
-                return hidden, closed
+                return hidden, closed, close_requests, hide_fallbacks, zero_size_fallbacks, matched_identities
             if item.parent_hwnd != 0:
                 continue
             if self.engine._scanner.is_confirmed_main_window(item.hwnd, item=item):
                 continue
-            if not self.engine.api.is_window_visible(item.hwnd):
+            host_identity = (item.hwnd, item.pid, item.class_name)
+            host_hidden_popup = self._is_hidden_with_reason(host_identity, HIDE_REASON_POPUP)
+            if not self.engine.api.is_window_visible(item.hwnd) and not host_hidden_popup:
                 continue
             popup_guard = self.engine._signals.popup_host_guard_status(item.text)
 
-            for child, depth, class_name in self.engine._scanner.find_popup_matches(item.hwnd):
+            for child, depth, class_name in self.engine._scanner.find_popup_matches(
+                item.hwnd,
+                require_visible=not host_hidden_popup,
+            ):
                 if self.engine._is_stopping():
-                    return hidden, closed
+                    return hidden, closed, close_requests, hide_fallbacks, zero_size_fallbacks, matched_identities
                 if not self.engine.api.is_window(child):
                     continue
                 child_identity = (
@@ -228,43 +314,64 @@ class WindowActionExecutor:
                     self.engine.api.get_window_thread_process_id(child),
                     class_name,
                 )
-                popup_signals = self.engine._signals.blank_signals()
-                popup_signals["popup_direct_class"] = depth == 1
-                popup_signals["popup_descendant_class"] = True
-                popup_signals["popup_match_depth"] = depth
-                popup_signals["popup_host_guard"] = popup_guard
-                popup_decision = (
-                    self.engine._signals.decision_dismiss_popup(popup_signals)
-                    if popup_guard == POPUP_GUARD_ALLOW
-                    else self.engine._signals.decision_none(popup_signals)
-                )
+                popup_decision = self.engine._signals.popup_dismiss_decision(popup_guard, depth)
                 self.engine._update_candidate_state(child_identity, popup_decision, decision_time)
                 if popup_guard != POPUP_GUARD_ALLOW:
                     continue
 
-                if item.hwnd not in handled_hwnds:
-                    parent_hidden, parent_closed = self.dismiss_popup_window(item.hwnd)
+                matched_identities.add(host_identity)
+                matched_identities.add(child_identity)
+
+                if item.hwnd not in handled_hwnds and not self._is_hidden_with_reason(host_identity, HIDE_REASON_POPUP):
+                    (
+                        parent_hidden,
+                        parent_closed,
+                        parent_close_requests,
+                        parent_hide_fallbacks,
+                        parent_zero_size_fallbacks,
+                    ) = self.dismiss_popup_window(item.hwnd)
                     hidden += parent_hidden
                     closed += parent_closed
+                    close_requests += parent_close_requests
+                    hide_fallbacks += parent_hide_fallbacks
+                    zero_size_fallbacks += parent_zero_size_fallbacks
                     handled_hwnds.add(item.hwnd)
-                if child not in handled_hwnds:
-                    child_hidden, child_closed = self.dismiss_popup_window(child)
+                if child not in handled_hwnds and not self._is_hidden_with_reason(child_identity, HIDE_REASON_POPUP):
+                    (
+                        child_hidden,
+                        child_closed,
+                        child_close_requests,
+                        child_hide_fallbacks,
+                        child_zero_size_fallbacks,
+                    ) = self.dismiss_popup_window(child)
                     hidden += child_hidden
                     closed += child_closed
+                    close_requests += child_close_requests
+                    hide_fallbacks += child_hide_fallbacks
+                    zero_size_fallbacks += child_zero_size_fallbacks
                     handled_hwnds.add(child)
-        return hidden, closed
+        return hidden, closed, close_requests, hide_fallbacks, zero_size_fallbacks, matched_identities
 
-    def dismiss_popup_window(self, hwnd: int) -> Tuple[int, int]:
-        if self.engine._is_stopping() or hwnd <= 0 or not self.engine.api.is_window(hwnd):
-            return 0, 0
-        self.engine.api.send_message(hwnd, WM_CLOSE, 0, 0)
+    def dismiss_popup_window(self, hwnd: int) -> Tuple[int, int, int, int, int]:
+        if not self.engine._can_mutate_windows() or hwnd <= 0 or not self.engine.api.is_window(hwnd):
+            return 0, 0, 0, 0, 0
+        pid = self.engine.api.get_window_thread_process_id(hwnd)
+        class_name = self.engine._get_class(hwnd)
+        identity = (hwnd, pid, class_name)
+        snapshot = self._capture_hidden_snapshot(hwnd, pid, class_name, HIDE_REASON_POPUP)
+
+        close_requests = 1
+        self.close_window(hwnd, "popup-dismiss")
         if not self.engine.api.is_window(hwnd):
-            return 1, 1
+            return 1, 1, close_requests, 0, 0
 
+        if not self.engine._can_mutate_windows():
+            return 0, 0, close_requests, 0, 0
         self.engine.api.show_window(hwnd, SW_HIDE)
         if not self.engine.api.is_window(hwnd):
-            return 1, 1
+            return 1, 1, close_requests, 0, 0
         hidden_ok = not self.engine.api.is_window_visible(hwnd)
+        hide_fallbacks = 1 if hidden_ok else 0
         if not hidden_ok:
             self.engine.logger.debug(
                 "popup window still visible after SW_HIDE hwnd=%s win32err=%s",
@@ -272,9 +379,12 @@ class WindowActionExecutor:
                 self.engine._api_last_error(),
             )
 
+        if not self.engine._can_mutate_windows():
+            return (1 if hidden_ok else 0, 0, close_requests, hide_fallbacks, 0)
         resized_ok = bool(self.engine.api.set_window_pos(hwnd, 0, 0, 0, 0, 0))
         if not self.engine.api.is_window(hwnd):
-            return 1, 1
+            return 1, 1, close_requests, hide_fallbacks, 0
+        zero_size_fallbacks = 1 if resized_ok else 0
         if not resized_ok:
             self.engine.logger.debug(
                 "popup set_window_pos(zero-size) failed hwnd=%s win32err=%s",
@@ -290,31 +400,36 @@ class WindowActionExecutor:
                 failures.append("zero-size failed")
             self.engine._set_error(f"popup-dismiss: hwnd={hwnd} {'; '.join(failures)}")
 
-        return (1 if hidden_ok or resized_ok else 0, 0)
+        if (hidden_ok or resized_ok) and snapshot is not None:
+            self._track_hidden_snapshot(identity, snapshot)
+
+        return (1 if hidden_ok or resized_ok else 0, 0, close_requests, hide_fallbacks, zero_size_fallbacks)
 
     def hide_window(self, hwnd: int, pid: int, class_name: str, hide_reason: str) -> bool:
-        if self.engine._is_stopping():
+        if not self.engine._can_mutate_windows():
+            return False
+        if hide_reason == HIDE_REASON_AGGRESSIVE and not self.engine.settings.aggressive_mode:
             return False
         if pid <= 0 or not self.engine.api.is_window(hwnd):
             return False
         identity = (hwnd, pid, class_name)
         with self.engine._cache_lock:
             if identity not in self.engine._hidden_windows:
-                self.engine._hidden_windows[identity] = HiddenWindowSnapshot(
-                    was_visible=bool(self.engine.api.is_window_visible(hwnd)),
-                    rect=self.engine.api.get_window_rect(hwnd),
-                    pid=pid,
-                    class_name=class_name,
-                    hide_reason=hide_reason,
-                )
+                snapshot = self._capture_hidden_snapshot(hwnd, pid, class_name, hide_reason)
+                if snapshot is not None:
+                    self.engine._hidden_windows[identity] = snapshot
             snapshot = self.engine._hidden_windows.get(identity)
         self.engine._note_candidate_snapshot(identity, snapshot)
 
+        if not self.engine._can_mutate_windows():
+            return False
         self.engine.api.show_window(hwnd, SW_HIDE)
         if not self.engine.api.is_window_visible(hwnd):
             return True
         self.engine.logger.debug("window still visible after SW_HIDE hwnd=%s win32err=%s", hwnd, self.engine._api_last_error())
 
+        if not self.engine._can_mutate_windows():
+            return False
         moved = bool(
             self.engine.api.set_window_pos(
                 hwnd,

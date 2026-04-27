@@ -88,6 +88,10 @@ class FixtureAPI:
         self.send_calls.append((hwnd, msg, wparam, lparam))
         return 1
 
+    def send_message_timeout(self, hwnd, msg, wparam=0, lparam=0, timeout_ms=500) -> tuple[bool, int]:
+        self.send_calls.append((hwnd, msg, wparam, lparam))
+        return True, 1
+
     def get_last_error(self):
         return 0
 
@@ -154,7 +158,7 @@ def test_window_dump_fixture_empty_eva_child_without_ad_signal_is_not_closed():
     assert 104 not in closed_handles
 
 
-def test_window_dump_fixture_popup_adfit_webview_is_closed_hidden_and_not_restored():
+def test_window_dump_fixture_popup_adfit_webview_is_closed_hidden_and_restored_when_disabled():
     _payload, api, engine = _run_fixture(
         "popup_adfit_webview.json",
         settings=LayoutSettingsV11(enabled=True, aggressive_mode=False),
@@ -168,13 +172,14 @@ def test_window_dump_fixture_popup_adfit_webview_is_closed_hidden_and_not_restor
     assert 201 in api.hide_calls
     assert (200, 0, 0, 0, 0) in api.set_pos_calls
     assert (201, 0, 0, 0, 0) in api.set_pos_calls
-    assert all(identity[0] not in {200, 201} for identity in engine._hidden_windows)
+    assert any(identity[0] == 200 for identity in engine._hidden_windows)
+    assert any(identity[0] == 201 for identity in engine._hidden_windows)
 
     engine.set_enabled(False)
     engine.stop()
 
-    assert 200 not in api.show_calls
-    assert 201 not in api.show_calls
+    assert 200 in api.show_calls
+    assert 201 in api.show_calls
 
 
 def test_window_dump_fixture_popup_non_adfit_viewer_is_ignored_by_default():

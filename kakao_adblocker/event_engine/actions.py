@@ -470,11 +470,20 @@ class WindowActionExecutor:
             for identity in stale_identities:
                 state = self.engine._candidate_states.get(identity)
                 if state is None:
+                    # Hidden identities without a prior candidate state (e.g.
+                    # popup hosts dismissed via remove_popup_ads) seed last_action_at
+                    # so the grace check measures elapsed time from this point
+                    # instead of from epoch (0.0), which would make grace_elapsed
+                    # arbitrarily large and trigger immediate restore on the first miss.
                     state = CandidateState()
+                    state.last_action_at = now_value
                     self.engine._candidate_states[identity] = state
                 state.match_streak = 0
                 state.miss_streak += 1
-                grace_elapsed_ms = max(now_value - state.last_action_at, 0.0) * 1000.0
+                if state.last_action_at > 0:
+                    grace_elapsed_ms = max(now_value - state.last_action_at, 0.0) * 1000.0
+                else:
+                    grace_elapsed_ms = 0.0
                 if (
                     grace_elapsed_ms >= float(self.engine.rules.hidden_restore_grace_ms)
                     or state.miss_streak >= RESTORE_MISS_THRESHOLD

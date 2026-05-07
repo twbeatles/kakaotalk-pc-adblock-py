@@ -101,7 +101,12 @@ class LayoutOnlyEngine:
             self._last_activity = time.time()
             self._burst_scans_remaining = 0
         with self._cache_lock:
+            # Drop stale state from any prior session (e.g. failed-restore
+            # snapshots that lingered after a previous stop()) so the new
+            # session does not retry restores for windows it never hid.
             self._candidate_states.clear()
+            self._hidden_windows.clear()
+            self._text_cache.clear()
         self._stop_event.clear()
         self._wake_event.clear()
 

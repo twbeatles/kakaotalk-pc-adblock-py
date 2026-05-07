@@ -1974,3 +1974,91 @@ def test_engine_can_reset_restore_failures_state():
 
     assert state.restore_failures == 0
     assert state.last_restore_error == ""
+
+
+def test_engine_popup_host_restore_respects_grace_when_no_prior_state(monkeypatch):
+    api = FakeAPI()
+    api.windows[240] = {
+        "pid": 42,
+        "class": "EVA_Window",
+        "text": "",
+        "parent": 0,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.windows[241] = {
+        "pid": 42,
+        "class": "AdFitWebView",
+        "text": "",
+        "parent": 240,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.children[240] = [241]
+    now = {"value": 100.0}
+    monkeypatch.setattr("kakao_adblocker.event_engine.time.time", lambda: now["value"])
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    rules = LayoutRulesV11(popup_ad_classes=["AdFitWebView"], hidden_restore_grace_ms=250)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+    assert api.windows[240]["visible"] is False
+    assert api.windows[241]["visible"] is False
+
+    # Simulate the popup descendant being destroyed while only a tiny amount of time
+    # passes. The host (240) had no candidate state entry (popup hosts skip
+    # _update_candidate_state in remove_popup_ads), so without the grace fix
+    # `last_action_at=0.0` would make the grace check fire immediately and the
+    # host would be restored on the very first miss tick.
+    api.windows.pop(241, None)
+    api.children[240] = []
+    now["value"] = 100.05
+    engine.scan_once()
+    engine.apply_once()
+    assert api.windows[240]["visible"] is False, "popup host restored before grace elapsed"
+
+    now["value"] = 100.40
+    engine.scan_once()
+    engine.apply_once()
+    assert api.windows[240]["visible"] is True
+    assert 240 in api.show_calls
+
+
+def test_engine_start_clears_leftover_hidden_window_snapshots():
+    api = FakeAPI()
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=True)
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    # Simulate a snapshot leftover from a previous session that failed to restore
+    # (e.g. restore_hidden_windows kept it for retry but the engine shut down).
+    from kakao_adblocker.event_engine.models import HiddenWindowSnapshot
+
+    leftover_identity = (9876, 555, "GhostClass")
+    engine._hidden_windows[leftover_identity] = HiddenWindowSnapshot(
+        was_visible=True,
+        rect=(0, 0, 100, 100),
+        pid=555,
+        class_name="GhostClass",
+        hide_reason="legacy",
+    )
+    engine._text_cache[leftover_identity] = (0.0, "stale text")
+
+    engine.start()
+    try:
+        assert leftover_identity not in engine._hidden_windows
+        assert leftover_identity not in engine._text_cache
+    finally:
+        engine.stop()

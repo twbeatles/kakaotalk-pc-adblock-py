@@ -2,7 +2,9 @@ import logging
 
 from kakao_adblocker.config import LayoutRulesV11
 from kakao_adblocker.layout_engine import LayoutEngine
-from kakao_adblocker.win32_api import SWP_NOMOVE
+from kakao_adblocker.win32_api import SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER
+
+RESIZE_FLAGS = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
 
 
 class DummyAPI:
@@ -33,7 +35,7 @@ def test_resize_formula_online_main_view():
         parent_rect=(0, 0, 500, 700),
     )
     assert ok is True
-    assert api.calls == [(101, 0, 0, 498, 669, SWP_NOMOVE)]
+    assert api.calls == [(101, 0, 0, 498, 669, RESIZE_FLAGS)]
 
 
 def test_resize_formula_lock_mode_view():
@@ -47,7 +49,7 @@ def test_resize_formula_lock_mode_view():
         parent_rect=(0, 0, 500, 700),
     )
     assert ok is True
-    assert api.calls == [(201, 0, 0, 498, 700, SWP_NOMOVE)]
+    assert api.calls == [(201, 0, 0, 498, 700, RESIZE_FLAGS)]
 
 
 def test_resize_skipped_when_already_same_size():

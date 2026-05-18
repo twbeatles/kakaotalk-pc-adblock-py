@@ -47,6 +47,7 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 시작프로그램 토글에서 레지스트리 변경 후 설정 저장이 실패하면 레지스트리도 즉시 역롤백해 상태 불일치를 줄입니다.
 - 앱 시작 시 `run_on_startup`은 레지스트리 상태를 기준으로 1회 동기화됩니다.
 - 앱 시작 시 Run 등록이 켜져 있으면 등록 명령을 함께 검증하고, stale/mismatch 상태면 `sync_registration_command()`로 자동 복구를 시도합니다.
+- 소스 모드 실행 중에도 기존 Run 등록이 존재하는 `KakaoTalkLayoutAdBlocker_v11.exe --startup-launch --minimized` 패키지 실행 파일을 가리키면 정상 등록으로 인정해, 설치된 EXE 등록을 소스 스크립트 명령으로 덮어쓰지 않습니다.
 - 시작 시 `run_on_startup` 동기화 저장이 실패해도 값 롤백 후 예외 없이 계속 동작합니다.
 - 차단 OFF 전환 또는 앱 종료 시, 이전에 숨김/이동한 광고 창은 즉시 원복됩니다.
 - 차단 OFF 상태에서는 watch/apply 루프를 모두 일시중단하고, ON 전환 시 즉시 재개합니다.
@@ -86,8 +87,10 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 빈 텍스트 캐시는 짧은 TTL로 빠르게 재조회해 초기 UI 구성 구간의 탐지 지연을 줄였습니다.
 - 숨김/후보 aggressive subtree는 stale non-empty 텍스트 캐시를 우회해 재확인하므로 광고 토큰이 사라진 창을 더 빠르게 복원합니다.
 - empty `EVA_ChildWindow` custom scroll guard는 tick 단위로 재평가해 동적 subtree 변경을 놓치지 않습니다.
+- empty `EVA_ChildWindow` close는 `WM_CLOSE` 요청 성공만으로 누적 닫힘을 올리지 않고, 대상 창이 실제로 사라진 경우에만 닫힘으로 집계합니다.
 - 공격 모드를 끄면 aggressive hide로 숨긴 창은 즉시 복구되고, 즉시 재스캔/재적용이 수행됩니다.
 - 한 번 숨긴 창도 이후 aggressive/legacy 시그니처에서 벗어나면 자동 복구되어 stale hide가 누적되지 않습니다.
+- main child resize와 popup zero-size fallback은 z-order/activation 변경을 피하는 `SetWindowPos` flags를 사용합니다.
 - 상태 문자열의 `숨김`/`닫힘`/`리사이즈` 수치는 누적값이며, UI/트레이 라벨도 `누적 숨김`/`누적 닫힘`/`누적 리사이즈`로 명시됩니다.
 - 핵심 런타임 모듈은 단일 파일이 아니라 패키지로 정리되었습니다: `kakao_adblocker/app/`, `kakao_adblocker/config/`, `kakao_adblocker/event_engine/`. 기존 import 경로(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`)는 그대로 유지됩니다.
 
@@ -252,13 +255,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign
 - packaged self-check는 `core` 실패만 빌드 실패로 간주하고, `optional` 실패는 경고로만 남깁니다.
 - 빌드 시작 시 `kakao_adblocker.config.VERSION`과 `packaging/windows_version_info.txt`의 PE 버전 리소스가 일치하는지 검증합니다.
 - interactive shell이 감지되면 추가로 `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...` startup smoke를 1회 수행합니다.
+- startup smoke도 60초 timeout으로 보호되며, 종료 trace가 생성되지 않거나 프로세스가 멈추면 빌드를 실패시킵니다.
 - interactive shell이 없으면 startup smoke는 건너뛰고 빌드는 계속 진행합니다.
 - `-StrictStartupSmoke`를 함께 주면 interactive startup smoke가 실제 수행된 경우에만 `tray_available=false` 또는 `tray_start_error!=empty`를 빌드 실패로 승격합니다.
 - smoke를 건너뛰려면 `-SkipSmokeCheck`를 사용합니다.
 
 ## CI
 
-- GitHub Actions(`.github/workflows/windows-ci.yml`)는 hosted `windows-latest`에서 `python -m pyright`, `pytest -q --basetemp .pytest_tmp`, `python kakaotalk_layout_adblock_v11.py --self-check --json`, `powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign -SkipSmokeCheck`를 실행합니다.
+- GitHub Actions(`.github/workflows/windows-ci.yml`)는 hosted `windows-latest`에서 `python -m pyright`, `pytest -q --basetemp .pytest_tmp`, `python kakaotalk_layout_adblock_v11.py --self-check --json`, `powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign`를 실행합니다.
+- CI의 release build는 built EXE의 `--self-check --strict-self-check --json` packaged smoke까지 실행합니다.
 - hosted Windows CI는 정적 분석/테스트/패키징 게이트만 담당하며, interactive tray/startup smoke는 로컬 수동 검증 또는 실제 릴리스 호스트에서 수행하는 것을 기준으로 합니다.
 
 서명을 켜려면 아래 둘 중 하나를 설정하세요.

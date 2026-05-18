@@ -37,7 +37,7 @@ jobs:
 
       - name: Build Release
         shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign -SkipSmokeCheck
+        run: powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4

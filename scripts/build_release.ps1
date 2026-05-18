@@ -211,8 +211,14 @@ function Invoke-StartupSmoke {
             -FilePath $ExePath `
             -ArgumentList @("--startup-launch", "--minimized", "--startup-trace", $tracePath, "--exit-after-startup-ms", "1500") `
             -PassThru `
-            -Wait `
             -WindowStyle Hidden
+        if (-not $proc.WaitForExit(60000)) {
+            try {
+                $proc.Kill()
+            } catch {
+            }
+            throw "packaged startup smoke timed out"
+        }
     } finally {
         $env:APPDATA = $previousAppData
     }

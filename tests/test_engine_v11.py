@@ -6,7 +6,7 @@ from pathlib import Path
 
 from kakao_adblocker.config import LayoutRulesV11, LayoutSettingsV11
 from kakao_adblocker.event_engine import LayoutOnlyEngine
-from kakao_adblocker.win32_api import SW_HIDE, SW_SHOW
+from kakao_adblocker.win32_api import SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER
 
 
 class FakeAPI:
@@ -28,6 +28,7 @@ class FakeAPI:
         self.rect_calls = 0
         self.visible_calls = 0
         self.set_pos_calls = []
+        self.set_pos_flag_calls = []
         self.hide_calls = []
         self.show_calls = []
         self.send_calls = []
@@ -77,6 +78,7 @@ class FakeAPI:
 
     def set_window_pos(self, hwnd: int, x: int, y: int, width: int, height: int, flags: int) -> bool:
         self.set_pos_calls.append((hwnd, x, y, width, height))
+        self.set_pos_flag_calls.append((hwnd, x, y, width, height, flags))
         return True
 
     def update_window(self, hwnd):
@@ -561,6 +563,9 @@ def test_engine_popup_ad_class_is_closed_hidden_and_restored_when_disabled():
     assert 241 in api.hide_calls
     assert (240, 0, 0, 0, 0) in api.set_pos_calls
     assert (241, 0, 0, 0, 0) in api.set_pos_calls
+    zero_size_flags = SWP_NOZORDER | SWP_NOACTIVATE
+    assert (240, 0, 0, 0, 0, zero_size_flags) in api.set_pos_flag_calls
+    assert (241, 0, 0, 0, 0, zero_size_flags) in api.set_pos_flag_calls
     assert any(identity[0] == 240 for identity in engine._hidden_windows)
     assert any(identity[0] == 241 for identity in engine._hidden_windows)
     assert engine.state.popup_close_requests == 2
@@ -1565,6 +1570,53 @@ def test_engine_empty_eva_child_with_legacy_ad_signal_is_closed():
 
     closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
     assert 104 in closed_handles
+    assert engine.state.closed_windows == 0
+    assert "still exists after close request" in engine.state.last_error
+
+
+def test_engine_empty_eva_child_counts_close_only_when_window_disappears():
+    api = FakeAPI()
+    api.windows[104] = {
+        "pid": 42,
+        "class": "EVA_ChildWindow",
+        "text": "",
+        "parent": 100,
+        "rect": (0, 600, 500, 620),
+        "visible": True,
+    }
+    api.windows[105] = {
+        "pid": 42,
+        "class": "Chrome_WidgetWin_1",
+        "text": "Chrome Legacy Window",
+        "parent": 100,
+        "rect": (0, 620, 500, 700),
+        "visible": True,
+    }
+    api.children[100] = [101, 104, 105]
+
+    def closing_send_message_timeout(hwnd, msg, wparam=0, lparam=0, timeout_ms=500):
+        api.send_calls.append((hwnd, msg, wparam, lparam))
+        if hwnd == 104:
+            api.windows.pop(hwnd, None)
+        return True, 1
+
+    api.send_message_timeout = closing_send_message_timeout
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False),
+        LayoutRulesV11(close_empty_eva_child_requires_ad_signal=True),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+    engine.scan_once()
+    engine.apply_once()
+
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    assert 104 in closed_handles
+    assert engine.state.closed_windows == 1
 
 
 def test_engine_empty_eva_child_ignores_unrelated_custom_scroll_when_closing():

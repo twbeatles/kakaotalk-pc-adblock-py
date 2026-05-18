@@ -79,6 +79,7 @@
   - `reset_restore_failures()`로 복원 실패 상태 수동 초기화 지원
   - `WindowIdentity(hwnd,pid,class)` 기반 text/hidden-window 캐시로 HWND 재사용 오동작 방지
   - 숨김/후보 aggressive subtree는 stale non-empty 텍스트 캐시를 우회해 광고 토큰 소멸 후 복원 지연을 줄임
+  - empty `EVA_ChildWindow` close는 `SendMessageTimeoutW` 성공만으로 집계하지 않고 대상 창 소멸을 확인한 경우에만 `closed_windows`를 증가시킴
   - 스캔 경로는 경량 수집(`rect/visible` 미조회)으로 호출 부담 감소, `--dump-tree`만 상세 수집 사용
   - `--dump-tree-series`는 frame별 candidate decision preview를 함께 저장하며 popup dismiss host와 matched descendant를 모두 기록
   - PID 스캔/캐시 정리 주기 스로틀 적용
@@ -89,6 +90,7 @@
   - `OnlineMainView` / `LockModeView` 리사이즈 규칙
   - 공격적 배너 휴리스틱은 token 판정과 geometry 판정을 분리하고, 짧은 ad 토큰은 단어 경계 기준으로 매칭
   - 기본값에서는 token 없는 하단 `Chrome_WidgetWin_*` 패널을 geometry만으로 숨기지 않으며, subtree token도 aggressive signal로 사용
+  - main child resize는 `SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE`로 적용해 z-order/activation 부작용을 피함
 - `kakao_adblocker/protocols.py`
   - Win32 API/Joinable Thread/UI Root/Engine 상태에 대한 구조적 타입 프로토콜 정의
   - 테스트 더블(`tests/*`)과 런타임 모듈의 타입 경계를 분리
@@ -103,6 +105,7 @@
   - 트레이 비가용 시 창 닫기(X)는 숨김이 아니라 종료로 처리
   - 시작 시 `run_on_startup` 값을 레지스트리 상태로 1회 동기화
   - 시작 시 Run 등록이 enabled면 등록 명령 stale/missing 여부를 함께 검사하고 자동 복구를 시도
+  - 소스 모드에서는 기존 Run 등록이 존재하는 `KakaoTalkLayoutAdBlocker_v11.exe --startup-launch --minimized` 패키지 EXE를 가리키면 healthy로 인정해 설치된 EXE 등록을 소스 스크립트 명령으로 자동 덮어쓰지 않음
   - 상태 문자열에 마지막 오류/갱신시각 표시
   - 엔진 오류가 없을 때는 tray unavailable/startup rollback 같은 UI 계층 경고를 상태 문자열에 짧게 노출
   - 상태 문자열의 `메인윈도우`는 확정 count이며, 후보가 더 많을 때만 `후보 N`을 추가 표기
@@ -131,9 +134,9 @@
 - popup parity(`popup_ad_classes` / `AdFitWebView`), `SendMessageTimeoutW` close timeout, popup fallback 복원 추적은 기존 `config/event_engine/win32_api` 내부 구현이라 추가 PyInstaller hook 없이 현재 spec으로 포장 가능
 - empty `EVA_ChildWindow` subtree custom-scroll guard는 tick-local `event_engine` 내부 구현이라 추가 hidden import 없이 현재 spec으로 유지
 - `scripts/build_release.ps1`는 빌드 시작 시 `VERSION`과 `packaging/windows_version_info.txt` 동기화를 검증하고, 기본값으로 built EXE에 `--self-check --strict-self-check --json` packaged smoke를 1회 수행하며, core failure만 빌드 실패로 취급한다. 필요 시 `-SkipSmokeCheck`로 비활성화 가능
-- interactive shell이 감지되면 built EXE에 `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...` startup smoke를 추가 수행하고, 비interactive 환경에서는 skip 기록만 남기고 계속 진행한다
+- interactive shell이 감지되면 built EXE에 `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...` startup smoke를 추가 수행하고, 60초 timeout으로 멈춤을 차단하며, 비interactive 환경에서는 skip 기록만 남기고 계속 진행한다
 - `-StrictStartupSmoke`는 interactive startup smoke가 실제 수행된 경우에만 tray unavailable / tray start warning을 빌드 실패로 승격한다
-- GitHub Actions workflow `.github/workflows/windows-ci.yml`는 hosted Windows에서 pyright, pytest, self-check JSON, no-sign packaging build만 검증하고, interactive tray/startup smoke는 강제하지 않는다
+- GitHub Actions workflow `.github/workflows/windows-ci.yml`는 hosted Windows에서 pyright, pytest, self-check JSON, no-sign packaging build와 packaged strict self-check를 검증하고, interactive tray/startup smoke는 강제하지 않는다
 
 ## 동작 규칙
 
@@ -144,7 +147,7 @@
 5. `Chrome Legacy Window` 하위 광고 서브윈도우 숨김
 6. 공격 모드에서 `Chrome_WidgetWin_* + ad token` 또는 subtree token이 확인된 하단 배너 후보만 숨기고, geometry-only hide는 rules opt-in일 때만 허용
 7. 비메인 top-level 창의 descendant(depth<=`popup_search_depth`)가 `AdFitWebView` 등 `popup_ad_classes`에 매치되더라도 기본값에서는 empty host title 또는 allowlist match일 때만 host와 matched popup descendant만 close/hide/zero-size 처리
-8. 시작프로그램 토글은 레지스트리 갱신 성공 시에만 설정 파일에 반영
+8. 시작프로그램 토글은 레지스트리 갱신 성공 시에만 설정 파일에 반영하며, 소스 모드 자동 동기화는 유효한 패키지 EXE Run 등록을 덮어쓰지 않는다
 9. `--dump-tree`는 UI 모듈을 로딩하지 않는 경량 경로로 동작
 10. `--self-check`는 UI/엔진을 기동하지 않고 APPDATA/logging bootstrap/tasklist/레지스트리/Run 등록 명령/`tkinter/Tk`/트레이 import 환경 진단만 수행하며, 기본 모드의 트레이 import 실패는 optional이고 `--strict-self-check`에서는 core로 취급
 11. 시작 경고 상태 반영은 `복구 실패 > 자동 복구 > 기타` 우선순위로 1건 노출

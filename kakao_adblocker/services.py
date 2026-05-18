@@ -133,6 +133,8 @@ class ProcessInspector:
 class StartupManager:
     KEY = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
     NAME = "KakaoTalkAdBlockerLayout"
+    PACKAGED_EXE_NAME = "KakaoTalkLayoutAdBlocker_v11.exe"
+    STARTUP_ARGS = ("--startup-launch", "--minimized")
 
     @staticmethod
     def build_command() -> str:
@@ -187,6 +189,20 @@ class StartupManager:
         return targets
 
     @staticmethod
+    def _is_source_mode_compatible_packaged_command(command: str) -> bool:
+        if getattr(sys, "frozen", False):
+            return False
+        tokens = StartupManager._split_command(command)
+        if not tokens:
+            return False
+        target = Path(tokens[0])
+        if target.name.lower() != StartupManager.PACKAGED_EXE_NAME.lower():
+            return False
+        if not target.exists():
+            return False
+        return tuple(tokens[1:]) == StartupManager.STARTUP_ARGS
+
+    @staticmethod
     def registration_health() -> tuple[str, str]:
         command = StartupManager.get_registered_command()
         if not command:
@@ -198,6 +214,8 @@ class StartupManager:
             missing_text = ", ".join(missing_targets)
             return "missing_target", f"Run 등록 대상 누락: {missing_text}"
         if command != expected:
+            if StartupManager._is_source_mode_compatible_packaged_command(command):
+                return "healthy", "Run 등록 명령 정상(packaged EXE)"
             return "stale_command", "Run 등록 명령 불일치"
         return "healthy", "Run 등록 명령 정상"
 
@@ -213,7 +231,9 @@ class StartupManager:
             return False
         expected = StartupManager.build_command()
         current = StartupManager.get_registered_command()
-        if current == expected:
+        if current == expected or (
+            current is not None and StartupManager._is_source_mode_compatible_packaged_command(current)
+        ):
             return True
         try:
             key = winreg_mod.OpenKey(

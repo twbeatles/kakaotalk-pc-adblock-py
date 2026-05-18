@@ -138,7 +138,7 @@ class WindowActionExecutor:
                         if close_confirmed:
                             if not self.engine._can_mutate_windows():
                                 return
-                            if self.close_window(child, "empty-eva-close"):
+                            if self.close_window_and_confirm_closed(child, "empty-eva-close"):
                                 closed += 1
                     elif self.engine._signals.has_relevant_signal(close_decision):
                         self.engine._update_candidate_state(identity, close_decision, now)
@@ -242,6 +242,16 @@ class WindowActionExecutor:
         if not ok:
             self.engine._set_error(f"{reason}: hwnd={hwnd} close timeout/failure win32err={self.engine._api_last_error()}")
         return ok
+
+    def close_window_and_confirm_closed(self, hwnd: int, reason: str) -> bool:
+        if not self.close_window(hwnd, reason):
+            return False
+        if self.engine.api.is_window(hwnd):
+            self.engine._set_error(
+                f"{reason}: hwnd={hwnd} still exists after close request win32err={self.engine._api_last_error()}"
+            )
+            return False
+        return True
 
     def _capture_hidden_snapshot(
         self,
@@ -381,7 +391,7 @@ class WindowActionExecutor:
 
         if not self.engine._can_mutate_windows():
             return (1 if hidden_ok else 0, 0, close_requests, hide_fallbacks, 0)
-        resized_ok = bool(self.engine.api.set_window_pos(hwnd, 0, 0, 0, 0, 0))
+        resized_ok = bool(self.engine.api.set_window_pos(hwnd, 0, 0, 0, 0, SWP_NOZORDER | SWP_NOACTIVATE))
         if not self.engine.api.is_window(hwnd):
             return 1, 1, close_requests, hide_fallbacks, 0
         zero_size_fallbacks = 1 if resized_ok else 0

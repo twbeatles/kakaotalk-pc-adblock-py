@@ -218,6 +218,67 @@ def test_startup_manager_sync_registration_command_updates_stale_value(monkeypat
     assert FakeWinreg.written == [r'"C:\Apps\KakaoTalkLayoutAdBlocker_v11.exe" --startup-launch --minimized']
 
 
+def test_startup_manager_source_mode_accepts_existing_packaged_registration(monkeypatch, tmp_path):
+    exe_path = tmp_path / "KakaoTalkLayoutAdBlocker_v11.exe"
+    exe_path.write_text("stub", encoding="utf-8")
+    command = f'"{exe_path}" --startup-launch --minimized'
+    monkeypatch.setattr(services.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(services.StartupManager, "get_registered_command", staticmethod(lambda: command))
+    monkeypatch.setattr(
+        services.StartupManager,
+        "build_command",
+        staticmethod(lambda: r'"C:\Python\python.exe" "D:\repo\kakaotalk_layout_adblock_v11.py" --startup-launch --minimized'),
+    )
+
+    ok, detail = services.StartupManager.probe_registration_command()
+
+    assert ok is True
+    assert "packaged EXE" in detail
+
+
+def test_startup_manager_source_mode_sync_keeps_existing_packaged_registration(monkeypatch, tmp_path):
+    exe_path = tmp_path / "KakaoTalkLayoutAdBlocker_v11.exe"
+    exe_path.write_text("stub", encoding="utf-8")
+    command = f'"{exe_path}" --startup-launch --minimized'
+
+    class FakeWinreg:
+        HKEY_CURRENT_USER = object()
+        KEY_READ = 0x20019
+        KEY_SET_VALUE = 0x0002
+        REG_SZ = 1
+        written = []
+
+        @staticmethod
+        def OpenKey(*_args, **_kwargs):
+            return "k"
+
+        @staticmethod
+        def QueryValueEx(_key, _name):
+            return (command, FakeWinreg.REG_SZ)
+
+        @staticmethod
+        def SetValueEx(_key, _name, _reserved, _regtype, value):
+            FakeWinreg.written.append(value)
+
+        @staticmethod
+        def CloseKey(_key):
+            return None
+
+    monkeypatch.setattr(services.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(services, "WINREG_AVAILABLE", True)
+    monkeypatch.setattr(services, "winreg", FakeWinreg)
+    monkeypatch.setattr(
+        services.StartupManager,
+        "build_command",
+        staticmethod(lambda: r'"C:\Python\python.exe" "D:\repo\kakaotalk_layout_adblock_v11.py" --startup-launch --minimized'),
+    )
+
+    ok = services.StartupManager.sync_registration_command()
+
+    assert ok is True
+    assert FakeWinreg.written == []
+
+
 def test_startup_manager_probe_registration_command_not_registered(monkeypatch):
     monkeypatch.setattr(services.StartupManager, "get_registered_command", staticmethod(lambda: None))
 
@@ -239,6 +300,27 @@ def test_startup_manager_probe_registration_command_detects_stale_command(monkey
         staticmethod(lambda: r'"C:\Apps\KakaoTalkLayoutAdBlocker_v11.exe" --startup-launch --minimized'),
     )
     monkeypatch.setattr(services.Path, "exists", lambda _path: True)
+
+    ok, detail = services.StartupManager.probe_registration_command()
+
+    assert ok is False
+    assert "명령 불일치" in detail
+
+
+def test_startup_manager_frozen_mode_rejects_different_packaged_registration(monkeypatch, tmp_path):
+    exe_path = tmp_path / "KakaoTalkLayoutAdBlocker_v11.exe"
+    exe_path.write_text("stub", encoding="utf-8")
+    monkeypatch.setattr(services.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        services.StartupManager,
+        "get_registered_command",
+        staticmethod(lambda: f'"{exe_path}" --startup-launch --minimized'),
+    )
+    monkeypatch.setattr(
+        services.StartupManager,
+        "build_command",
+        staticmethod(lambda: r'"C:\Installed\KakaoTalkLayoutAdBlocker_v11.exe" --startup-launch --minimized'),
+    )
 
     ok, detail = services.StartupManager.probe_registration_command()
 

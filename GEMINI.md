@@ -86,6 +86,7 @@
   - `EngineState` includes `restore_failures` / `last_restore_error`
   - `WindowIdentity(hwnd,pid,class)` keyed caches protect against HWND reuse side effects
   - hidden/candidate aggressive subtree checks bypass stale non-empty text cache with fresh text reads so token disappearance can restore after `hidden_restore_grace_ms`
+  - empty `EVA_ChildWindow` close is counted only after the target window actually disappears, not merely after a successful `SendMessageTimeoutW` request
   - watch scan path avoids geometry/visibility calls; dump-tree path still collects full geometry
   - `--dump-tree-series` stores frame-by-frame candidate decision previews alongside the tree dump, including both popup host and matched popup descendant candidates
   - process-id scan and cache cleanup are interval-throttled for idle CPU savings
@@ -97,6 +98,7 @@
   - aggressive detection separates token signals from geometry-only bottom-banner heuristics
   - token-less bottom `Chrome_WidgetWin_*` panels are not hidden by default; subtree token signals can still trigger aggressive hide
   - short ASCII ad tokens are word-boundary matched to reduce false positives
+  - main child resize uses `SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE` to avoid z-order and activation side effects
 - `protocols.py`
   - structural typing boundaries for Win32 API / joinable thread / UI root / engine state
   - keeps runtime module contracts compatible with test doubles
@@ -111,6 +113,7 @@
   - window close action switches from hide to shutdown when tray is unavailable
   - startup setting is synchronized from registry on app start
   - when Run registration is enabled, startup command health is probed and stale/missing command lines are auto-repaired when possible
+  - in source mode, an existing Run registration that points to an existing `KakaoTalkLayoutAdBlocker_v11.exe --startup-launch --minimized` packaged EXE is treated as healthy and is not auto-overwritten with a source-script command
   - startup toggle rolls registry back on settings-save failure
   - setting save failures roll back values (`enabled`, `run_on_startup`, `aggressive_mode`)
   - aggressive mode toggle is pushed into the engine immediately after a successful save
@@ -132,6 +135,7 @@
   - `ProcessInspector.consume_last_warning()` provides scan diagnostics to the engine
   - `StartupManager.probe_access()` validates both Run-registry read and write access
   - `StartupManager.registration_health()` classifies `not_registered`, `healthy`, `stale_command`, `missing_target`
+  - source-mode registration health accepts the compatible packaged-EXE Run command above; frozen mode still requires the current EXE command
   - diagnostics helpers: `ProcessInspector.probe_tasklist()`, `StartupManager.probe_access()`, `StartupManager.probe_registration_command()`
 - `win32_api.py`
   - user32 API bindings explicitly define `argtypes/restype`
@@ -167,14 +171,14 @@
 - the empty `EVA_ChildWindow` subtree custom-scroll guard remains tick-local inside `event_engine`, so current hidden-import coverage remains sufficient.
 - `--self-check` / `--strict-self-check` exercise dynamic Tk diagnostics and logging bootstrap probe, so explicit `tkinter` hidden imports keep onefile packaging deterministic.
 - `scripts/build_release.ps1` verifies `kakao_adblocker.config.VERSION` matches `packaging/windows_version_info.txt`, then runs a packaged `--self-check --strict-self-check --json` smoke by default after building with a temporary `%APPDATA%`; only `core` failures fail the build.
-- when an interactive shell is available, `scripts/build_release.ps1` also runs a packaged startup smoke with `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...`; otherwise it records a skipped startup smoke and continues.
+- when an interactive shell is available, `scripts/build_release.ps1` also runs a packaged startup smoke with `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...`; the smoke is bounded by a 60-second timeout and kills the child process on timeout. Otherwise it records a skipped startup smoke and continues.
 - `-StrictStartupSmoke` only upgrades tray-unavailable / tray-start-warning startup smoke results to a build failure when the interactive startup smoke actually ran.
 
 ## CI
 
 - GitHub Actions workflow `.github/workflows/windows-ci.yml` runs on `push` and `pull_request` with hosted `windows-latest`.
-- CI covers `python -m pyright`, `pytest -q --basetemp .pytest_tmp`, `python kakaotalk_layout_adblock_v11.py --self-check --json`, and `scripts/build_release.ps1 -NoSign -SkipSmokeCheck`.
-- Hosted CI intentionally skips interactive tray/startup validation; that remains a local/manual or release-host check.
+- CI covers `python -m pyright`, `pytest -q --basetemp .pytest_tmp`, `python kakaotalk_layout_adblock_v11.py --self-check --json`, and `scripts/build_release.ps1 -NoSign`.
+- Hosted CI runs the built EXE packaged strict self-check through the release script. Interactive tray/startup validation is still skipped by the release script's non-interactive/CI detection and remains a local/manual or release-host check.
 
 ## Legacy Archive
 

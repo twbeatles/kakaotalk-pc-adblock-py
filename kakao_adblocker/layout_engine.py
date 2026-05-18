@@ -6,7 +6,7 @@ from typing import Iterable, Optional
 
 from .config import LayoutRulesV11
 from .protocols import LayoutApiLike, Rect
-from .win32_api import SWP_NOMOVE
+from .win32_api import SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER
 
 _ASCII_WORD_RE = re.compile(r"[a-z0-9]+")
 
@@ -38,7 +38,8 @@ class LayoutEngine:
         if current and _rect_width(current) == width and _rect_height(current) == height:
             return False
         self.api.update_window(child_hwnd)
-        return bool(self.api.set_window_pos(child_hwnd, 0, 0, width, height, SWP_NOMOVE))
+        flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+        return bool(self.api.set_window_pos(child_hwnd, 0, 0, width, height, flags))
 
     def should_close_empty_eva_child(
         self,

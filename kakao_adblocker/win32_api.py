@@ -5,6 +5,8 @@ import os
 from ctypes import wintypes
 from typing import Any, Callable, Optional, Tuple
 
+from .protocols import WindowTextResult
+
 SW_HIDE = 0
 SW_SHOW = 5
 SWP_NOSIZE = 0x0001
@@ -58,6 +60,9 @@ class Win32API:
 
         self.user32.GetWindowTextW.argtypes = [hwnd_t, wintypes.LPWSTR, ctypes.c_int]
         self.user32.GetWindowTextW.restype = ctypes.c_int
+
+        self.user32.GetWindowTextLengthW.argtypes = [hwnd_t]
+        self.user32.GetWindowTextLengthW.restype = ctypes.c_int
 
         self.user32.GetParent.argtypes = [hwnd_t]
         self.user32.GetParent.restype = hwnd_t
@@ -159,11 +164,33 @@ class Win32API:
         return buf.value
 
     def get_window_text(self, hwnd: int) -> str:
+        return self.get_window_text_result(hwnd).text
+
+    def get_window_text_result(self, hwnd: int) -> WindowTextResult:
         if not self.available:
-            return ""
-        buf = ctypes.create_unicode_buffer(512)
-        self.user32.GetWindowTextW(hwnd, buf, 512)
-        return buf.value
+            return WindowTextResult("", known=False)
+        try:
+            ctypes.set_last_error(0)
+        except Exception:
+            pass
+        length = int(self.user32.GetWindowTextLengthW(hwnd))
+        length_error = int(ctypes.get_last_error())
+        if length < 0:
+            return WindowTextResult("", known=False, error_code=length_error)
+        if length == 0 and length_error:
+            return WindowTextResult("", known=False, error_code=length_error)
+        buffer_len = max(length + 1, 1)
+        buf = ctypes.create_unicode_buffer(buffer_len)
+        try:
+            ctypes.set_last_error(0)
+        except Exception:
+            pass
+        copied = int(self.user32.GetWindowTextW(hwnd, buf, buffer_len))
+        text_error = int(ctypes.get_last_error())
+        if copied == 0 and length > 0 and text_error:
+            return WindowTextResult("", known=False, error_code=text_error)
+        truncated = copied >= buffer_len - 1 and length >= buffer_len - 1
+        return WindowTextResult(buf.value, known=True, truncated=truncated, error_code=text_error if truncated else 0)
 
     def get_parent(self, hwnd: int) -> int:
         if not self.available:

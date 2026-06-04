@@ -4,6 +4,8 @@ import importlib
 import logging
 import os
 import sys
+import ctypes
+from ctypes import wintypes
 from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
@@ -35,6 +37,26 @@ from .startup import (
 tk: Any = SimpleNamespace(Tk=None)
 TrayController: Any = None
 LayoutOnlyEngine: Any = None
+ERROR_ALREADY_EXISTS = 183
+MAX_DUMP_SERIES_DURATION_MS = 10000
+MIN_DUMP_SERIES_INTERVAL_MS = 10
+_SINGLE_INSTANCE_MUTEX_NAME = "Local\\KakaoTalkLayoutAdBlocker_v11"
+
+
+class _SingleInstanceGuard:
+    def __init__(self, kernel32: Any, handle: int) -> None:
+        self._kernel32 = kernel32
+        self._handle = handle
+
+    def release(self) -> None:
+        if not self._handle:
+            return
+        handle = self._handle
+        self._handle = 0
+        try:
+            self._kernel32.ReleaseMutex(handle)
+        finally:
+            self._kernel32.CloseHandle(handle)
 
 
 def _load_ui_dependencies() -> None:
@@ -55,6 +77,28 @@ def _load_engine_dependencies() -> None:
         from ..event_engine import LayoutOnlyEngine as _LayoutOnlyEngine
 
         LayoutOnlyEngine = _LayoutOnlyEngine
+
+
+def _acquire_single_instance_guard() -> _SingleInstanceGuard | None:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.ReleaseMutex.argtypes = [wintypes.HANDLE]
+    kernel32.ReleaseMutex.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    try:
+        ctypes.set_last_error(0)
+    except Exception:
+        pass
+    handle = int(kernel32.CreateMutexW(None, True, _SINGLE_INSTANCE_MUTEX_NAME) or 0)
+    error = int(ctypes.get_last_error())
+    if not handle:
+        raise OSError(error, "CreateMutexW failed")
+    if error == ERROR_ALREADY_EXISTS:
+        kernel32.CloseHandle(handle)
+        return None
+    return _SingleInstanceGuard(kernel32, handle)
 
 
 def _check_appdata_writable() -> tuple[bool, str]:
@@ -128,24 +172,40 @@ def _self_check_specs(strict: bool = False) -> list[tuple[str, str, Callable[[],
 
 def _run_self_check(as_json: bool = False, report_path: str | None = None, strict: bool = False) -> int:
     records: list[SelfCheckRecord] = []
-    if report_path:
-        write_self_check_report(records, report_path, completed=False, write_text_report=_write_text_report)
+    try:
+        if report_path:
+            write_self_check_report(records, report_path, completed=False, write_text_report=_write_text_report)
+    except Exception as exc:
+        print(f"self-check report write failed: {exc}", file=sys.stderr)
+        return 1
     for label, severity, fn in _self_check_specs(strict=strict):
         ok, detail = fn()
         records.append(SelfCheckRecord(name=label, ok=ok, severity=severity, detail=detail))
-        if report_path:
-            write_self_check_report(records, report_path, completed=False, write_text_report=_write_text_report)
+        try:
+            if report_path:
+                write_self_check_report(records, report_path, completed=False, write_text_report=_write_text_report)
+        except Exception as exc:
+            print(f"self-check report write failed: {exc}", file=sys.stderr)
+            return 1
     if as_json:
-        emit_self_check_json(
-            records,
-            report_path=report_path,
-            write_text_report=_write_text_report,
-            write_stdout_text=_write_stdout_text,
-            frozen=bool(getattr(sys, "frozen", False)),
-        )
+        try:
+            emit_self_check_json(
+                records,
+                report_path=report_path,
+                write_text_report=_write_text_report,
+                write_stdout_text=_write_stdout_text,
+                frozen=bool(getattr(sys, "frozen", False)),
+            )
+        except Exception as exc:
+            print(f"self-check report write failed: {exc}", file=sys.stderr)
+            return 1
     else:
-        if report_path:
-            write_self_check_report(records, report_path, completed=True, write_text_report=_write_text_report)
+        try:
+            if report_path:
+                write_self_check_report(records, report_path, completed=True, write_text_report=_write_text_report)
+        except Exception as exc:
+            print(f"self-check report write failed: {exc}", file=sys.stderr)
+            return 1
         emit_self_check_text(records)
     return self_check_exit_code(records)
 
@@ -188,6 +248,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     args = build_parser().parse_args(argv if argv is not None else sys.argv[1:])
+    dump_series_duration_ms = max(int(args.dump_series_duration_ms), 0)
+    dump_series_interval_ms = max(int(args.dump_series_interval_ms), MIN_DUMP_SERIES_INTERVAL_MS)
+    if args.dump_tree_series and dump_series_duration_ms > MAX_DUMP_SERIES_DURATION_MS:
+        print(
+            f"--dump-series-duration-ms must be <= {MAX_DUMP_SERIES_DURATION_MS}",
+            file=sys.stderr,
+        )
+        return 2
     if args.self_check:
         return _run_self_check(
             as_json=bool(args.json),
@@ -210,35 +278,57 @@ def main(argv: Optional[list[str]] = None) -> int:
     if logging_warning:
         combined_warnings.append(logging_warning)
 
-    _load_engine_dependencies()
-    engine = LayoutOnlyEngine(logger, settings, rules)
-    for warning in load_warnings:
-        logger.warning(warning)
-    priority_warning = _pick_priority_warning(combined_warnings)
-
-    if args.dump_tree:
-        path = engine.dump_window_tree(out_dir=args.dump_dir)
-        if path:
-            print(path)
-            return 0
-        print("KakaoTalk not running (or root not found)")
-        return 1
-    if args.dump_tree_series:
-        path = engine.dump_window_tree_series(
-            out_dir=args.dump_dir,
-            duration_ms=args.dump_series_duration_ms,
-            interval_ms=args.dump_series_interval_ms,
-        )
-        if path:
-            print(path)
-            return 0
-        print("KakaoTalk not running (or root not found)")
-        return 1
+    single_instance_guard: _SingleInstanceGuard | None = None
+    is_dump_path = bool(args.dump_tree or args.dump_tree_series)
+    if not is_dump_path:
+        try:
+            single_instance_guard = _acquire_single_instance_guard()
+        except Exception as exc:
+            logger.warning("single instance mutex unavailable; continuing (%s)", exc.__class__.__name__)
+        else:
+            if single_instance_guard is None:
+                print("KakaoTalk Layout AdBlocker is already running.", file=sys.stderr)
+                return 0
 
     controller: Any = None
     root: Any = None
+    engine: Any = None
     engine_started = False
+
     try:
+        _load_engine_dependencies()
+        engine = LayoutOnlyEngine(logger, settings, rules)
+        for warning in load_warnings:
+            logger.warning(warning)
+        priority_warning = _pick_priority_warning(combined_warnings)
+
+        if args.dump_tree:
+            try:
+                path = engine.dump_window_tree(out_dir=args.dump_dir)
+            except Exception as exc:
+                print(f"dump-tree failed: {exc}", file=sys.stderr)
+                return 1
+            if path:
+                print(path)
+                return 0
+            print("KakaoTalk not running (or root not found)")
+            return 1
+        if args.dump_tree_series:
+            try:
+                path = engine.dump_window_tree_series(
+                    out_dir=args.dump_dir,
+                    duration_ms=dump_series_duration_ms,
+                    interval_ms=dump_series_interval_ms,
+                )
+            except Exception as exc:
+                print(f"dump-tree-series failed: {exc}", file=sys.stderr)
+                return 1
+            if path:
+                print(path)
+                return 0
+            print("KakaoTalk not running (or root not found)")
+            return 1
+
         if args.startup_launch:
             startup_trace["shell_wait_attempted"] = True
             shell_ready = StartupManager.wait_for_shell_ready()
@@ -270,7 +360,11 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         finalize_startup_trace(startup_trace, controller, root, check_tray_import=_check_tray_import)
         if args.startup_trace:
-            write_startup_trace(args.startup_trace, startup_trace)
+            try:
+                write_startup_trace(args.startup_trace, startup_trace)
+            except Exception as exc:
+                print(f"startup trace write failed: {exc}", file=sys.stderr)
+                return 1
         schedule_startup_exit(root, controller, args.exit_after_startup_ms)
 
         root.mainloop()
@@ -292,6 +386,11 @@ def main(argv: Optional[list[str]] = None) -> int:
                 engine.stop()
             except Exception as exc:
                 logger.warning("cleanup: engine.stop failed (%s)", exc.__class__.__name__)
+        if single_instance_guard is not None:
+            try:
+                single_instance_guard.release()
+            except Exception as exc:
+                logger.warning("cleanup: single instance release failed (%s)", exc.__class__.__name__)
 
 
 __all__ = ["main", "build_parser", "VERSION"]

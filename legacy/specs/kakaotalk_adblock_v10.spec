@@ -18,6 +18,8 @@ if not APP_ICON.exists():
     raise FileNotFoundError(f"Missing application icon: {APP_ICON}")
 
 # Compatibility shim: mirror the active v11 spec hidden-import surface.
+# New v11 mutex/text-result/startup-command parsing logic is stdlib/ctypes based,
+# so no extra hidden imports are required beyond the active v11 surface below.
 hiddenimports = [
     "psutil",
     "PIL",

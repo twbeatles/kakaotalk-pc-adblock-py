@@ -309,7 +309,7 @@ class WindowActionExecutor:
             host_hidden_popup = self._is_hidden_with_reason(host_identity, HIDE_REASON_POPUP)
             if not self.engine.api.is_window_visible(item.hwnd) and not host_hidden_popup:
                 continue
-            popup_guard = self.engine._signals.popup_host_guard_status(item.text)
+            popup_guard = self.engine._signals.popup_host_guard_status(item.text, text_known=item.text_known)
 
             for child, depth, class_name in self.engine._scanner.find_popup_matches(
                 item.hwnd,

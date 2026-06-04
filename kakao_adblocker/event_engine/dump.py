@@ -272,7 +272,7 @@ class WindowDumpBuilder:
                 continue
             if not self.engine.api.is_window_visible(item.hwnd):
                 continue
-            popup_guard = self.engine._signals.popup_host_guard_status(item.text)
+            popup_guard = self.engine._signals.popup_host_guard_status(item.text, text_known=item.text_known)
             for child, depth, class_name in self.engine._scanner.find_popup_matches(item.hwnd):
                 identity = (child, self.engine.api.get_window_thread_process_id(child), class_name)
                 host_identity = (item.hwnd, item.pid, item.class_name)
@@ -314,10 +314,12 @@ class WindowDumpBuilder:
     def dump_node(self, hwnd: int, depth: int, max_depth: int) -> Dict[str, object]:
         class_name = self.engine._get_class(hwnd)
         pid = self.engine.api.get_window_thread_process_id(hwnd)
+        text_result = self.engine._get_text_result(hwnd, pid, class_name)
         node: Dict[str, object] = {
             "hwnd": hwnd,
             "class": class_name,
-            "text": self.engine._get_text(hwnd, pid, class_name),
+            "text": text_result.text,
+            "text_known": text_result.known,
             "pid": pid,
             "visible": self.engine.api.is_window_visible(hwnd),
             "rect": self.engine.api.get_window_rect(hwnd),

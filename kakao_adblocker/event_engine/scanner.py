@@ -39,15 +39,17 @@ class WindowScanner:
             if pid not in pids:
                 return True
             class_name = self.engine._get_class(hwnd)
+            text_result = self.engine._get_text_result(hwnd, pid, class_name)
             result.append(
                 WindowInfo(
                     hwnd=hwnd,
                     pid=pid,
                     class_name=class_name,
-                    text=self.engine._get_text(hwnd, pid, class_name),
+                    text=text_result.text,
                     parent_hwnd=self.engine.api.get_parent(hwnd),
                     rect=self.engine.api.get_window_rect(hwnd) if include_geometry else None,
                     visible=bool(self.engine.api.is_window_visible(hwnd)) if include_geometry else False,
+                    text_known=text_result.known,
                 )
             )
             return True
@@ -116,14 +118,16 @@ class WindowScanner:
                     "confirmation": "rejected",
                 }
             class_name = self.engine._get_class(hwnd)
+            text_result = self.engine._get_text_result(hwnd, pid, class_name)
             item = WindowInfo(
                 hwnd=hwnd,
                 pid=pid,
                 class_name=class_name,
-                text=self.engine._get_text(hwnd, pid, class_name),
+                text=text_result.text,
                 parent_hwnd=self.engine.api.get_parent(hwnd),
                 rect=None,
                 visible=False,
+                text_known=text_result.known,
             )
         structural_candidate = self.structural_main_window_candidate(item)
         title_match = self.main_window_title_matches(item.text)

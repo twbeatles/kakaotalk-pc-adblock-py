@@ -31,6 +31,8 @@
 - 패키지 `kakao_adblocker`는 lazy export(`__getattr__`)를 사용해 초기 import 비용을 줄임
 - 정적 분석 기준선은 루트 `pyrightconfig.json`으로 고정되며 활성 범위는 `kakao_adblocker`, `tests`, `kakaotalk_layout_adblock_v11.py`
 - 권장 로컬 검증 명령은 `.\scripts\dev_check.ps1`이며 필요 시 `-SkipTests`로 타입 검사만 수행
+- 일반 UI 실행 경로는 Windows named mutex(`Local\KakaoTalkLayoutAdBlocker_v11`)로 단일 인스턴스만 허용한다. 중복 실행은 Tk/root, tray, engine을 시작하지 않고 stderr 메시지 후 종료 코드 `0`으로 끝낸다.
+- `--self-check`, `--dump-tree`, `--dump-tree-series`는 mutex를 획득하지 않는 진단 경로로 유지한다.
 
 ## 핵심 모듈
 
@@ -75,6 +77,7 @@
   - 숨김 창은 aggressive/legacy 시그니처에서 벗어나면 stale 상태로 남지 않고 자동 원복
   - `stop()` join timeout(2.0s) 시 상태/로그 경고 후 종료 절차 계속
   - 원복 실패 항목 스냅샷 보존으로 재시도 가능
+  - restore failure retry snapshot은 현재 프로세스 메모리 한정이며, 프로세스 재시작 이후 cross-process snapshot persistence는 구현하지 않는다
   - `EngineState.restore_failures`, `EngineState.last_restore_error` 상태 노출
   - `reset_restore_failures()`로 복원 실패 상태 수동 초기화 지원
   - `WindowIdentity(hwnd,pid,class)` 기반 text/hidden-window 캐시로 HWND 재사용 오동작 방지
@@ -82,6 +85,7 @@
   - empty `EVA_ChildWindow` close는 `SendMessageTimeoutW` 성공만으로 집계하지 않고 대상 창 소멸을 확인한 경우에만 `closed_windows`를 증가시킴
   - 스캔 경로는 경량 수집(`rect/visible` 미조회)으로 호출 부담 감소, `--dump-tree`만 상세 수집 사용
   - `--dump-tree-series`는 frame별 candidate decision preview를 함께 저장하며 popup dismiss host와 matched descendant를 모두 기록
+  - Win32 text-result 상태(`known/truncated/error`)를 반영하며, popup host text unknown은 empty-title allow가 아니라 guard blocked로 처리
   - PID 스캔/캐시 정리 주기 스로틀 적용
   - PID 스캔 경고(psutil 실패, tasklist fallback/실패)를 상태(`last_error`)와 로그에 반영
   - 기본 설정 기준 idle->active 복귀 목표 지연 약 200ms
@@ -106,12 +110,14 @@
   - 시작 시 `run_on_startup` 값을 레지스트리 상태로 1회 동기화
   - 시작 시 Run 등록이 enabled면 등록 명령 stale/missing 여부를 함께 검사하고 자동 복구를 시도
   - 소스 모드에서는 기존 Run 등록이 존재하는 `KakaoTalkLayoutAdBlocker_v11.exe --startup-launch --minimized` 패키지 EXE를 가리키면 healthy로 인정해 설치된 EXE 등록을 소스 스크립트 명령으로 자동 덮어쓰지 않음
+  - custom/unknown Run command는 자동 sync로 덮어쓰지 않고 `custom command left unchanged` 상태로 보존한다. 직접 UI 토글은 현재 실행 모드의 표준 command를 사용한다.
   - 상태 문자열에 마지막 오류/갱신시각 표시
   - 엔진 오류가 없을 때는 tray unavailable/startup rollback 같은 UI 계층 경고를 상태 문자열에 짧게 노출
   - 상태 문자열의 `메인윈도우`는 확정 count이며, 후보가 더 많을 때만 `후보 N`을 추가 표기
   - 상태 문자열의 `누적 숨김`/`누적 닫힘`/`누적 리사이즈` 라벨로 누적 카운터 의미를 명시
   - pystray/Pillow 지연 로딩 + 실패 TTL(30초) 자동 재시도
   - 트레이 콜백은 queue 디스패치(`_safe_after` -> main-thread drain)로 처리
+  - `_safe_after()`는 tray/worker thread에서 Tk/root 메서드를 호출하지 않고 queue put만 수행한다. `winfo_exists()`와 callback 실행 여부는 Tk main-thread drain에서만 판단한다.
   - 설정 저장 실패 시 토글 값 롤백(`enabled`/`run_on_startup`/`aggressive_mode`)
   - startup 토글에서 저장 실패 시 레지스트리 역롤백
   - aggressive mode 토글은 저장 성공 후 엔진에 즉시 반영
@@ -123,6 +129,10 @@
   - psutil 초기화/루프 실패 시 `tasklist` 폴백
   - `ProcessInspector.consume_last_warning()`로 PID 탐지 경고를 엔진 계층에서 소비 가능
   - `StartupManager.probe_access()`는 Run 레지스트리 읽기/쓰기 접근을 함께 점검
+  - Run command parsing은 Windows `CommandLineToArgvW`와 환경변수 확장을 우선 사용하고 실패 시 기존 fallback 파서를 사용한다
+  - `StartupManager.registration_health()`는 exact expected command, source-mode compatible packaged EXE를 healthy로 보고 custom command는 자동 복구 대상에서 제외한다
+  - dump/report/startup trace 파일 쓰기 실패는 traceback 대신 stderr와 종료 코드 `1`로 처리한다. `--dump-series-duration-ms` 상한은 `10000`, interval 하한은 `10`이다.
+  - hidden `--bootstrap-argv-report`는 인자 누락 시 종료 코드 `2`, 쓰기 실패 시 종료 코드 `1`을 반환한다.
   - 진단용 `ProcessInspector.probe_tasklist()`, `StartupManager.probe_access()` 제공
 
 ## 빌드 메모
@@ -131,6 +141,7 @@
 - 타입 경계 모듈 `kakao_adblocker.protocols`도 `hiddenimports`에 포함되어 onefile 모듈 누락 가능성을 줄임
 - 패키지 루트 `kakao_adblocker`도 `hiddenimports`에 포함되어 lazy export 패키지 접근 경로를 고정
 - `pywinauto`, `comtypes`는 active v11 런타임 바깥의 legacy/UIA 의존성이므로 `.spec`의 `excludes`로 유지
+- single-instance mutex, 동적 Win32 text-result, Run command parsing은 stdlib `ctypes` 기반 kernel32/user32/shell32 호출이므로 `.spec` hidden import 추가 대상이 아님
 - popup parity(`popup_ad_classes` / `AdFitWebView`), `SendMessageTimeoutW` close timeout, popup fallback 복원 추적은 기존 `config/event_engine/win32_api` 내부 구현이라 추가 PyInstaller hook 없이 현재 spec으로 포장 가능
 - empty `EVA_ChildWindow` subtree custom-scroll guard는 tick-local `event_engine` 내부 구현이라 추가 hidden import 없이 현재 spec으로 유지
 - `scripts/build_release.ps1`는 빌드 시작 시 `VERSION`과 `packaging/windows_version_info.txt` 동기화를 검증하고, 기본값으로 built EXE에 `--self-check --strict-self-check --json` packaged smoke를 1회 수행하며, core failure만 빌드 실패로 취급한다. 필요 시 `-SkipSmokeCheck`로 비활성화 가능
@@ -150,7 +161,9 @@
 8. 시작프로그램 토글은 레지스트리 갱신 성공 시에만 설정 파일에 반영하며, 소스 모드 자동 동기화는 유효한 패키지 EXE Run 등록을 덮어쓰지 않는다
 9. `--dump-tree`는 UI 모듈을 로딩하지 않는 경량 경로로 동작
 10. `--self-check`는 UI/엔진을 기동하지 않고 APPDATA/logging bootstrap/tasklist/레지스트리/Run 등록 명령/`tkinter/Tk`/트레이 import 환경 진단만 수행하며, 기본 모드의 트레이 import 실패는 optional이고 `--strict-self-check`에서는 core로 취급
-11. 시작 경고 상태 반영은 `복구 실패 > 자동 복구 > 기타` 우선순위로 1건 노출
+11. 일반 UI 실행은 named mutex로 단일 인스턴스만 허용하고, self-check/dump 계열 진단 명령은 mutex 밖에서 실행
+12. Win32 text read failure/unknown popup host는 empty title로 간주하지 않고 popup dismiss guard blocked로 처리
+13. 시작 경고 상태 반영은 `복구 실패 > 자동 복구 > 기타` 우선순위로 1건 노출
 
 ## 설정 파일
 
@@ -164,3 +177,4 @@
 - 원본 모놀리식: `legacy/kakao_adblocker/legacy.py`
 - deprecated 엔트리포인트: `legacy/카카오톡 광고제거 v10.0.py`
 - 레거시 스크립트는 보관 자산이며 활성 repo-wide `pyright` 범위에서는 제외; 기존 파일 상단 지시문은 개별 유지보수 시 참고용으로 유지
+- CodeGraph broad query는 `legacy/` symbol을 함께 노출할 수 있으므로 active v11 구현 판단은 `kakao_adblocker/`, `tests/`, `kakaotalk_layout_adblock_v11.py` 범위로 좁혀서 해석

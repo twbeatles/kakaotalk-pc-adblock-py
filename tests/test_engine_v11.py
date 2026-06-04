@@ -6,6 +6,7 @@ from pathlib import Path
 
 from kakao_adblocker.config import LayoutRulesV11, LayoutSettingsV11
 from kakao_adblocker.event_engine import LayoutOnlyEngine
+from kakao_adblocker.protocols import WindowTextResult
 from kakao_adblocker.win32_api import SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER
 
 
@@ -52,6 +53,9 @@ class FakeAPI:
 
     def get_window_text(self, hwnd):
         return self.windows[hwnd]["text"]
+
+    def get_window_text_result(self, hwnd):
+        return WindowTextResult(self.get_window_text(hwnd), known=True)
 
     def get_parent(self, hwnd):
         return self.windows[hwnd]["parent"]
@@ -615,6 +619,50 @@ def test_engine_popup_ad_class_with_non_empty_host_title_is_ignored_by_default()
 
     assert 240 not in api.hide_calls
     assert 241 not in api.hide_calls
+
+
+def test_engine_popup_ad_class_with_unknown_host_text_is_ignored_by_default():
+    api = FakeAPI()
+    api.windows[240] = {
+        "pid": 42,
+        "class": "EVA_Window",
+        "text": "",
+        "parent": 0,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.windows[241] = {
+        "pid": 42,
+        "class": "AdFitWebView",
+        "text": "",
+        "parent": 240,
+        "rect": (40, 40, 360, 240),
+        "visible": True,
+    }
+    api.children[240] = [241]
+
+    def get_window_text_result(hwnd):
+        if hwnd == 240:
+            return WindowTextResult("", known=False, error_code=5)
+        return WindowTextResult(api.get_window_text(hwnd), known=True)
+
+    api.get_window_text_result = get_window_text_result
+    settings = LayoutSettingsV11(enabled=True, poll_interval_ms=100, aggressive_mode=False)
+    rules = LayoutRulesV11(popup_ad_classes=["AdFitWebView"])
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        settings,
+        rules,
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    engine.scan_once()
+    engine.apply_once()
+
+    assert 240 not in api.hide_calls
+    assert 241 not in api.hide_calls
+    assert 240 not in [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
     assert api.send_calls == []
 
 

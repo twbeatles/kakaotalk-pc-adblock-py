@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Callable, Protocol
 
 Rect = tuple[int, int, int, int]
 WindowIdentity = tuple[int, int, str]
+
+
+@dataclass(frozen=True)
+class WindowTextResult:
+    text: str
+    known: bool = True
+    truncated: bool = False
+    error_code: int = 0
 
 
 class LayoutApiLike(Protocol):

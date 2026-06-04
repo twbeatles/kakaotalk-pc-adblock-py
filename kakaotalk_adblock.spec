@@ -17,6 +17,8 @@ if not APP_ICON.exists():
 # `--self-check` / `--strict-self-check` import pystray/PIL/tkinter and probe logging bootstrap.
 # Popup-removal parity, SendMessageTimeoutW close timeout, fallback restore tracking,
 # and popup host text guards live in existing stdlib/ctypes-backed modules.
+# Single-instance mutex, dynamic GetWindowTextLengthW text reads, and Windows
+# Run-command parsing use stdlib ctypes against kernel32/user32/shell32.
 # Empty `EVA_ChildWindow` subtree custom-scroll guard is tick-local inside existing `event_engine` modules.
 # Tray readiness/JSON self-heal/startup-warning/stale-hide recovery/logging-fallback changes are stdlib-only.
 # Core runtime modules are now packageized (`kakao_adblocker.app/config/event_engine`), so collect submodules for those packages too.

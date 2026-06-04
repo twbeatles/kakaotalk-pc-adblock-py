@@ -35,7 +35,7 @@ class FakeRoot:
     def state(self):
         return "normal" if self._visible else "withdrawn"
 
-    def winfo_exists(self):
+    def winfo_exists(self) -> bool:
         return True
 
     def quit(self):
@@ -548,6 +548,55 @@ def test_queue_bridge_processes_callbacks_in_order(monkeypatch):
     controller._drain_ui_queue()
 
     assert calls == ["a", "b", "c"]
+
+
+def test_safe_after_does_not_touch_root_from_worker_thread(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+
+    class ThreadSensitiveRoot(FakeRoot):
+        def __init__(self):
+            super().__init__()
+            self.exists_calls = 0
+
+        def winfo_exists(self):
+            self.exists_calls += 1
+            raise RuntimeError("wrong thread")
+
+    root = ThreadSensitiveRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    controller._ui_queue_running = True
+    calls = []
+
+    worker = threading.Thread(target=lambda: controller._safe_after(lambda: calls.append("queued")))
+    worker.start()
+    worker.join(timeout=2.0)
+
+    assert not worker.is_alive()
+    assert root.exists_calls == 0
+    assert controller._ui_queue.qsize() == 1
+
+
+def test_drain_ui_queue_drops_callbacks_when_root_is_unavailable(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+
+    class DestroyedRoot(FakeRoot):
+        def winfo_exists(self):
+            return False
+
+    root = DestroyedRoot()
+    engine = FakeEngine()
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+    controller._ui_queue_running = True
+    calls = []
+    controller._safe_after(lambda: calls.append("should-not-run"))
+
+    controller._drain_ui_queue()
+
+    assert calls == []
+    assert controller._ui_queue.empty()
 
 
 def test_menu_reset_restore_failures_calls_engine(monkeypatch):

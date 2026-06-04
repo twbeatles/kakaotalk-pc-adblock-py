@@ -16,10 +16,14 @@ def _write_bootstrap_report(argv: list[str]) -> int | None:
         return 2
     path = argv[index + 1]
     directory = os.path.dirname(path) or "."
-    os.makedirs(directory, exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
-        json.dump({"argv": argv}, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    try:
+        os.makedirs(directory, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump({"argv": argv}, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+    except Exception as exc:
+        print(f"bootstrap argv report write failed: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

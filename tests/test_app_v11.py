@@ -1,6 +1,7 @@
 import logging
 import json
 
+import kakaotalk_layout_adblock_v11 as bootstrap
 from kakao_adblocker import app
 from kakao_adblocker.config import LayoutRulesV11, LayoutSettingsV11
 
@@ -115,6 +116,13 @@ class FakeController:
         self.shutdown_called = True
 
 
+class FakeSingleInstanceGuard:
+    released = 0
+
+    def release(self):
+        FakeSingleInstanceGuard.released += 1
+
+
 def _patch_main_dependencies(monkeypatch, settings, load_warnings=None):
     monkeypatch.setattr(app.os, "name", "nt")
     monkeypatch.setattr(app, "ensure_runtime_files", lambda: None)
@@ -126,7 +134,9 @@ def _patch_main_dependencies(monkeypatch, settings, load_warnings=None):
     monkeypatch.setattr(app.tk, "Tk", FakeRoot)
     monkeypatch.setattr(app, "TrayController", FakeController)
     monkeypatch.setattr(app.StartupManager, "wait_for_shell_ready", staticmethod(lambda: True))
+    monkeypatch.setattr(app, "_acquire_single_instance_guard", lambda: FakeSingleInstanceGuard())
     FakeController.tray_available_default = True
+    FakeSingleInstanceGuard.released = 0
 
 
 def test_main_skips_startup_notice_when_minimized(monkeypatch):
@@ -153,6 +163,23 @@ def test_main_shows_startup_notice_when_not_minimized(monkeypatch):
     assert controller.started_with_minimized is False
     assert controller.notice_called is True
     assert controller.shown_called is True
+    assert FakeSingleInstanceGuard.released == 1
+
+
+def test_main_exits_when_single_instance_mutex_is_already_held(monkeypatch, capsys):
+    settings = LayoutSettingsV11(start_minimized=False)
+    _patch_main_dependencies(monkeypatch, settings)
+    monkeypatch.setattr(app, "_acquire_single_instance_guard", lambda: None)
+    FakeEngine.last_instance = None
+    FakeController.last_instance = None
+
+    rc = app.main([])
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "already running" in captured.err
+    assert FakeEngine.last_instance is None
+    assert FakeController.last_instance is None
 
 
 def test_main_ignores_minimized_when_tray_unavailable(monkeypatch):
@@ -279,6 +306,66 @@ def test_dump_tree_series_path_skips_ui_loading_and_passes_timing(monkeypatch):
     assert rc == 0
     assert called["ui_load"] == 0
     assert engine.calls == [(None, 250, 25)]
+
+
+def test_dump_tree_series_rejects_duration_above_cap(monkeypatch, capsys):
+    called = {"runtime": 0}
+    monkeypatch.setattr(app.os, "name", "nt")
+    monkeypatch.setattr(app, "ensure_runtime_files", lambda: called.__setitem__("runtime", called["runtime"] + 1))
+
+    rc = app.main(["--dump-tree-series", "--dump-series-duration-ms", "10001"])
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "dump-series-duration-ms" in captured.err
+    assert called["runtime"] == 0
+
+
+def test_dump_tree_series_clamps_interval_to_minimum(monkeypatch):
+    class DumpEngine:
+        def __init__(self, *_args, **_kwargs):
+            self.calls = []
+
+        def dump_window_tree_series(self, out_dir=None, duration_ms=1000, interval_ms=100):
+            self.calls.append((duration_ms, interval_ms))
+            return "C:\\temp\\dump-series.json"
+
+    engine = DumpEngine()
+    monkeypatch.setattr(app.os, "name", "nt")
+    monkeypatch.setattr(app, "ensure_runtime_files", lambda: None)
+    monkeypatch.setattr(app.LayoutSettingsV11, "load", classmethod(lambda _cls: LayoutSettingsV11()))
+    monkeypatch.setattr(app.LayoutRulesV11, "load", classmethod(lambda _cls: LayoutRulesV11()))
+    monkeypatch.setattr(app, "consume_load_warnings", lambda: [])
+    monkeypatch.setattr(app, "setup_logging", lambda _level: logging.getLogger("test"))
+    monkeypatch.setattr(app, "LayoutOnlyEngine", lambda *_args, **_kwargs: engine)
+
+    rc = app.main(["--dump-tree-series", "--dump-series-interval-ms", "1"])
+
+    assert rc == 0
+    assert engine.calls == [(1000, 10)]
+
+
+def test_dump_tree_write_failure_returns_error(monkeypatch, capsys):
+    class BrokenDumpEngine:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def dump_window_tree(self, out_dir=None):
+            raise OSError("denied")
+
+    monkeypatch.setattr(app.os, "name", "nt")
+    monkeypatch.setattr(app, "ensure_runtime_files", lambda: None)
+    monkeypatch.setattr(app.LayoutSettingsV11, "load", classmethod(lambda _cls: LayoutSettingsV11()))
+    monkeypatch.setattr(app.LayoutRulesV11, "load", classmethod(lambda _cls: LayoutRulesV11()))
+    monkeypatch.setattr(app, "consume_load_warnings", lambda: [])
+    monkeypatch.setattr(app, "setup_logging", lambda _level: logging.getLogger("test"))
+    monkeypatch.setattr(app, "LayoutOnlyEngine", BrokenDumpEngine)
+
+    rc = app.main(["--dump-tree"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "dump-tree failed" in captured.err
 
 
 def test_main_reports_first_load_warning_to_engine(monkeypatch):
@@ -485,6 +572,26 @@ def test_self_check_json_can_write_report_file(monkeypatch, capsys, tmp_path):
     assert stdout_payload == file_payload
 
 
+def test_self_check_report_write_failure_returns_error(monkeypatch, capsys, tmp_path):
+    report_dir = tmp_path / "not-a-dir"
+    report_dir.write_text("x", encoding="utf-8")
+    report_path = report_dir / "self-check.json"
+    monkeypatch.setattr(app.os, "name", "nt")
+    monkeypatch.setattr(app, "_check_appdata_writable", lambda: (True, "ok"))
+    monkeypatch.setattr(app, "probe_logging_setup", lambda: (True, "ok"))
+    monkeypatch.setattr(app.ProcessInspector, "probe_tasklist", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_access", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app.StartupManager, "probe_registration_command", staticmethod(lambda: (True, "ok")))
+    monkeypatch.setattr(app, "_check_tk_boot", lambda: (True, "ok"))
+    monkeypatch.setattr(app, "_check_tray_import", lambda: (True, "ok"))
+
+    rc = app.main(["--self-check", "--json", "--self-check-report", str(report_path)])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "self-check report write failed" in captured.err
+
+
 def test_self_check_json_report_skips_stdout_when_frozen(monkeypatch, capsys, tmp_path):
     report_path = tmp_path / "self-check.json"
     monkeypatch.setattr(app.os, "name", "nt")
@@ -542,6 +649,23 @@ def test_main_writes_startup_trace_and_schedules_exit_after_startup(monkeypatch,
     assert payload["window_hidden_after_start"] is True
     assert controller.root._after_calls[0][0] == 250
     assert controller.root._after_calls[0][1] == controller.shutdown
+
+
+def test_startup_trace_write_failure_returns_error_and_cleans_up(monkeypatch, tmp_path, capsys):
+    settings = LayoutSettingsV11(start_minimized=True)
+    _patch_main_dependencies(monkeypatch, settings)
+    trace_dir = tmp_path / "not-a-dir"
+    trace_dir.write_text("x", encoding="utf-8")
+    trace_path = trace_dir / "startup-trace.json"
+
+    rc = app.main(["--startup-trace", str(trace_path)])
+
+    captured = capsys.readouterr()
+    engine = FakeEngine.last_instance
+    assert rc == 1
+    assert "startup trace write failed" in captured.err
+    assert engine is not None
+    assert engine.stopped is True
 
 
 def test_self_check_fails_when_tk_boot_check_fails(monkeypatch):
@@ -614,6 +738,16 @@ def test_build_fallback_logger_closes_existing_handlers(monkeypatch):
     assert warning.startswith("logging init failed")
     assert old_handler.closed_called is True
     assert logger.propagate is False
+
+
+def test_bootstrap_report_write_failure_returns_error(monkeypatch, capsys):
+    monkeypatch.setattr(bootstrap.os, "makedirs", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("denied")))
+
+    rc = bootstrap._write_bootstrap_report(["--bootstrap-argv-report", "C:\\blocked\\argv.json"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "bootstrap argv report write failed" in captured.err
 
 
 def test_check_tk_boot_success(monkeypatch):

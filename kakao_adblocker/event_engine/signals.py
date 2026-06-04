@@ -24,7 +24,9 @@ class SignalEvaluator:
     def __init__(self, engine: "LayoutOnlyEngine") -> None:
         self.engine = engine
 
-    def popup_host_text_matches(self, text: str) -> bool:
+    def popup_host_text_matches(self, text: str, text_known: bool = True) -> bool:
+        if not text_known:
+            return False
         normalized = (text or "").strip()
         if not normalized:
             return True
@@ -33,8 +35,8 @@ class SignalEvaluator:
             return True
         return not self.engine.rules.popup_host_require_empty_text
 
-    def popup_host_guard_status(self, text: str) -> str:
-        return POPUP_GUARD_ALLOW if self.popup_host_text_matches(text) else POPUP_GUARD_BLOCKED
+    def popup_host_guard_status(self, text: str, text_known: bool = True) -> str:
+        return POPUP_GUARD_ALLOW if self.popup_host_text_matches(text, text_known=text_known) else POPUP_GUARD_BLOCKED
 
     def blank_signals(self) -> Dict[str, object]:
         return {

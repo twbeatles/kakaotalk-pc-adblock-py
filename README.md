@@ -8,6 +8,7 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - `blurfx/KakaoTalkAdBlock` 방식에 맞춰 레이아웃 엔진으로 재설계했습니다.
 - 폴링은 적응형으로 동작합니다: 활성 상태 `50ms`, 유휴 상태 `200ms`(기본값).
 - 기본 동작은 트레이 중심이며, 설정 창은 필요 시 열 수 있습니다.
+- 일반 UI 실행 경로는 Windows named mutex로 단일 인스턴스만 허용합니다. 이미 실행 중이면 stderr에 `already running` 계열 메시지를 출력하고 종료 코드 `0`으로 정상 종료합니다.
 
 ## 광고차단 알고리즘 고정 원칙
 
@@ -47,12 +48,15 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 시작프로그램 토글에서 레지스트리 변경 후 설정 저장이 실패하면 레지스트리도 즉시 역롤백해 상태 불일치를 줄입니다.
 - 앱 시작 시 `run_on_startup`은 레지스트리 상태를 기준으로 1회 동기화됩니다.
 - 앱 시작 시 Run 등록이 켜져 있으면 등록 명령을 함께 검증하고, stale/mismatch 상태면 `sync_registration_command()`로 자동 복구를 시도합니다.
+- Run 등록 명령 파싱은 Windows `CommandLineToArgvW`와 환경변수 확장을 우선 사용합니다.
 - 소스 모드 실행 중에도 기존 Run 등록이 존재하는 `KakaoTalkLayoutAdBlocker_v11.exe --startup-launch --minimized` 패키지 실행 파일을 가리키면 정상 등록으로 인정해, 설치된 EXE 등록을 소스 스크립트 명령으로 덮어쓰지 않습니다.
+- 앱이 생성한 형식이 아닌 custom Run command는 자동 동기화로 덮어쓰지 않고 `custom command left unchanged` 상태로 보존합니다. 사용자가 UI에서 시작프로그램 토글을 직접 변경할 때는 현재 실행 모드의 표준 command를 씁니다.
 - 시작 시 `run_on_startup` 동기화 저장이 실패해도 값 롤백 후 예외 없이 계속 동작합니다.
 - 차단 OFF 전환 또는 앱 종료 시, 이전에 숨김/이동한 광고 창은 즉시 원복됩니다.
 - 차단 OFF 상태에서는 watch/apply 루프를 모두 일시중단하고, ON 전환 시 즉시 재개합니다.
 - 차단 OFF/공격 모드 OFF/종료 복원은 scan/apply/window mutation과 single-flight로 조율되어 토글 직후 재은닉/추가 close가 발생하지 않도록 방어합니다.
 - 원복 실패 창은 스냅샷을 유지해 재시도하며, 상태 문자열에 `복원실패 N` 및 마지막 실패 사유를 노출합니다.
+- 원복 실패 재시도 스냅샷은 현재 프로세스 메모리 한정 정책입니다. 프로세스 종료를 넘어서는 cross-process snapshot persistence는 현재 범위에 포함하지 않습니다.
 - 트레이 메뉴에서 `복원 실패 초기화`를 실행해 `restore_failures` 상태를 수동 초기화할 수 있습니다.
 - `stop()`에서 watch thread join timeout(2초) 발생 시 경고를 상태/로그에 기록하고 종료 절차를 계속 진행합니다.
 - `stop()`이 시작되면 새 hide/close/apply 작업은 즉시 봉쇄되어, join timeout 이후에도 복원 직후 재은닉이 누적되지 않도록 정리했습니다.
@@ -64,7 +68,9 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - PID 탐지 경고(예: psutil 실패, tasklist fallback/실패)는 상태 문자열(`last_error`)과 로그에 반영됩니다.
 - `--dump-tree` 경로는 UI/트레이 모듈을 지연 로딩하여 시작 오버헤드를 최소화합니다.
 - `--self-check` 경로는 UI/엔진을 기동하지 않고 환경 진단(APPDATA, logging bootstrap, tasklist, 레지스트리, `tkinter/Tk` 부팅, 트레이 모듈 import)만 수행합니다.
+- `--self-check`, `--dump-tree`, `--dump-tree-series`는 단일 인스턴스 mutex를 획득하지 않는 진단 경로라 기존처럼 병렬 실행할 수 있습니다.
 - `--self-check`의 시작프로그램 진단은 Run 레지스트리 `읽기/쓰기` 접근과 Run 등록 명령 유효성을 함께 점검합니다.
+- `--self-check-report`, startup trace, bootstrap argv report, dump 파일 쓰기 실패는 traceback 대신 명확한 stderr 메시지와 종료 코드 `1`로 정리됩니다. hidden `--bootstrap-argv-report`는 인자 누락 시 기존처럼 종료 코드 `2`를 유지합니다.
 - 기본 `--self-check`에서 트레이 모듈 import 실패는 런타임 fallback 가능성을 반영해 optional로 보고, 릴리스/패키징 검증은 `--strict-self-check`로 core 실패 처리합니다.
 - 로그 파일 핸들러 초기화가 실패하면 stderr fallback logger로 계속 기동하고, 해당 경고를 상태 문자열에도 반영합니다.
 - UI 실행 경로는 `try/finally` cleanup으로 예외 발생 시에도 `stop_tray()/engine.stop()`를 보장합니다.
@@ -78,13 +84,14 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - rules 문자열(`main_window_titles`, `aggressive_ad_tokens`, `chrome_legacy_title_contains`)에 인코딩 이상 징후(mojibake/`�`)가 있으면 시작 시 경고를 기록합니다.
 - 엔진 내부 캐시/숨김 스냅샷 키를 `WindowIdentity(hwnd,pid,class)`로 강화해 HWND 재사용 시 오동작 가능성을 낮췄습니다.
 - 스캔 경로는 경량 수집(`rect/visible` 미조회)으로 최적화되고, 상세 수집은 `--dump-tree` 경로에만 적용됩니다.
-- 트레이 메뉴 콜백은 큐 디스패치(`_safe_after` -> main-thread drain)로 처리해 스레드 경합을 줄입니다.
+- 트레이 메뉴 콜백은 tray thread에서 Tk/root 메서드를 호출하지 않고 큐 디스패치(`_safe_after` -> main-thread drain)로 처리합니다. root 생존 여부와 callback 실행 가능 여부는 Tk main thread의 drain 단계에서만 확인합니다.
 - 트레이 모듈 import 실패 시 즉시 재시도하지 않고 TTL(기본 30초) 경과 후 자동 재시도합니다.
 - 상태 갱신 타이머(`_tick_status`)도 종료 경합에서 스케줄링 실패 예외를 전파하지 않습니다.
 - UI의 `로그 폴더 열기` / `GitHub 릴리스 열기`가 실패하면 상태 문자열에 짧은 경고를 노출합니다.
 - `--startup-launch` 경로는 셸 준비 대기를 `Tk()`/트레이 생성보다 먼저 수행해 로그인 직후 레이스를 줄입니다.
 - 엔진 시작 시 동기 warm-up(scan+apply 1회)을 먼저 수행해 초기 광고 깜빡임을 줄였습니다.
 - 빈 텍스트 캐시는 짧은 TTL로 빠르게 재조회해 초기 UI 구성 구간의 탐지 지연을 줄였습니다.
+- Win32 window text는 `GetWindowTextLengthW` 기반 동적 버퍼로 읽어 512자 고정 버퍼 잘림을 피합니다. 내부 text-result 상태로 `known/truncated/error`를 구분하며, popup host text가 unknown이면 empty-title allow로 보지 않고 guard blocked로 처리합니다.
 - 숨김/후보 aggressive subtree는 stale non-empty 텍스트 캐시를 우회해 재확인하므로 광고 토큰이 사라진 창을 더 빠르게 복원합니다.
 - empty `EVA_ChildWindow` custom scroll guard는 tick 단위로 재평가해 동적 subtree 변경을 놓치지 않습니다.
 - empty `EVA_ChildWindow` close는 `WM_CLOSE` 요청 성공만으로 누적 닫힘을 올리지 않고, 대상 창이 실제로 사라진 경우에만 닫힘으로 집계합니다.
@@ -143,6 +150,7 @@ python -m pyright
 `kakao_adblocker/protocols.py`는 런타임/테스트 더블 간 구조적 타입 경계를 정의하고,  
 `kakao_adblocker/__init__.pyi`는 lazy export 패키지의 정적 타입 가시성을 제공합니다.  
 `legacy/`는 보관 자산이므로 활성 Pylance 품질 게이트에서 제외합니다. 기존 파일 상단 `pyright` 지시문은 개별 유지보수 시 참고용으로만 유지합니다.
+CodeGraph broad query는 repository 전체 인덱스를 대상으로 하므로 `legacy/` symbol이 먼저 노출될 수 있습니다. active v11 분석은 `kakao_adblocker/`, `tests/`, `kakaotalk_layout_adblock_v11.py` 범위로 좁혀서 해석합니다.
 
 `scripts/dev_check.ps1`는 기본적으로 `python -m pyright` 후 `pytest -q --basetemp .pytest_tmp`를 순서대로 실행합니다.
 - `-SkipTests`: 타입 검사만 수행
@@ -180,6 +188,7 @@ python -m pyright
 - 출력 파일명: `window_dump_series_YYYYMMDD-HHMMSS.json`
 - 각 frame은 기존 window tree와 함께 `candidates[]` (`hwnd`, `pid`, `class`, `signals`, `decision`, `action`)를 기록합니다.
 - popup dismiss 후보는 matched popup descendant뿐 아니라 함께 처리되는 host window도 `candidates[]`에 기록합니다.
+- `--dump-series-duration-ms`는 최대 `10000`, `--dump-series-interval-ms`는 최소 `10`으로 제한됩니다. duration 상한 초과는 stderr 진단과 종료 코드 `2`로 실패합니다.
 
 기존 `adblock_settings.json`, `ad_patterns.json`, `blocked_domains.txt`는 읽지 않습니다.
 
@@ -222,6 +231,7 @@ pyinstaller kakaotalk_adblock.spec
 - `.spec`는 패키지 루트(`kakao_adblocker`)도 `hiddenimports`에 포함해 lazy export 경로와 패키징 도구 경로를 함께 안정화합니다.
 - `.spec`는 active v11 런타임에 없는 보관용 의존성(`pywinauto`, `comtypes`)을 `excludes`에 넣어 legacy 아카이브가 onefile 번들에 섞이지 않게 유지합니다.
 - legacy `kakaotalk_adblock_v10.spec`는 구 파일명 호환용 shim이며 active v11 spec의 hidden import/version/icon 구성을 따릅니다.
+- single-instance mutex, `GetWindowTextLengthW` 기반 text-result, `CommandLineToArgvW` 기반 Run command parsing은 모두 stdlib `ctypes`로 `kernel32/user32/shell32`를 호출하므로 `.spec` hidden import 추가가 필요 없습니다.
 - popup parity(`popup_ad_classes` / `AdFitWebView`), `SendMessageTimeoutW` close timeout, popup fallback 복원 추적은 기존 `config/event_engine/win32_api` 경로 내부 구현이라 추가 hidden import 없이 동일 spec으로 빌드됩니다.
 - empty `EVA_ChildWindow` subtree custom-scroll guard는 tick-local `event_engine` 내부 구현이라 `.spec` hidden import 집합 변경 없이 현재 spec으로 유지합니다.
 - `.spec`는 `packaging/windows_version_info.txt`를 버전 리소스로 포함해 `CompanyName/ProductName/FileVersion` 등 PE 메타데이터를 채웁니다.
@@ -242,6 +252,12 @@ self-check + 테스트:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\smoke_check.ps1 -RunTests
 ```
+
+릴리스 전 수동 live KakaoTalk 체크:
+
+1. KakaoTalk 실제 UI에서 `--dump-tree` 또는 `--dump-tree-series`를 저장합니다.
+2. popup host guard, legacy signature, aggressive token candidate가 기대한 frame에만 잡히는지 확인합니다.
+3. fixture 변경이 필요하면 dump 근거와 회귀 테스트를 함께 갱신합니다.
 
 ### 빌드 + 서명 파이프라인 (signtool)
 

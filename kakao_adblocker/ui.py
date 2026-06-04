@@ -184,6 +184,14 @@ class TrayController:
         processed = 0
         while self._ui_queue_running and processed < self._ui_queue_batch_size:
             try:
+                if hasattr(self.root, "winfo_exists") and not bool(self.root.winfo_exists()):
+                    self._discard_ui_queue()
+                    return
+            except Exception:
+                self.logger.debug("UI queue drain skipped because root state is unavailable")
+                self._discard_ui_queue()
+                return
+            try:
                 callback = self._ui_queue.get_nowait()
             except queue.Empty:
                 break
@@ -193,6 +201,13 @@ class TrayController:
                 self.logger.exception("Queued UI callback failed")
             processed += 1
         self._schedule_ui_queue_drain()
+
+    def _discard_ui_queue(self) -> None:
+        while True:
+            try:
+                self._ui_queue.get_nowait()
+            except queue.Empty:
+                return
 
     def _tick_status(self) -> None:
         self._update_status()
@@ -554,9 +569,6 @@ class TrayController:
         if not self._ui_queue_running:
             return
         try:
-            if hasattr(self.root, "winfo_exists"):
-                if not bool(self.root.winfo_exists()):
-                    return
             self._ui_queue.put_nowait(callback)
         except Exception:
             self.logger.debug("Tray callback queueing skipped")

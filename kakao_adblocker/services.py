@@ -164,9 +164,34 @@ class StartupManager:
             return None
 
     @staticmethod
+    def _split_command_windows(command: str) -> list[str]:
+        if os.name != "nt" or not command:
+            return []
+        try:
+            shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            argc = ctypes.c_int(0)
+            shell32.CommandLineToArgvW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+            shell32.CommandLineToArgvW.restype = ctypes.POINTER(wintypes.LPWSTR)
+            kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+            kernel32.LocalFree.restype = wintypes.HANDLE
+            argv = shell32.CommandLineToArgvW(command, ctypes.byref(argc))
+            if not argv:
+                return []
+            try:
+                return [argv[i] for i in range(max(argc.value, 0))]
+            finally:
+                kernel32.LocalFree(ctypes.cast(argv, ctypes.c_void_p))
+        except Exception:
+            return []
+
+    @staticmethod
     def _split_command(command: str) -> list[str]:
         if not command:
             return []
+        windows_tokens = StartupManager._split_command_windows(command)
+        if windows_tokens:
+            return windows_tokens
         try:
             tokens = shlex.split(command, posix=False)
         except Exception:
@@ -174,16 +199,35 @@ class StartupManager:
         return [token[1:-1] if len(token) >= 2 and token[0] == token[-1] == '"' else token for token in tokens]
 
     @staticmethod
+    def _expand_environment_strings(value: str) -> str:
+        if not value:
+            return value
+        if os.name == "nt":
+            try:
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel32.ExpandEnvironmentStringsW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+                kernel32.ExpandEnvironmentStringsW.restype = wintypes.DWORD
+                required = int(kernel32.ExpandEnvironmentStringsW(value, None, 0))
+                if required > 0:
+                    buf = ctypes.create_unicode_buffer(required)
+                    written = int(kernel32.ExpandEnvironmentStringsW(value, buf, required))
+                    if written > 0:
+                        return buf.value
+            except Exception:
+                pass
+        return os.path.expandvars(value)
+
+    @staticmethod
     def _command_target_paths(command: str) -> list[str]:
         tokens = StartupManager._split_command(command)
         if not tokens:
             return []
-        targets = [tokens[0]]
+        targets = [StartupManager._expand_environment_strings(tokens[0])]
         for token in tokens[1:]:
             normalized = token.lower()
             if normalized.startswith("-") or normalized.startswith("/"):
                 break
-            targets.append(token)
+            targets.append(StartupManager._expand_environment_strings(token))
             if len(targets) >= 2:
                 break
         return targets
@@ -195,7 +239,7 @@ class StartupManager:
         tokens = StartupManager._split_command(command)
         if not tokens:
             return False
-        target = Path(tokens[0])
+        target = Path(StartupManager._expand_environment_strings(tokens[0]))
         if target.name.lower() != StartupManager.PACKAGED_EXE_NAME.lower():
             return False
         if not target.exists():
@@ -203,26 +247,48 @@ class StartupManager:
         return tuple(tokens[1:]) == StartupManager.STARTUP_ARGS
 
     @staticmethod
+    def _is_managed_registration_command(command: str, expected: str) -> bool:
+        tokens = StartupManager._split_command(command)
+        expected_tokens = StartupManager._split_command(expected)
+        if not tokens:
+            return False
+        first_target = Path(StartupManager._expand_environment_strings(tokens[0]))
+        if first_target.name.lower() == StartupManager.PACKAGED_EXE_NAME.lower():
+            return True
+        if expected_tokens:
+            expected_first = Path(StartupManager._expand_environment_strings(expected_tokens[0]))
+            if first_target.name.lower() == expected_first.name.lower():
+                return True
+        if len(tokens) >= 2 and expected_tokens and len(expected_tokens) >= 2:
+            second_target = Path(StartupManager._expand_environment_strings(tokens[1]))
+            expected_second = Path(StartupManager._expand_environment_strings(expected_tokens[1]))
+            if second_target.name.lower() == expected_second.name.lower():
+                return True
+        return False
+
+    @staticmethod
     def registration_health() -> tuple[str, str]:
         command = StartupManager.get_registered_command()
         if not command:
             return "not_registered", "Run 등록 안 됨"
         expected = StartupManager.build_command()
+        if command == expected:
+            return "healthy", "Run 등록 명령 정상"
+        if StartupManager._is_source_mode_compatible_packaged_command(command):
+            return "healthy", "Run 등록 명령 정상(packaged EXE)"
+        if not StartupManager._is_managed_registration_command(command, expected):
+            return "custom_command", "custom command left unchanged"
         targets = StartupManager._command_target_paths(command)
         missing_targets = [target for target in targets if target and not Path(target).exists()]
         if missing_targets:
             missing_text = ", ".join(missing_targets)
             return "missing_target", f"Run 등록 대상 누락: {missing_text}"
-        if command != expected:
-            if StartupManager._is_source_mode_compatible_packaged_command(command):
-                return "healthy", "Run 등록 명령 정상(packaged EXE)"
-            return "stale_command", "Run 등록 명령 불일치"
-        return "healthy", "Run 등록 명령 정상"
+        return "stale_command", "Run 등록 명령 불일치"
 
     @staticmethod
     def probe_registration_command() -> Tuple[bool, str]:
         status, detail = StartupManager.registration_health()
-        return status in {"healthy", "not_registered"}, detail
+        return status in {"healthy", "not_registered", "custom_command"}, detail
 
     @staticmethod
     def sync_registration_command() -> bool:
@@ -234,6 +300,8 @@ class StartupManager:
         if current == expected or (
             current is not None and StartupManager._is_source_mode_compatible_packaged_command(current)
         ):
+            return True
+        if current is not None and not StartupManager._is_managed_registration_command(current, expected):
             return True
         try:
             key = winreg_mod.OpenKey(

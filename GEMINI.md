@@ -33,6 +33,9 @@
 - `--self-check` runs diagnostics only (no UI/tray/engine start)
 - default `--self-check` treats tray import failure as optional; `--strict-self-check` upgrades it to core failure for packaging/release validation
 - `--self-check --json` emits structured diagnostics, and packaged smoke can persist the same payload via an internal report path
+- normal UI launch is single-instance guarded by the Windows named mutex `Local\KakaoTalkLayoutAdBlocker_v11`; duplicate UI launches print an already-running message to stderr and exit `0` before Tk/tray/engine startup
+- `--self-check`, `--dump-tree`, and `--dump-tree-series` remain diagnostic paths and do not acquire the single-instance mutex
+- dump/report/startup-trace write failures return stderr plus exit `1`; `--dump-series-duration-ms` is capped at `10000` and `--dump-series-interval-ms` is floored at `10`
 - package `kakao_adblocker` exports are lazy-resolved via `__getattr__`
 - static analysis baseline is fixed by root `pyrightconfig.json`; active scope is `kakao_adblocker`, `tests`, and `kakaotalk_layout_adblock_v11.py`
 - preferred local verification entrypoint is `.\scripts\dev_check.ps1` (`-SkipTests` runs pyright only)
@@ -83,12 +86,14 @@
   - hidden windows are automatically restored when they no longer match aggressive/legacy signatures, preventing stale hides
   - stop join timeout (`2.0s`) emits state/log warning and proceeds with shutdown flow
   - restore failures keep snapshots for retry on next restore cycle
+  - restore-failure retry snapshots are process-local memory only; cross-process snapshot persistence after app restart is intentionally not implemented
   - `EngineState` includes `restore_failures` / `last_restore_error`
   - `WindowIdentity(hwnd,pid,class)` keyed caches protect against HWND reuse side effects
   - hidden/candidate aggressive subtree checks bypass stale non-empty text cache with fresh text reads so token disappearance can restore after `hidden_restore_grace_ms`
   - empty `EVA_ChildWindow` close is counted only after the target window actually disappears, not merely after a successful `SendMessageTimeoutW` request
   - watch scan path avoids geometry/visibility calls; dump-tree path still collects full geometry
   - `--dump-tree-series` stores frame-by-frame candidate decision previews alongside the tree dump, including both popup host and matched popup descendant candidates
+  - Win32 text-result metadata (`known/truncated/error`) is preserved internally; unknown popup host text is guard-blocked instead of treated as an empty-title allow
   - process-id scan and cache cleanup are interval-throttled for idle CPU savings
   - process scan warnings (psutil failure, tasklist fallback/failure) are propagated to status/log (`last_error`)
   - default idle->active detection target is <= 200ms
@@ -114,6 +119,7 @@
   - startup setting is synchronized from registry on app start
   - when Run registration is enabled, startup command health is probed and stale/missing command lines are auto-repaired when possible
   - in source mode, an existing Run registration that points to an existing `KakaoTalkLayoutAdBlocker_v11.exe --startup-launch --minimized` packaged EXE is treated as healthy and is not auto-overwritten with a source-script command
+  - custom/unknown Run commands are left unchanged by automatic sync and reported as `custom command left unchanged`; explicit UI toggles still write the current-mode standard command
   - startup toggle rolls registry back on settings-save failure
   - setting save failures roll back values (`enabled`, `run_on_startup`, `aggressive_mode`)
   - aggressive mode toggle is pushed into the engine immediately after a successful save
@@ -126,6 +132,7 @@
   - controller-local UI warnings (`tray unavailable`, startup registry rollback issues) surface when engine error is absent
   - pystray/Pillow are loaded lazily and retried after TTL (30s) when import fails
   - tray callbacks are queued and drained on Tk main thread
+  - `_safe_after()` does not call Tk/root methods from tray or worker threads; root liveness and callback execution are checked only during Tk main-thread drain
   - status tick scheduling (`root.after`) also swallows shutdown-race errors
   - startup load-warning propagation uses priority (`heal failure > auto-heal > others`)
 - `services.py`
@@ -134,11 +141,13 @@
   - psutil init/loop failure falls back to `tasklist` scan
   - `ProcessInspector.consume_last_warning()` provides scan diagnostics to the engine
   - `StartupManager.probe_access()` validates both Run-registry read and write access
-  - `StartupManager.registration_health()` classifies `not_registered`, `healthy`, `stale_command`, `missing_target`
+  - startup Run command parsing prefers Windows `CommandLineToArgvW` plus environment-variable expansion, with the older parser retained as fallback
+  - `StartupManager.registration_health()` classifies `not_registered`, `healthy`, `stale_command`, `missing_target`, `custom_command`
   - source-mode registration health accepts the compatible packaged-EXE Run command above; frozen mode still requires the current EXE command
   - diagnostics helpers: `ProcessInspector.probe_tasklist()`, `StartupManager.probe_access()`, `StartupManager.probe_registration_command()`
 - `win32_api.py`
   - user32 API bindings explicitly define `argtypes/restype`
+  - `get_window_text_result()` reads text with a `GetWindowTextLengthW`-sized dynamic buffer and reports known/truncated/error state; `get_window_text()` remains the compatible string-returning wrapper
   - exposes `get_last_error()` for debug telemetry on ShowWindow/SetWindowPos failures
 
 ## Key Resize Rules
@@ -167,6 +176,7 @@
 - `kakaotalk_adblock.spec` also includes `collect_submodules("kakao_adblocker.app")`, `collect_submodules("kakao_adblocker.config")`, and `collect_submodules("kakao_adblocker.event_engine")` so packageized runtime internals are bundled in onefile builds.
 - `kakaotalk_adblock.spec` includes package root `kakao_adblocker` so lazy exports remain importable in onefile builds and tooling paths.
 - `kakaotalk_adblock.spec` excludes `pywinauto` and `comtypes` so archived legacy/UIA-only dependencies do not leak into the active v11 onefile bundle.
+- single-instance mutex handling, dynamic Win32 text-result reads, and Startup Run command parsing are stdlib `ctypes` calls into kernel32/user32/shell32, so they do not require additional PyInstaller hidden imports.
 - popup parity (`popup_ad_classes` / `AdFitWebView`), `SendMessageTimeoutW` close timeout, popup fallback restore tracking, popup host guards, and logging fallback/probe stay inside existing modules, so no extra hidden-import or hook change is required.
 - the empty `EVA_ChildWindow` subtree custom-scroll guard remains tick-local inside `event_engine`, so current hidden-import coverage remains sufficient.
 - `--self-check` / `--strict-self-check` exercise dynamic Tk diagnostics and logging bootstrap probe, so explicit `tkinter` hidden imports keep onefile packaging deterministic.
@@ -191,3 +201,4 @@ Legacy code/assets were moved under `legacy/`:
 - `legacy/scripts/*`
 - `legacy/카카오톡 광고제거 v10.0.py`
 - archived legacy files stay outside the active repo-wide `pyright` scope; existing per-file directives remain for ad hoc maintenance
+- CodeGraph broad queries can still surface `legacy/` symbols, so active v11 analysis should be narrowed to `kakao_adblocker/`, `tests/`, and `kakaotalk_layout_adblock_v11.py`

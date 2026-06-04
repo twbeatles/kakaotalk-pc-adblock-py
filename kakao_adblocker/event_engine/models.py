@@ -16,6 +16,7 @@ class WindowInfo:
     parent_hwnd: int
     rect: Optional[Rect]
     visible: bool
+    text_known: bool = True
 
 
 @dataclass

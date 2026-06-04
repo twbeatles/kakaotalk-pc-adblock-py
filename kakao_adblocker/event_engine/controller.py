@@ -8,7 +8,7 @@ from typing import Callable, Dict, Optional, Set, Tuple
 
 from ..config import LayoutRulesV11, LayoutSettingsV11, get_runtime_paths
 from ..layout_engine import LayoutEngine
-from ..protocols import JoinableThreadLike, WindowIdentity, Win32ApiLike
+from ..protocols import JoinableThreadLike, WindowIdentity, WindowTextResult, Win32ApiLike
 from ..services import ProcessInspector
 from ..win32_api import Win32API
 from .actions import WindowActionExecutor
@@ -337,6 +337,20 @@ class LayoutOnlyEngine:
             cache[key] = (now, value)
             return value
 
+    def _get_cached_text_result(self, key: WindowIdentity, loader: Callable[[], WindowTextResult]) -> WindowTextResult:
+        now = time.time()
+        with self._cache_lock:
+            hit = self._text_cache.get(key)
+            if hit:
+                ts, cached_value = hit
+                ttl = self.rules.cache_ttl_seconds if cached_value else self._empty_text_cache_ttl_seconds()
+                if (now - ts) <= ttl:
+                    return WindowTextResult(cached_value, known=True)
+            result = loader()
+            if result.known:
+                self._text_cache[key] = (now, result.text)
+            return result
+
     def _empty_text_cache_ttl_seconds(self) -> float:
         active_ttl = max(self._active_poll_interval_seconds(), 0.05)
         if self._is_burst_mode_active():
@@ -351,15 +365,44 @@ class LayoutOnlyEngine:
         return (hwnd, resolved_pid, resolved_class)
 
     def _get_text(self, hwnd: int, pid: Optional[int] = None, class_name: Optional[str] = None) -> str:
+        return self._get_text_result(hwnd, pid, class_name).text
+
+    def _get_text_result(self, hwnd: int, pid: Optional[int] = None, class_name: Optional[str] = None) -> WindowTextResult:
         identity = self._window_identity(hwnd, pid, class_name)
+        loader = getattr(self.api, "get_window_text_result", None)
+
+        def load_result() -> WindowTextResult:
+            if callable(loader):
+                result = loader(hwnd)
+                if isinstance(result, WindowTextResult):
+                    return result
+                text = str(getattr(result, "text", "") or "")
+                known = bool(getattr(result, "known", True))
+                truncated = bool(getattr(result, "truncated", False))
+                error_code = int(getattr(result, "error_code", 0) or 0)
+                return WindowTextResult(text, known=known, truncated=truncated, error_code=error_code)
+            return WindowTextResult(self.api.get_window_text(hwnd) or "", known=True)
+
         if identity is None:
-            return self.api.get_window_text(hwnd) or ""
-        return self._get_cached(self._text_cache, identity, lambda: self.api.get_window_text(hwnd))
+            return load_result()
+        return self._get_cached_text_result(identity, load_result)
 
     def _get_text_fresh(self, hwnd: int, pid: Optional[int] = None, class_name: Optional[str] = None) -> str:
-        value = self.api.get_window_text(hwnd) or ""
+        loader = getattr(self.api, "get_window_text_result", None)
+        if callable(loader):
+            result = loader(hwnd)
+            if not isinstance(result, WindowTextResult):
+                result = WindowTextResult(
+                    str(getattr(result, "text", "") or ""),
+                    known=bool(getattr(result, "known", True)),
+                    truncated=bool(getattr(result, "truncated", False)),
+                    error_code=int(getattr(result, "error_code", 0) or 0),
+                )
+        else:
+            result = WindowTextResult(self.api.get_window_text(hwnd) or "", known=True)
+        value = result.text
         identity = self._window_identity(hwnd, pid, class_name)
-        if identity is not None:
+        if identity is not None and result.known:
             with self._cache_lock:
                 self._text_cache[identity] = (time.time(), value)
         return value

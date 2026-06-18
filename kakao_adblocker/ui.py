@@ -271,6 +271,14 @@ class TrayController:
         )
         if candidate_main_count > state.main_window_count:
             base = f"{base} | 후보 {candidate_main_count}"
+        ad_candidate_count = int(getattr(state, "ad_candidate_count", 0) or 0)
+        if ad_candidate_count > 0:
+            base = f"{base} | 광고후보 {ad_candidate_count}"
+            if state.enabled and state.hidden_windows == 0 and state.closed_windows == 0:
+                # Ad candidates detected but nothing has ever been hidden/closed
+                # this session: a hint that blocking may not be taking effect
+                # (e.g. KakaoTalk changed its ad window structure).
+                base = f"{base}(미차단?)"
         popup_close_requests = int(getattr(state, "popup_close_requests", 0) or 0)
         popup_hide_fallbacks = int(getattr(state, "popup_hide_fallbacks", 0) or 0)
         popup_zero_size_fallbacks = int(getattr(state, "popup_zero_size_fallbacks", 0) or 0)

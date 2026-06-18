@@ -23,6 +23,8 @@
 - popup class 탐색은 direct child만 보지 않고 `popup_search_depth` 범위의 descendant까지 허용하되, 기본값은 `2`를 넘기지 않는다.
 - 알고리즘 자체를 바꾸려면 반드시 실제 `--dump-tree`/`--dump-tree-series` 근거, fixture 또는 회귀 테스트, 관련 문서 갱신을 함께 남긴다.
 - 가능하면 rules/fixture/test를 조정하고, 엔진 로직 변경은 실제 회귀가 확인된 경우로 제한한다.
+- 실측 기준(2026-06-17, KakaoTalk `26.5.0.5163`): 메인 배너 광고는 **owner=메인창인 owned `WS_POPUP`**(`EVA_Window_Dblclk`, 빈 텍스트) 안에 `Chrome_WidgetWin_1`/`Chrome Legacy Window`(CEF)를 갖는다. 엔진은 `GetParent`가 owned 윈도우에 owner(=메인 핸들)를 반환하는 특성 덕에 "메인의 빈 텍스트 자식 후보" 분기로 등록 후 legacy signature로 hide한다(`parent==0` 분기 아님). 잘 동작하지만 Win32 동작에 기댄 부하지지 경로이므로 추측 변경 금지, `tests/fixtures/window_dumps/owned_popup_legacy_ad.json` 골든 회귀로 고정한다.
+- `--dump-tree`의 `windows` 트리는 owned popup(광고 호스트)을 누락한다. 광고 구조 판단은 정적 트리 1장이 아니라 series `candidates[]` 또는 실제 엔진 실행으로 한다.
 
 ## 엔트리포인트
 

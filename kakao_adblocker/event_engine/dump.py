@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Dict, List, Set, Tuple, cast
 
 from ..protocols import Rect, WindowIdentity
 from .constants import POPUP_GUARD_ALLOW
-from .models import AdDecision, CandidateState
+from .models import AdDecision, CandidateState, WindowInfo
 
 if TYPE_CHECKING:
     from .controller import LayoutOnlyEngine
@@ -82,14 +82,26 @@ class WindowDumpBuilder:
         return path
 
     def build_window_dump_payload(self, pids: Set[int]) -> Dict[str, object]:
-        roots = self.engine._scanner.collect_windows(pids, include_geometry=True)
-        roots = [w for w in roots if w.parent_hwnd == 0]
+        top_level = self.engine._scanner.collect_windows(pids, include_geometry=True)
+        roots = [w for w in top_level if w.parent_hwnd == 0]
+        # Owned top-level popups (GetParent returns a non-zero owner) such as the
+        # KakaoTalk 26.5 banner ad host are enumerated by EnumWindows but are NOT
+        # children of any node in `windows`, so without this section they vanish
+        # from the dump entirely (which previously hid the very window the engine
+        # acts on). Surface them separately, annotated with their owner.
+        owned = [w for w in top_level if w.parent_hwnd != 0]
         return {
             "timestamp": datetime.now().isoformat(),
             "pids": sorted(pids),
             "main_windows": self.inspect_main_windows_for_dump(pids),
             "windows": [self.dump_node(root.hwnd, 0, 6) for root in roots],
+            "owned_popups": [self._dump_owned_popup(info) for info in owned],
         }
+
+    def _dump_owned_popup(self, info: WindowInfo) -> Dict[str, object]:
+        node = self.dump_node(info.hwnd, 0, 6)
+        node["owner"] = info.parent_hwnd
+        return node
 
     def inspect_main_windows_for_dump(self, pids: Set[int]) -> List[Dict[str, object]]:
         windows = self.engine._scanner.collect_windows(pids) if pids else []

@@ -67,6 +67,36 @@ def test_resize_skipped_when_already_same_size():
     assert api.calls == []
 
 
+def test_resize_uses_parent_relative_size_for_live_2026_geometry():
+    """Documents the resize formula against the real KakaoTalk 26.5 main window
+    geometry (parent [1337,0,1920,1032], OnlineMainView top offset 38).
+
+    The formula is width=parent_w-2, height=parent_h-31, applied with SWP_NOMOVE
+    (top-left unchanged). Because the child top is 38 (not 0), the resulting
+    height (1001) plus the offset reaches 1039, i.e. ~7px past the parent bottom
+    (1032). This is a latent magic-number/chrome coupling (PROJECT_AUDIT.md 3.4):
+    today it is harmless, but it is asserted here so a future change that alters
+    the formula or the assumed chrome is caught.
+    """
+    api = DummyAPI()
+    rules = LayoutRulesV11()
+    engine = LayoutEngine(api, rules, logging.getLogger("test"))
+
+    parent_rect = (1337, 0, 1920, 1032)  # width 583, height 1032
+    ok = engine.apply_view_resize(
+        child_hwnd=591132,
+        window_text="OnlineMainView_0x00090512",
+        parent_rect=parent_rect,
+    )
+
+    assert ok is True
+    assert len(api.calls) == 1
+    _hwnd, _x, _y, width, height, flags = api.calls[0]
+    assert width == 581  # parent width 583 - layout_shadow_padding_px (2)
+    assert height == 1001  # parent height 1032 - main_view_padding_px (31)
+    assert flags == RESIZE_FLAGS
+
+
 def test_aggressive_banner_heuristic():
     api = DummyAPI()
     rules = LayoutRulesV11()

@@ -36,7 +36,9 @@ class FakeAPI:
 
     def enum_windows(self, callback):
         for hwnd, info in sorted(self.windows.items()):
-            if info["parent"] == 0:
+            # Top-level windows include un-parented windows and owned popups
+            # (owner set), mirroring Win32 EnumWindows.
+            if info["parent"] == 0 or info.get("owner"):
                 callback(hwnd)
         return True
 
@@ -58,7 +60,8 @@ class FakeAPI:
         return WindowTextResult(self.get_window_text(hwnd), known=True)
 
     def get_parent(self, hwnd):
-        return self.windows[hwnd]["parent"]
+        # Win32 GetParent returns the owner for owned top-level windows.
+        return self.windows[hwnd].get("owner") or self.windows[hwnd]["parent"]
 
     def get_window_rect(self, hwnd):
         self.rect_calls += 1
@@ -1962,6 +1965,49 @@ def test_engine_dump_tree_series_includes_popup_host_and_descendant_candidates(t
         if candidate["action"] == "dismiss_popup"
     }
     assert {240, 241}.issubset(popup_dismiss_hwnds)
+
+
+def test_engine_dump_tree_includes_owned_popup_ad_host(tmp_path):
+    """The owned-popup banner ad host (GetParent -> owner) must appear in the
+    dump's `owned_popups` section, not vanish like it does from `windows`."""
+    api = FakeAPI()
+    api.windows[527936] = {
+        "pid": 42,
+        "class": "EVA_Window_Dblclk",
+        "text": "",
+        "parent": 0,
+        "owner": 100,
+        "rect": (1344, 912, 1913, 1025),
+        "visible": True,
+    }
+    api.windows[5508836] = {
+        "pid": 42,
+        "class": "Chrome_RenderWidgetHostHWND",
+        "text": "Chrome Legacy Window",
+        "parent": 527936,
+        "rect": (1344, 912, 1913, 1025),
+        "visible": True,
+    }
+    api.children[527936] = [5508836]
+    engine = LayoutOnlyEngine(
+        logging.getLogger("test"),
+        LayoutSettingsV11(enabled=True, aggressive_mode=True),
+        LayoutRulesV11(),
+        api=api,
+        process_ids_provider=lambda _name: {42},
+    )
+
+    path = engine.dump_window_tree(out_dir=str(tmp_path))
+
+    assert path is not None
+    payload = json.loads((tmp_path / Path(path).name).read_text(encoding="utf-8"))
+    owned = payload.get("owned_popups", [])
+    host = next((node for node in owned if node["hwnd"] == 527936), None)
+    assert host is not None
+    assert host["owner"] == 100
+    assert any(child["text"] == "Chrome Legacy Window" for child in host["children"])
+    # The owned popup must NOT also appear as a top-level node in `windows`.
+    assert all(node["hwnd"] != 527936 for node in payload["windows"])
 
 
 def test_engine_dump_tree_records_child_signature_fallback_context(tmp_path):

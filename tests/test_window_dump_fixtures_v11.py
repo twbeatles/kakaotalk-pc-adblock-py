@@ -23,11 +23,17 @@ class FixtureAPI:
     def _load_node(self, node: dict, parent: int) -> None:
         hwnd = int(node["hwnd"])
         rect = tuple(node["rect"]) if node.get("rect") is not None else None
+        # "owner" models an owned top-level WS_POPUP window (e.g. the KakaoTalk
+        # 26.5 banner ad host): it is still enumerated as top-level by
+        # enum_windows (structural parent stays 0) and is NOT in the owner's
+        # EnumChildWindows, but Win32 GetParent returns the owner handle.
+        owner = int(node.get("owner", 0))
         self.windows[hwnd] = {
             "pid": int(node["pid"]),
             "class": str(node["class"]),
             "text": str(node["text"]),
             "parent": parent,
+            "owner": owner,
             "rect": rect,
             "visible": bool(node["visible"]),
         }
@@ -57,7 +63,10 @@ class FixtureAPI:
         return self.windows[hwnd]["text"]
 
     def get_parent(self, hwnd):
-        return self.windows[hwnd]["parent"]
+        # Win32 GetParent returns the owner for top-level owned (WS_POPUP)
+        # windows, and the parent for child windows.
+        info = self.windows[hwnd]
+        return info["owner"] or info["parent"]
 
     def get_window_rect(self, hwnd):
         return self.windows[hwnd]["rect"]
@@ -211,6 +220,43 @@ def test_window_dump_fixture_guarded_popup_adfit_viewer_is_ignored():
 
     assert api.hide_calls == []
     assert api.send_calls == []
+
+
+def test_window_dump_fixture_owned_popup_legacy_ad_is_hidden():
+    """Ground-truth regression: KakaoTalk 26.5 renders the banner ad as an
+    OWNED WS_POPUP window (owner = main window), so GetParent returns the main
+    handle and the engine classifies it via the empty-text child-of-main branch,
+    then hides it by legacy signature. If this breaks, ad blocking is broken on
+    the current client. See PROJECT_AUDIT.md and owned_popup_legacy_ad.json."""
+    _payload, api, engine = _run_fixture(
+        "owned_popup_legacy_ad.json",
+        settings=LayoutSettingsV11(enabled=True, aggressive_mode=True),
+    )
+
+    assert engine.state.main_window_count == 1
+    # The owned popup is enumerated top-level but resolves to the main window
+    # as its owner, so it is tracked as an ad sub-window candidate.
+    assert 527936 in engine._ad_subwindow_candidates
+    # The legacy "Chrome Legacy Window" descendant triggers a strong hide.
+    assert 527936 in api.hide_calls
+    assert any(identity[0] == 527936 for identity in engine._hidden_windows)
+    # The non-ad main view child must never be closed.
+    closed_handles = [hwnd for hwnd, _msg, _wparam, _lparam in api.send_calls]
+    assert 591132 not in closed_handles
+
+
+def test_window_dump_fixture_owned_popup_legacy_ad_is_restored_when_disabled():
+    """Disabling blocking must restore the previously hidden owned-popup ad."""
+    _payload, api, engine = _run_fixture(
+        "owned_popup_legacy_ad.json",
+        settings=LayoutSettingsV11(enabled=True, aggressive_mode=True),
+    )
+    assert 527936 in api.hide_calls
+
+    engine.set_enabled(False)
+    engine.stop()
+
+    assert 527936 in api.show_calls
 
 
 def test_window_dump_fixture_non_main_media_viewer_is_ignored():

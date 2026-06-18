@@ -1,0 +1,70 @@
+{
+  "_comment": "Ground-truth structure captured from installed KakaoTalk 26.5.0.5163 on 2026-06-17. The banner ad is an OWNED WS_POPUP window (owner = main window), NOT a child of the main window and NOT a parent==0 window. GetParent returns the owner (main handle), which is why the engine classifies it via the 'empty-text child of main' branch and then hides it by legacy signature. This fixture is a regression guard: if the engine stops hiding hwnd 527936, KakaoTalk's ad structure changed and blocking is broken.",
+  "timestamp": "2026-06-17T20:22:57",
+  "pids": [30948],
+  "windows": [
+    {
+      "hwnd": 526240,
+      "class": "EVA_Window_Dblclk",
+      "text": "카카오톡",
+      "pid": 30948,
+      "visible": true,
+      "rect": [1337, 0, 1920, 1032],
+      "depth": 0,
+      "children": [
+        {
+          "hwnd": 591132,
+          "class": "EVA_ChildWindow",
+          "text": "OnlineMainView_0x00090512",
+          "pid": 30948,
+          "visible": true,
+          "rect": [1338, 38, 1919, 1039],
+          "depth": 1,
+          "children": []
+        }
+      ]
+    },
+    {
+      "hwnd": 527936,
+      "class": "EVA_Window_Dblclk",
+      "text": "",
+      "owner": 526240,
+      "pid": 30948,
+      "visible": true,
+      "rect": [1344, 912, 1913, 1025],
+      "depth": 0,
+      "children": [
+        {
+          "hwnd": 4657842,
+          "class": "Chrome_WidgetWin_0",
+          "text": "",
+          "pid": 30948,
+          "visible": true,
+          "rect": [1344, 912, 1913, 1025],
+          "depth": 1,
+          "children": []
+        },
+        {
+          "hwnd": 2032986,
+          "class": "Chrome_WidgetWin_1",
+          "text": "AdFit NAS Advertisement",
+          "pid": 34688,
+          "visible": true,
+          "rect": [1344, 912, 1913, 1025],
+          "depth": 1,
+          "children": []
+        },
+        {
+          "hwnd": 5508836,
+          "class": "Chrome_RenderWidgetHostHWND",
+          "text": "Chrome Legacy Window",
+          "pid": 34688,
+          "visible": true,
+          "rect": [1344, 912, 1913, 1025],
+          "depth": 1,
+          "children": []
+        }
+      ]
+    }
+  ]
+}

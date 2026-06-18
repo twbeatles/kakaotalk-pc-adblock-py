@@ -101,6 +101,15 @@ Windows용 카카오톡 광고 레이아웃 정리 도구입니다.
 - 상태 문자열의 `숨김`/`닫힘`/`리사이즈` 수치는 누적값이며, UI/트레이 라벨도 `누적 숨김`/`누적 닫힘`/`누적 리사이즈`로 명시됩니다.
 - 핵심 런타임 모듈은 단일 파일이 아니라 패키지로 정리되었습니다: `kakao_adblocker/app/`, `kakao_adblocker/config/`, `kakao_adblocker/event_engine/`. 기존 import 경로(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`)는 그대로 유지됩니다.
 
+## 지원 버전 / 광고 탐지 경로 (실측 기준)
+
+- 2026-06-17 기준, 설치 버전 **KakaoTalk `26.5.0.5163`(2025+ 리디자인 계열)** 에서 메인 배너 광고 차단이 정상 동작함을 라이브 엔진 실행으로 확인했습니다.
+- 26.5의 배너 광고는 **owner=메인창인 owned `WS_POPUP` 윈도우**(`EVA_Window_Dblclk`, 빈 텍스트)로 렌더되며, 내부에 `Chrome_WidgetWin_1`("AdFit NAS Advertisement")과 `Chrome Legacy Window`(CEF) 자식을 가집니다.
+- 엔진은 이 광고창을 다음 경로로 잡습니다: Win32 `GetParent`가 owned 윈도우에 대해 *owner(=메인 핸들)* 를 반환 → scanner의 "메인의 빈 텍스트 자식 후보" 분기로 등록 → `Chrome Legacy Window` legacy signature 매칭 → hide. 이는 `parent==0` legacy 분기가 아니라 owner 경유 경로입니다.
+- 위 동작은 Win32 `GetParent`의 owned-window 반환 특성에 의존하는 **부하지지(load-bearing) 경로**입니다. 카카오톡이 광고창의 소유관계/클래스를 바꾸면 조용히 깨질 수 있으므로, 회귀 픽스처(`tests/fixtures/window_dumps/owned_popup_legacy_ad.json`)와 테스트로 고정해 두었습니다.
+- 진단: 광고 후보가 발견됐는데 세션 누적 숨김/닫힘이 0이면 트레이 상태에 `광고후보 N(미차단?)`으로 표시되어 차단 미작동을 조기에 알 수 있습니다.
+- 주의: `--dump-tree`/`--dump-tree-series`의 `windows` 트리는 owned popup(광고 호스트)을 누락합니다. 광고 구조 확인은 정적 트리 1장이 아니라 series의 `candidates[]` 또는 실제 엔진 실행으로 검증하세요.
+
 ## 실행
 
 ```bash
@@ -255,9 +264,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\smoke_check.ps1 -RunTests
 
 릴리스 전 수동 live KakaoTalk 체크:
 
-1. KakaoTalk 실제 UI에서 `--dump-tree` 또는 `--dump-tree-series`를 저장합니다.
+1. **광고가 실제로 노출된 상태**(친구탭 하단/피드 배너)에서 `--dump-tree-series`를 저장합니다. 광고 미로드 상태의 정적 트리 1장만으로 판단하지 않습니다(트리는 owned popup 광고 호스트를 누락합니다 — series의 `candidates[]`와 `owned_popups` 섹션을 함께 봅니다).
 2. popup host guard, legacy signature, aggressive token candidate가 기대한 frame에만 잡히는지 확인합니다.
-3. fixture 변경이 필요하면 dump 근거와 회귀 테스트를 함께 갱신합니다.
+3. 차단이 실제로 적용되는지 확인합니다: 광고가 뜬 상태에서 차단 ON일 때 배너가 사라지고, OFF/종료 시 복원되는지, 트레이 상태에 `광고후보 N(미차단?)` 경고가 뜨지 않는지 봅니다.
+4. fixture 변경이 필요하면 dump 근거와 회귀 테스트를 함께 갱신합니다(현재 ground-truth 골든: `tests/fixtures/window_dumps/owned_popup_legacy_ad.json`).
 
 ### 빌드 + 서명 파이프라인 (signtool)
 

@@ -241,6 +241,7 @@ class WindowScanner:
             self.engine._state.kakao_pid_count = len(pids)
             self.engine._state.candidate_main_window_count = len(candidate_main_handles)
             self.engine._state.main_window_count = len(main_handles)
+            self.engine._state.ad_candidate_count = len(candidates)
             self.engine._state.last_tick = now
 
         self.engine._maybe_cleanup_caches(now)

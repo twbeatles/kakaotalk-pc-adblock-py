@@ -91,6 +91,7 @@ class LayoutOnlyEngine:
             self._state.popup_hide_fallbacks = 0
             self._state.popup_zero_size_fallbacks = 0
             self._state.candidate_main_window_count = 0
+            self._state.ad_candidate_count = 0
             self._state.restore_failures = 0
             self._state.last_restore_error = ""
             enabled_on_start = self._state.enabled
@@ -133,7 +134,16 @@ class LayoutOnlyEngine:
             self.logger.warning("Watch thread join timed out during stop")
         self._watch_thread = None
         if timed_out:
-            self._restore_hidden_windows(reason="stop")
+            # The watch thread is still alive; try to coordinate via the
+            # scan/apply lock so restore does not race a late mutation, but
+            # fall back to an unlocked restore if the stuck thread is holding
+            # it (RLock.acquire honors the timeout, returning False on miss).
+            acquired = self._scan_apply_lock.acquire(timeout=1.0)
+            try:
+                self._restore_hidden_windows(reason="stop")
+            finally:
+                if acquired:
+                    self._scan_apply_lock.release()
         else:
             with self._scan_apply_lock:
                 self._restore_hidden_windows(reason="stop")
@@ -315,6 +325,7 @@ class LayoutOnlyEngine:
             self._state.kakao_pid_count = 0
             self._state.candidate_main_window_count = 0
             self._state.main_window_count = 0
+            self._state.ad_candidate_count = 0
             self._state.last_tick = now
 
     def _is_main_title(self, title: str) -> bool:

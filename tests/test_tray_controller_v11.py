@@ -51,6 +51,7 @@ class FakeState:
     kakao_pid_count: int = 1
     candidate_main_window_count: int = 1
     main_window_count: int = 1
+    ad_candidate_count: int = 0
     hidden_windows: int = 2
     closed_windows: int = 1
     popup_close_requests: int = 0
@@ -475,6 +476,41 @@ def test_status_text_shows_candidate_main_window_count(monkeypatch):
     text = controller.status_text()
 
     assert "후보 3" in text
+
+
+def test_status_text_shows_ad_candidate_count(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    engine._state.main_window_count = 1
+    engine._state.candidate_main_window_count = 1
+    engine._state.ad_candidate_count = 2
+    engine._state.hidden_windows = 2
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    text = controller.status_text()
+
+    assert "광고후보 2" in text
+    assert "미차단" not in text
+
+
+def test_status_text_flags_ad_candidates_with_no_blocking(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    root = FakeRoot()
+    engine = FakeEngine()
+    engine._state.main_window_count = 1
+    engine._state.candidate_main_window_count = 1
+    engine._state.ad_candidate_count = 1
+    engine._state.hidden_windows = 0
+    engine._state.closed_windows = 0
+    settings = LayoutSettingsV11(enabled=True)
+    controller = TrayController(root, engine, settings, logging.getLogger("test"))
+
+    text = controller.status_text()
+
+    assert "광고후보 1" in text
+    assert "미차단" in text
 
 
 def test_status_text_uses_ui_warning_when_engine_error_absent(monkeypatch):

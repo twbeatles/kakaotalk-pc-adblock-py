@@ -26,6 +26,7 @@ class EngineState:
     kakao_pid_count: int = 0
     candidate_main_window_count: int = 0
     main_window_count: int = 0
+    ad_candidate_count: int = 0
     resized_windows: int = 0
     hidden_windows: int = 0
     closed_windows: int = 0

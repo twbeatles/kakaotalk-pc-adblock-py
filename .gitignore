@@ -23,6 +23,8 @@ pip-wheel-metadata/
 
 build/
 dist/
+build_audit_verify/
+dist_audit_verify/
 .tmp-packaged/
 .tmp-packaged-*/
 window_dump_*.json

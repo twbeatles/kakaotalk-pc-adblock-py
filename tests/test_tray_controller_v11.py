@@ -125,6 +125,19 @@ def test_tray_controller_release_menu(monkeypatch):
     assert called["url"] == 1
 
 
+def test_update_check_in_source_mode_shows_clear_message(monkeypatch):
+    monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
+    controller = TrayController(FakeRoot(), FakeEngine(), LayoutSettingsV11(), logging.getLogger("test"))
+    calls = {"count": 0}
+    monkeypatch.setattr("kakao_adblocker.ui.sys.frozen", False, raising=False)
+    monkeypatch.setattr("kakao_adblocker.ui.messagebox.showinfo", lambda *_args, **_kwargs: calls.__setitem__("count", calls["count"] + 1))
+
+    controller.check_for_updates()
+
+    assert calls["count"] == 1
+    assert controller._update_in_progress is False
+
+
 def test_tray_controller_open_log_folder_sets_warning_on_failure(monkeypatch):
     monkeypatch.setattr(TrayController, "_build_window", lambda self: None)
     root = FakeRoot()

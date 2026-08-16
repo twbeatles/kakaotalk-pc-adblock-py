@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import logging
 import queue
+import sys
 import threading
 import time
 import tkinter as tk
@@ -12,7 +13,7 @@ from typing import Any, Callable, Optional, cast
 
 from .config import APP_NAME, LayoutSettingsV11, get_runtime_paths
 from .protocols import EngineLike, RootLike, StatusVarLike
-from .services import ReleaseService, ShellService, StartupManager
+from .services import NoUpdateAvailable, ReleaseService, ShellService, StartupManager, UpdateError, UpdateService
 
 pystray: Any = None
 Image: Any = None
@@ -86,6 +87,7 @@ class TrayController:
         self._tray_recovery_attempts_remaining = 0
         self._tray_recovery_scheduled = False
         self._startup_rehide_on_tray_recovery = False
+        self._update_in_progress = False
         try:
             if isinstance(self.root, tk.Misc):
                 self._status_var: StatusVarLike = tk.StringVar(master=self.root, value="상태: 초기화")
@@ -130,12 +132,14 @@ class TrayController:
         btn_row2.pack(fill="x", pady=6)
         ttk.Button(btn_row2, text="로그 폴더 열기", command=self.open_log_folder).pack(side="left")
         ttk.Button(btn_row2, text="GitHub 릴리스", command=self.open_releases_page).pack(side="left", padx=(8, 0))
+        ttk.Button(btn_row2, text="업데이트 확인", command=self.check_for_updates).pack(side="left", padx=(8, 0))
 
         ttk.Button(wrapper, text="종료", command=self.shutdown).pack(anchor="e", pady=(14, 0))
 
     def start(self, startup_minimized: bool = False) -> None:
         self._ui_queue_running = True
         self._schedule_ui_queue_drain()
+        self._report_previous_update_result()
         self._sync_startup_setting()
         self._tray_available = False
         self._tray_start_error = ""
@@ -363,6 +367,77 @@ class TrayController:
             return
         self._report_ui_action_failure("open_releases_page", "release page open failed")
 
+    def check_for_updates(self) -> None:
+        if self._update_in_progress:
+            return
+        if not getattr(sys, "frozen", False):
+            messagebox.showinfo("업데이트", "자동 업데이트는 배포된 EXE에서만 사용할 수 있습니다.", parent=cast(Any, self.root))
+            return
+        self._update_in_progress = True
+        self._set_ui_warning("업데이트 확인 중...")
+        self._update_status(force=True)
+
+        def worker() -> None:
+            try:
+                manifest = UpdateService.check_for_update()
+                staged = UpdateService.download_update(manifest)
+            except NoUpdateAvailable:
+                self._safe_after(self._show_no_update)
+            except UpdateError as exc:
+                self._safe_after(lambda: self._show_update_error(str(exc)))
+            except Exception as exc:
+                self._safe_after(lambda: self._show_update_error(f"예상하지 못한 오류: {exc}"))
+            else:
+                self._safe_after(lambda: self._confirm_update_install(manifest, staged))
+
+        threading.Thread(target=worker, name="UpdateCheck", daemon=True).start()
+
+    def _show_no_update(self) -> None:
+        self._update_in_progress = False
+        self._clear_ui_warning(("업데이트",))
+        self._update_status(force=True)
+        messagebox.showinfo("업데이트", "현재 최신 버전을 사용 중입니다.", parent=cast(Any, self.root))
+
+    def _show_update_error(self, message: str) -> None:
+        self._update_in_progress = False
+        self._set_ui_warning(f"업데이트 실패: {message}")
+        self._update_status(force=True)
+        messagebox.showwarning("업데이트 실패", f"자동 업데이트를 완료하지 못했습니다.\n\n{message}", parent=cast(Any, self.root))
+
+    def _confirm_update_install(self, manifest, staged) -> None:
+        self._update_in_progress = False
+        version = str(manifest.version)
+        if not messagebox.askyesno(
+            "업데이트 준비 완료",
+            f"업데이트 {version}의 서명과 파일 무결성을 확인했습니다.\n지금 설치하시겠습니까?",
+            parent=cast(Any, self.root),
+        ):
+            try:
+                staged.unlink(missing_ok=True)
+            except OSError:
+                pass
+            self._clear_ui_warning(("업데이트",))
+            self._update_status(force=True)
+            return
+        try:
+            UpdateService.launch_installer(staged)
+        except UpdateError as exc:
+            self._show_update_error(str(exc))
+            return
+        messagebox.showinfo("업데이트", "업데이트를 설치하기 위해 프로그램을 종료합니다.", parent=cast(Any, self.root))
+        self.shutdown()
+
+    def _report_previous_update_result(self) -> None:
+        result = UpdateService.consume_install_result()
+        if result is None:
+            return
+        status = str(result.get("status", ""))
+        if status == "applied":
+            self._safe_after(lambda: messagebox.showinfo("업데이트", "이전 업데이트가 설치되었습니다.", parent=cast(Any, self.root)))
+            return
+        detail = str(result.get("error", "알 수 없는 오류"))
+        self._safe_after(lambda: self._show_update_error(f"이전 업데이트 설치 실패: {detail}"))
+
     def show_window(self) -> None:
         if hasattr(self.root, "deiconify"):
             self.root.deiconify()
@@ -482,6 +557,7 @@ class TrayController:
                 pystray_mod.MenuItem("창 열기", self._menu_show_window),
                 pystray_mod.MenuItem("로그 폴더 열기", self._menu_open_logs),
                 pystray_mod.MenuItem("GitHub 릴리스 열기", self._menu_open_release),
+                pystray_mod.MenuItem("업데이트 확인", self._menu_check_updates),
                 pystray_mod.MenuItem("종료", self._menu_exit),
             ),
         )
@@ -646,6 +722,9 @@ class TrayController:
 
     def _menu_open_release(self, _icon, _item) -> None:
         self._safe_after(self.open_releases_page)
+
+    def _menu_check_updates(self, _icon, _item) -> None:
+        self._safe_after(self.check_for_updates)
 
     def _menu_exit(self, _icon, _item) -> None:
         self._safe_after(self.shutdown)

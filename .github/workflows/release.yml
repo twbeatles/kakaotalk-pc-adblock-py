@@ -1,0 +1,61 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Verify tag matches application version
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path kakao_adblocker/config/paths.py -Pattern '^VERSION = "([^"]+)"').Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag $env:GITHUB_REF_NAME must match application version v$version" }
+      - name: Build release executable
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign
+      - name: Create signed update manifest
+        shell: pwsh
+        env:
+          KAKAO_UPDATE_PRIVATE_KEY_B64: ${{ secrets.KAKAO_UPDATE_PRIVATE_KEY_B64 }}
+        run: |
+          python scripts/build_update_manifest.py `
+            --version $env:GITHUB_REF_NAME `
+            --tag $env:GITHUB_REF_NAME `
+            --artifact dist/KakaoTalkLayoutAdBlocker_v11.exe `
+            --artifact-url "https://github.com/${{ github.repository }}/releases/download/$env:GITHUB_REF_NAME/KakaoTalkLayoutAdBlocker_v11.exe" `
+            --output dist/update.json
+      - name: Publish GitHub Release assets idempotently
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:GITHUB_REF_NAME 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:GITHUB_REF_NAME --generate-notes --title $env:GITHUB_REF_NAME
+          }
+          gh release upload $env:GITHUB_REF_NAME dist/KakaoTalkLayoutAdBlocker_v11.exe dist/update.json --clobber
+      - name: Verify published manifest asset
+        shell: pwsh
+        run: |
+          $url = "https://github.com/${{ github.repository }}/releases/download/$env:GITHUB_REF_NAME/update.json"
+          Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile published-update.json
+          python scripts/verify_update_manifest.py --manifest published-update.json
+          python -c "import json; d=json.load(open('published-update.json', encoding='utf-8')); assert d['payload']['tag']=='${{ github.ref_name }}'; assert d['payload']['artifact_url'].endswith('/${{ github.ref_name }}/KakaoTalkLayoutAdBlocker_v11.exe')"

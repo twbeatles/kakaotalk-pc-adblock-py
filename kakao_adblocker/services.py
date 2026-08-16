@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import csv
 import ctypes
+import base64
+import hashlib
 import io
+import json
 import os
 import shlex
 import subprocess
@@ -11,8 +14,18 @@ import threading
 import time
 import webbrowser
 from ctypes import wintypes
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Set, Tuple
+from typing import Any, Optional, Set, Tuple, cast
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
+from uuid import uuid4
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+from .config import UPDATE_PUBLIC_KEY_B64, VERSION, get_runtime_paths
 
 try:
     import psutil as _psutil
@@ -461,4 +474,184 @@ class ReleaseService:
         return ShellService.open_url(ReleaseService.RELEASES_URL)
 
 
-__all__ = ["ProcessInspector", "StartupManager", "ShellService", "ReleaseService"]
+class UpdateError(RuntimeError):
+    """A release update could not be verified, downloaded, or installed."""
+
+
+class NoUpdateAvailable(UpdateError):
+    """The signed latest-release manifest is not newer than this application."""
+
+
+@dataclass(frozen=True)
+class UpdateManifest:
+    version: str
+    tag: str
+    artifact_url: str
+    sha256: str
+    size: int
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class StagedUpdate:
+    manifest: UpdateManifest
+    path: Path
+
+
+class UpdateService:
+    """Signed GitHub Releases updater for the frozen Windows executable."""
+
+    MANIFEST_URL = "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases/latest/download/update.json"
+    MAX_MANIFEST_BYTES = 64 * 1024
+    MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
+    USER_AGENT = "KakaoTalkLayoutAdBlocker-Updater"
+    RELEASE_DOWNLOAD_PREFIX = "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases/download/"
+    RESULT_FILE_NAME = "last-update-result.json"
+
+    @staticmethod
+    def _version_tuple(value: str) -> tuple[int, ...]:
+        parts = str(value or "").strip().split(".")
+        if not parts or any(not part.isdigit() for part in parts):
+            raise UpdateError(f"Invalid update version: {value}")
+        return tuple(int(part) for part in parts)
+
+    @classmethod
+    def _is_newer(cls, candidate: str, current: str) -> bool:
+        left, right = cls._version_tuple(candidate), cls._version_tuple(current)
+        width = max(len(left), len(right))
+        return left + (0,) * (width - len(left)) > right + (0,) * (width - len(right))
+
+    @staticmethod
+    def _canonical_payload(payload: dict[str, object]) -> bytes:
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    @classmethod
+    def check_for_update(cls) -> UpdateManifest:
+        request = Request(cls.MANIFEST_URL, headers={"User-Agent": cls.USER_AGENT})
+        try:
+            with urlopen(request, timeout=10) as response:
+                document = response.read(cls.MAX_MANIFEST_BYTES + 1)
+                final_url = str(response.geturl())
+        except Exception as exc:
+            raise UpdateError(f"업데이트 정보 다운로드 실패: {exc}") from exc
+        if not final_url.startswith("https://") or len(document) > cls.MAX_MANIFEST_BYTES:
+            raise UpdateError("업데이트 매니페스트가 올바르지 않습니다.")
+        try:
+            parsed = json.loads(document.decode("utf-8"))
+            payload = dict(parsed["payload"])
+            signature = base64.b64decode(str(parsed["signature"]), validate=True)
+            public_key = base64.b64decode(UPDATE_PUBLIC_KEY_B64, validate=True)
+            Ed25519PublicKey.from_public_bytes(public_key).verify(signature, cls._canonical_payload(payload))
+            version = str(payload["version"])
+            tag = str(payload["tag"])
+            artifact_url = str(payload["artifact_url"])
+            sha256 = str(payload["sha256"]).lower()
+            size = int(payload["size"])
+            expires_at = datetime.fromisoformat(str(payload["expires_at"]).replace("Z", "+00:00"))
+        except (KeyError, TypeError, ValueError, InvalidSignature) as exc:
+            raise UpdateError("업데이트 서명 또는 형식 검증에 실패했습니다.") from exc
+        if not tag.startswith("v") or tag[1:] != version:
+            raise UpdateError("업데이트 태그 정보가 올바르지 않습니다.")
+        expected_url = f"{cls.RELEASE_DOWNLOAD_PREFIX}{tag}/KakaoTalkLayoutAdBlocker_v11.exe"
+        if artifact_url != expected_url or urlsplit(artifact_url).scheme != "https":
+            raise UpdateError("업데이트 파일 위치가 올바르지 않습니다.")
+        if len(sha256) != 64 or any(c not in "0123456789abcdef" for c in sha256):
+            raise UpdateError("업데이트 파일 정보가 올바르지 않습니다.")
+        if size <= 0 or size > cls.MAX_ARTIFACT_BYTES:
+            raise UpdateError("업데이트 파일 크기가 허용 범위를 벗어났습니다.")
+        if expires_at.tzinfo is None:
+            raise UpdateError("업데이트 매니페스트 만료 시각이 올바르지 않습니다.")
+        if expires_at <= datetime.now(timezone.utc):
+            raise UpdateError("업데이트 매니페스트가 만료되었습니다.")
+        if not cls._is_newer(version, VERSION):
+            raise NoUpdateAvailable("현재 최신 버전을 사용 중입니다.")
+        return UpdateManifest(version, tag, artifact_url, sha256, size, expires_at)
+
+    @classmethod
+    def download_update(cls, manifest: UpdateManifest) -> StagedUpdate:
+        if not getattr(sys, "frozen", False):
+            raise UpdateError("자동 업데이트는 배포된 EXE에서만 사용할 수 있습니다.")
+        version, url = manifest.version, manifest.artifact_url
+        expected_hash, expected_size = manifest.sha256, manifest.size
+        temporary: Path | None = None
+        try:
+            staging = Path(get_runtime_paths(create=True).appdata_dir) / "updates"
+            staging.mkdir(parents=True, exist_ok=True)
+            session_id = uuid4().hex
+            destination = staging / f"KakaoTalkLayoutAdBlocker_v11-{version}-{session_id}.exe"
+            temporary = staging / f".{destination.name}.download"
+            digest, total = hashlib.sha256(), 0
+            request = Request(url, headers={"User-Agent": cls.USER_AGENT})
+            with urlopen(request, timeout=30) as response, temporary.open("wb") as handle:
+                if not str(response.geturl()).startswith("https://"):
+                    raise UpdateError("업데이트 파일 리디렉션이 안전하지 않습니다.")
+                while chunk := response.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > expected_size or total > cls.MAX_ARTIFACT_BYTES:
+                        raise UpdateError("업데이트 파일 크기가 일치하지 않습니다.")
+                    digest.update(chunk)
+                    handle.write(chunk)
+            if total != expected_size or digest.hexdigest() != expected_hash:
+                raise UpdateError("업데이트 파일 무결성 검증에 실패했습니다.")
+            temporary.replace(destination)
+            return StagedUpdate(manifest, destination)
+        except Exception as exc:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+            if isinstance(exc, UpdateError):
+                raise
+            raise UpdateError(f"업데이트 다운로드 실패: {exc}") from exc
+
+    @classmethod
+    def result_path(cls) -> Path:
+        root = Path(get_runtime_paths(create=True).appdata_dir) / "updates"
+        root.mkdir(parents=True, exist_ok=True)
+        return root / cls.RESULT_FILE_NAME
+
+    @classmethod
+    def consume_install_result(cls) -> dict[str, object] | None:
+        path: Path | None = None
+        try:
+            path = cls.result_path()
+            result = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(result, dict) or result.get("status") not in {"applied", "failed", "rolled_back"}:
+                return None
+            return result
+        except (OSError, ValueError, TypeError):
+            return None
+        finally:
+            try:
+                if path is not None:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _ps_quote(value: str) -> str:
+        return value.replace("'", "''")
+
+    @classmethod
+    def launch_installer(cls, staged: StagedUpdate) -> None:
+        target = Path(sys.executable).resolve()
+        if not getattr(sys, "frozen", False) or not target.exists() or not staged.path.is_file():
+            raise UpdateError("업데이트 설치 대상을 확인할 수 없습니다.")
+        # The helper waits until this process exits, atomically swaps the verified
+        # file, restores its backup on failure, then starts the updated EXE.
+        script = (
+            "$ErrorActionPreference='Stop'; "
+            f"$p={os.getpid()}; $t='{cls._ps_quote(str(target))}'; $s='{cls._ps_quote(str(staged.path.resolve()))}'; "
+            f"$h='{staged.manifest.sha256}'; $n={staged.manifest.size}; $r='{cls._ps_quote(str(cls.result_path()))}'; $b=$t+'.bak'; "
+            "while(Get-Process -Id $p -ErrorAction SilentlyContinue){Start-Sleep -Milliseconds 200}; "
+            "try { if((Get-Item -LiteralPath $s).Length -ne $n -or (Get-FileHash -Algorithm SHA256 -LiteralPath $s).Hash.ToLower() -ne $h){throw 'staged update verification failed'}; Remove-Item -LiteralPath $b -Force -ErrorAction SilentlyContinue; Move-Item -LiteralPath $t -Destination $b -Force; Move-Item -LiteralPath $s -Destination $t -Force; Start-Process -FilePath $t; $j=(@{status='applied';version='"
+            f"{staged.manifest.version}"
+            "'} | ConvertTo-Json -Compress); [IO.File]::WriteAllText($r,$j,[Text.Encoding]::UTF8) } "
+            "catch { $status='failed'; if((Test-Path -LiteralPath $b) -and -not (Test-Path -LiteralPath $t)){ Move-Item -LiteralPath $b -Destination $t -Force; $status='rolled_back' }; $j=(@{status=$status;error=$_.Exception.Message} | ConvertTo-Json -Compress); [IO.File]::WriteAllText($r,$j,[Text.Encoding]::UTF8) }"
+        )
+        encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+        try:
+            subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], creationflags=0x08000000)
+        except Exception as exc:
+            raise UpdateError(f"업데이트 설치 도우미 실행 실패: {exc}") from exc
+
+
+__all__ = ["ProcessInspector", "StartupManager", "ShellService", "ReleaseService", "UpdateError", "NoUpdateAvailable", "UpdateManifest", "StagedUpdate", "UpdateService"]

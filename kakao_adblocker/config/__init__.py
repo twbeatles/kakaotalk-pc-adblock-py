@@ -9,7 +9,7 @@ if not globals().get("__package__"):
     __package__ = "kakao_adblocker.config"
 
 from .models import LayoutRulesV11, LayoutSettingsV11
-from .paths import APP_NAME, APPDATA_DIRNAME, VERSION, RuntimePaths, _build_runtime_paths, _default_appdata_dir, resource_base_dir
+from .paths import APP_NAME, APPDATA_DIRNAME, UPDATE_PUBLIC_KEY_B64, VERSION, RuntimePaths, _build_runtime_paths, _default_appdata_dir, resource_base_dir
 from .storage import (
     _atomic_write_text,
     _backup_broken_json,
@@ -97,6 +97,7 @@ __all__ = [
     "VERSION",
     "APP_NAME",
     "APPDATA_DIRNAME",
+    "UPDATE_PUBLIC_KEY_B64",
     "APPDATA_DIR",
     "SETTINGS_FILE",
     "RULES_FILE",

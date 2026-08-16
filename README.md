@@ -222,6 +222,7 @@ CodeGraph broad query는 repository 전체 인덱스를 대상으로 하므로 `
 - 창 열기
 - 로그 폴더 열기
 - GitHub 릴리스 열기(수동)
+- 업데이트 확인(배포 EXE에서만)
 - 종료
 
 ## 빌드
@@ -291,6 +292,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign
 - GitHub Actions(`.github/workflows/windows-ci.yml`)는 hosted `windows-latest`에서 `python -m pyright`, `pytest -q --basetemp .pytest_tmp`, `python kakaotalk_layout_adblock_v11.py --self-check --json`, `powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign`를 실행합니다.
 - CI의 release build는 built EXE의 `--self-check --strict-self-check --json` packaged smoke까지 실행합니다.
 - hosted Windows CI는 정적 분석/테스트/패키징 게이트만 담당하며, interactive tray/startup smoke는 로컬 수동 검증 또는 실제 릴리스 호스트에서 수행하는 것을 기준으로 합니다.
+
+### GitHub Releases 자동 업데이트
+
+- 앱의 `업데이트 확인` 메뉴는 최신 GitHub Release의 `update.json`을 내려받아 내장된 Ed25519 공개키로 서명을 검증한 뒤, EXE의 SHA-256과 크기를 다시 검증합니다.
+- 확인된 파일만 `%APPDATA%\KakaoTalkAdBlockerLayout\updates`에 고유 파일명으로 저장하고, 설치 도우미가 교체 직전에 SHA-256/크기를 다시 검증합니다. 적용/복원 실패 결과는 다음 시작 시 표시됩니다.
+- `vX.Y.Z` 태그를 푸시하면 `.github/workflows/release.yml`이 EXE와 만료 시각·태그가 포함된 서명 매니페스트를 GitHub Release에 게시합니다. 재실행 시에도 asset을 갱신하며, 게시 후 공개키로 매니페스트를 다시 검증합니다. 태그 버전은 `kakao_adblocker/config/paths.py`의 `VERSION`과 반드시 일치해야 합니다.
+- 릴리스 서명용 개인키는 GitHub Actions 시크릿 `KAKAO_UPDATE_PRIVATE_KEY_B64`에만 보관합니다. 공개키는 배포 앱에 포함되며 비밀값이 아닙니다.
 
 서명을 켜려면 아래 둘 중 하나를 설정하세요.
 

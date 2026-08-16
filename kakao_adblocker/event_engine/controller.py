@@ -124,6 +124,11 @@ class LayoutOnlyEngine:
     def stop(self) -> None:
         self._stop_event.set()
         self._wake_event.set()
+        # Disable mutations before waiting for the worker.  Every action path
+        # checks _can_mutate_windows(), so a late scan cannot commit a new hide
+        # after shutdown has begun, even if the worker is temporarily stuck.
+        with self._state_lock:
+            self._state.enabled = False
         watch_thread = self._watch_thread
         timed_out = False
         if watch_thread and watch_thread.is_alive():

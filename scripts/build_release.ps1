@@ -171,7 +171,7 @@ function Invoke-PackagedSelfCheck {
         throw "packaged --self-check did not produce JSON report: $reportPath"
     }
     try {
-        $result = Get-Content $reportPath -Raw | ConvertFrom-Json
+        $result = Get-Content $reportPath -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($null -eq $result.summary) {
             throw "packaged --self-check JSON summary missing"
         }

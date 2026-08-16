@@ -5,9 +5,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-VERSION = "11.0.0"
+VERSION = "11.0.1"
 APP_NAME = "KakaoTalk Layout AdBlocker"
 APPDATA_DIRNAME = "KakaoTalkAdBlockerLayout"
+# The public half of the Ed25519 release-signing key.  Only the matching
+# private key is stored in GitHub Actions as KAKAO_UPDATE_PRIVATE_KEY_B64.
+UPDATE_PUBLIC_KEY_B64 = "Cix9d2r5UZxpDL4Bp9CWNrjMDRTQHF5Y1snTMYnMQ2U="
 
 
 @dataclass(frozen=True)

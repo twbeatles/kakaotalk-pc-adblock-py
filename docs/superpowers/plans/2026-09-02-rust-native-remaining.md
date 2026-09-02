@@ -12,6 +12,19 @@
 
 **Branch:** `feat/rust-native-migration` (from `main`). Continue on this branch. Do not rewrite `kakao-core` decision logic to “improve” ads.
 
+**Implementation status (code on this branch):**
+
+- [x] Phase 2 `kakao-win32` (trait, FakeWin32, RealWin32, process, event hook, mutex, startup registry)
+- [x] Phase 3 shadow / dump / FakeWin32 scan parity
+- [x] Phase 4 WinEvent + coalesce + reconciliation (engine worker)
+- [x] Phase 5 hide/resize/close apply + restore on FakeWin32 (live `--apply`)
+- [x] Phase 6 v11 settings/rules load
+- [x] Phase 7 CLI + named mutex (`--shadow`, `--apply`, dump, self-check)
+- [x] Phase 8 startup registry helpers + updater verify/download-hash (no default switch)
+- [ ] Visual tray icon / settings window (CLI covers the same commands)
+- [ ] Live KakaoTalk false-positive matrix (manual)
+- [ ] Python archive / default release switch (DoD gate)
+
 ## Global Constraints
 
 - Windows only. Non-Windows fail-fast exit code `2`.

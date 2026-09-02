@@ -32,6 +32,23 @@ struct DumpNode {
 }
 
 impl WindowGraph {
+    pub fn empty(pids: Vec<Pid>) -> Self {
+        Self {
+            pids,
+            nodes: HashMap::new(),
+            children: HashMap::new(),
+        }
+    }
+
+    pub fn insert_node(&mut self, node: WindowNode) {
+        self.children.entry(node.hwnd).or_default();
+        self.nodes.insert(node.hwnd, node);
+    }
+
+    pub fn set_children(&mut self, hwnd: Hwnd, children: Vec<Hwnd>) {
+        self.children.insert(hwnd, children);
+    }
+
     pub fn from_dump_json(text: &str) -> Result<Self, serde_json::Error> {
         let dump: DumpFile = serde_json::from_str(text)?;
         let mut graph = Self {

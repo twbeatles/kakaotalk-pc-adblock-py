@@ -4,8 +4,9 @@ Python v11 remains the default release. This tree is the native port.
 
 ## Status
 
-- **Done:** `kakao-core` golden parity against `tests/fixtures/golden/*.json` (10/10).
-- **Not done:** Win32, shadow mode, mutation, tray, updater. See the remaining plan.
+- **Done:** `kakao-core` golden 10/10, `kakao-win32`, `kakao-app` (`kakao-adblock-rs`) with `--shadow`, `--apply`, dump, self-check, updater verify.
+- **Not the default release:** Python v11 still ships. Do not archive Python until live DoD.
+- **Manual:** tray icon UI, live KakaoTalk matrix.
 
 ## Docs
 

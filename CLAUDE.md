@@ -6,7 +6,7 @@
 - 버전: `11.x`
 - 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, 적응형 폴링 엔진(active 50ms / idle 200ms 기본)
 - 실행 정책: Windows 전용(비Windows에서는 fail-fast 종료 코드 `2`)
-- Rust 포팅: 브랜치 `feat/rust-native-migration`에서 Phase 0·1(`kakao-core` golden 10/10) 완료. 이어서 구현할 때는 Phase 0/1을 다시 하지 말고 `docs/superpowers/plans/2026-09-02-rust-native-remaining.md`의 Phase 2부터 진행한다. 기본 릴리스는 여전히 Python v11이다.
+- Rust 포팅: 브랜치 `feat/rust-native-migration`. `kakao-core` golden 10/10, `kakao-win32`, `kakao-app` (`kakao-adblock-rs --shadow|--apply|--dump-tree|--self-check`) 구현됨. 기본 릴리스는 여전히 Python v11. Python archive/default switch와 실기기 오탐 매트릭스는 DoD 전까지 하지 않는다. 남은 수동 항목은 `docs/superpowers/plans/2026-09-02-rust-native-remaining.md` 상단 status.
 
 ## 광고차단 알고리즘 고정 규칙
 

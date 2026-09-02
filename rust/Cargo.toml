@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/kakao-core"]
+members = ["crates/kakao-core", "crates/kakao-win32", "crates/kakao-app"]
 resolver = "2"
 
 [workspace.package]
@@ -9,6 +9,18 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+crossbeam-channel = "0.5"
+ed25519-dalek = "2"
+hex = "0.4"
+kakao-core = { path = "crates/kakao-core" }
+kakao-win32 = { path = "crates/kakao-win32" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ureq = { version = "2", features = ["json", "tls"] }
+windows = "0.61"

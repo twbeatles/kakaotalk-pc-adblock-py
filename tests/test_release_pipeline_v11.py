@@ -51,3 +51,5 @@ def test_rust_holds_single_instance_mutex_and_resizes_with_nomove():
     assert "CloseHandle(self.handle)" in mutex
     apply = engine.split("for pos in &evaluation.actions.set_pos", 1)[1].split("restore_all", 1)[0]
     assert "SWP_NOMOVE" in apply
+    assert "is_view_resize" in apply
+    assert "if !is_view_resize" in apply

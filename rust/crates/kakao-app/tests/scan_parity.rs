@@ -116,4 +116,20 @@ fn view_resize_keeps_child_top_left_like_python_swp_nomove() {
     assert_eq!(rect.top, 38, "SWP_NOMOVE must keep child top");
     assert_eq!(rect.width(), 581);
     assert_eq!(rect.height(), 1001);
+    assert!(
+        !snapshots.keys().any(|id| id.hwnd == 101),
+        "view-resize hwnd must not be in restore snapshots"
+    );
+
+    // stop()/restore must not replay the child's screen rect through
+    // SetWindowPos. That would treat 1338,38 as parent-client coordinates
+    // and leave KakaoTalk's client area black on the next launch.
+    flags.enabled.store(false, Ordering::SeqCst);
+    let (failures, err) = restore_all(&api, &mut snapshots);
+    assert_eq!((failures, err.as_str()), (0, ""));
+    let after_stop = api.get_window_rect(101).expect("child after restore");
+    assert_eq!(after_stop.left, 1338);
+    assert_eq!(after_stop.top, 38);
+    assert_eq!(after_stop.width(), 581);
+    assert_eq!(after_stop.height(), 1001);
 }

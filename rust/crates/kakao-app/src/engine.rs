@@ -113,21 +113,30 @@ pub fn apply_evaluation(
         if !precheck(hwnd) {
             continue;
         }
-        if let Some(snap) = capture_snapshot(api, graph, hwnd) {
-            snapshots.entry(snap.identity.clone()).or_insert(snap);
-        }
         // View resize is size-only (Python SWP_NOMOVE). Zero-size popup
         // fallback must still be allowed to move to 0,0.
+        let width = pos[3];
+        let height = pos[4];
+        let is_view_resize = width > 0 && height > 0;
+        // Python stop() restores hidden/zero-sized windows only. Snapshotting
+        // OnlineMainView resize and replaying GetWindowRect through
+        // SetWindowPos treats screen coordinates as parent-relative, which
+        // shoves the main view off-canvas and blacks out KakaoTalk.
+        if !is_view_resize {
+            if let Some(snap) = capture_snapshot(api, graph, hwnd) {
+                snapshots.entry(snap.identity.clone()).or_insert(snap);
+            }
+        }
         let mut flags = SWP_NOZORDER | SWP_NOACTIVATE;
-        if pos[3] > 0 && pos[4] > 0 {
+        if is_view_resize {
             flags |= SWP_NOMOVE;
         }
         let _ = api.set_window_pos(
             hwnd,
             pos[1] as i32,
             pos[2] as i32,
-            pos[3] as i32,
-            pos[4] as i32,
+            width as i32,
+            height as i32,
             flags,
         );
     }

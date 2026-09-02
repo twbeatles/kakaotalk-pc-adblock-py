@@ -13,7 +13,15 @@ from kakao_adblocker.config.paths import RuntimePaths, VERSION
 from kakao_adblocker.services import NoUpdateAvailable, StagedUpdate, UpdateError, UpdateManifest, UpdateService
 
 
-def _document(version: str = "11.0.2") -> tuple[str, bytes]:
+def _bump_patch(version: str) -> str:
+    parts = [int(part) for part in version.split(".")]
+    parts[-1] += 1
+    return ".".join(str(part) for part in parts)
+
+
+def _document(version: str | None = None) -> tuple[str, bytes]:
+    if version is None:
+        version = _bump_patch(VERSION)
     key = Ed25519PrivateKey.generate()
     public = base64.b64encode(key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)).decode()
     tag = f"v{version}"
@@ -48,19 +56,32 @@ class _Response:
         return "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases/latest/download/update.json"
 
 
+def test_newer_manifest_fixture_stays_ahead_of_package_version():
+    newer = _bump_patch(VERSION)
+    assert UpdateService._is_newer(newer, VERSION)
+    assert not UpdateService._is_newer(VERSION, VERSION)
+    assert not UpdateService._is_newer(VERSION, newer)
+
+
 def test_check_for_update_accepts_signed_newer_manifest(monkeypatch):
-    public, document = _document()
+    newer = _bump_patch(VERSION)
+    public, document = _document(newer)
     monkeypatch.setattr("kakao_adblocker.services.UPDATE_PUBLIC_KEY_B64", public)
     monkeypatch.setattr("kakao_adblocker.services.urlopen", lambda *_args, **_kwargs: _Response(document))
     manifest = UpdateService.check_for_update()
-    assert manifest.version == "11.0.2"
-    assert manifest.tag == "v11.0.2"
+    assert manifest.version == newer
+    assert manifest.tag == f"v{newer}"
 
 
 def test_check_for_update_rejects_tampered_manifest(monkeypatch):
-    public, document = _document()
+    newer = _bump_patch(VERSION)
+    public, document = _document(newer)
+    tampered = _bump_patch(newer)
     monkeypatch.setattr("kakao_adblocker.services.UPDATE_PUBLIC_KEY_B64", public)
-    monkeypatch.setattr("kakao_adblocker.services.urlopen", lambda *_args, **_kwargs: _Response(document.replace(b'11.0.2', b'11.0.3')))
+    monkeypatch.setattr(
+        "kakao_adblocker.services.urlopen",
+        lambda *_args, **_kwargs: _Response(document.replace(newer.encode(), tampered.encode())),
+    )
     with pytest.raises(UpdateError, match="서명"):
         UpdateService.check_for_update()
 

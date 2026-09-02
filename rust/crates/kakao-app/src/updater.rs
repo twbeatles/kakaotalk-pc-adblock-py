@@ -272,6 +272,23 @@ mod tests {
     }
 
     #[test]
+    fn bumped_package_version_is_newer_than_current() {
+        let mut parts: Vec<u32> = VERSION
+            .split('.')
+            .map(|part| part.parse().expect("VERSION digits"))
+            .collect();
+        *parts.last_mut().expect("VERSION parts") += 1;
+        let newer = parts
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(".");
+        assert!(is_newer(&newer, VERSION).unwrap());
+        assert!(!is_newer(VERSION, VERSION).unwrap());
+        assert!(!is_newer(VERSION, &newer).unwrap());
+    }
+
+    #[test]
     fn canonical_payload_sorts_keys() {
         let payload = json!({"b": 1, "a": "카카오"});
         assert_eq!(

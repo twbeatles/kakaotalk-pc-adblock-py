@@ -41,7 +41,7 @@
 - Python tests must stay green: `python -m pyright` and `pytest -q`.
 - Do not delete or weaken fixtures to make Rust pass.
 - Settings files stay `layout_settings_v11.json` / `layout_rules_v11.json` under `%APPDATA%\KakaoTalkAdBlockerLayout`.
-- Version is `11.0.1` (`kakao_adblocker/config/paths.py`).
+- Version is `11.1.0` (`rust/crates/kakao-app/src/config.rs` and `legacy/python-v11/kakao_adblocker/config/paths.py`).
 - Named mutex: `Local\KakaoTalkLayoutAdBlocker_v11`. Diagnostic flags (`--self-check`, `--dump-tree`, `--dump-tree-series`) do not take the mutex.
 
 ---

@@ -5,7 +5,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-VERSION = "11.0.1"
+VERSION = "11.1.0"
 APP_NAME = "KakaoTalk Layout AdBlocker"
 APPDATA_DIRNAME = "KakaoTalkAdBlockerLayout"
 # The public half of the Ed25519 release-signing key.  Only the matching

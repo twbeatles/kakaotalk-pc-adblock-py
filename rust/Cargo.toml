@@ -3,7 +3,7 @@ members = ["crates/kakao-core", "crates/kakao-win32", "crates/kakao-app"]
 resolver = "2"
 
 [workspace.package]
-version = "11.0.1"
+version = "11.1.0"
 edition = "2021"
 license = "MIT"
 publish = false

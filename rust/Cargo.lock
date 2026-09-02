@@ -464,7 +464,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "kakao-app"
-version = "11.0.1"
+version = "11.1.0"
 dependencies = [
  "base64",
  "clap",
@@ -484,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "kakao-core"
-version = "11.0.1"
+version = "11.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "kakao-win32"
-version = "11.0.1"
+version = "11.1.0"
 dependencies = [
  "crossbeam-channel",
  "kakao-core",

@@ -9,6 +9,7 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $pytestBaseTemp = Join-Path $repoRoot ".pytest_tmp"
 
 Push-Location $repoRoot
+$env:PYTHONPATH = Join-Path $repoRoot "legacy\python-v11"
 try {
     Write-Host "Running pyright..."
     & $PythonExe -m pyright

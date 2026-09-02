@@ -1,6 +1,5 @@
 param(
     [string]$PythonExe = "python",
-    [string]$SpecPath = "kakaotalk_adblock.spec",
     [string]$ExeName = "KakaoTalkLayoutAdBlocker_v11.exe",
     [string]$DistDir = "dist",
     [string]$WorkDir = "build",
@@ -12,7 +11,6 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$resolvedSpec = Resolve-Path (Join-Path $repoRoot $SpecPath)
 
 function Get-SigningConfig {
     $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
@@ -107,12 +105,12 @@ function Test-InteractiveShell {
 }
 
 function Test-VersionMetadata {
-    $pathsFile = Join-Path $repoRoot "kakao_adblocker\config\paths.py"
+    $pathsFile = Join-Path $repoRoot "rust\crates\kakao-app\src\config.rs"
     $versionInfoFile = Join-Path $repoRoot "packaging\windows_version_info.txt"
     $pathsText = Get-Content $pathsFile -Raw
     $versionInfoText = Get-Content $versionInfoFile -Raw
 
-    $versionMatch = [regex]::Match($pathsText, 'VERSION\s*=\s*"([^"]+)"')
+    $versionMatch = [regex]::Match($pathsText, 'pub const VERSION: &str = "([^"]+)"')
     if (-not $versionMatch.Success) {
         throw "VERSION not found in $pathsFile"
     }
@@ -268,16 +266,27 @@ try {
         $signingConfig = Get-SigningConfig
     }
 
-    Write-Host "Building with PyInstaller spec: $resolvedSpec"
-    & $PythonExe -m PyInstaller --noconfirm --clean --distpath $DistDir --workpath $WorkDir $resolvedSpec
-    if ($LASTEXITCODE -ne 0) {
-        throw "PyInstaller build failed with exit code $LASTEXITCODE"
+    Write-Host "Building Rust release binary (kakao-app)"
+    $rustDir = Join-Path $repoRoot "rust"
+    Push-Location $rustDir
+    try {
+        cargo build --release -p kakao-app
+        if ($LASTEXITCODE -ne 0) {
+            throw "cargo build --release -p kakao-app failed with exit code $LASTEXITCODE"
+        }
+    } finally {
+        Pop-Location
     }
 
-    $exePath = Join-Path $repoRoot (Join-Path $DistDir $ExeName)
-    if (-not (Test-Path $exePath)) {
-        throw "Built EXE not found: $exePath"
+    $builtExe = Join-Path $rustDir "target\release\kakao-adblock-rs.exe"
+    if (-not (Test-Path $builtExe)) {
+        throw "Built EXE not found: $builtExe"
     }
+    $distPath = Join-Path $repoRoot $DistDir
+    New-Item -ItemType Directory -Force -Path $distPath | Out-Null
+    $exePath = Join-Path $distPath $ExeName
+    Copy-Item -LiteralPath $builtExe -Destination $exePath -Force
+    Write-Host "Copied $builtExe -> $exePath"
 
     if ($SkipSmokeCheck) {
         Write-Host "Skipping packaged smoke check (-SkipSmokeCheck)."

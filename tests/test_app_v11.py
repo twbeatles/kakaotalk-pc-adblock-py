@@ -1,8 +1,15 @@
-import logging
+import importlib.util
 import json
+import logging
+from pathlib import Path
 
-import kakaotalk_layout_adblock_v11 as bootstrap
 from kakao_adblocker import app
+
+_LEGACY_ENTRY = Path(__file__).resolve().parents[1] / "legacy" / "python-v11" / "kakaotalk_layout_adblock_v11.py"
+_spec = importlib.util.spec_from_file_location("kakaotalk_layout_adblock_v11_legacy", _LEGACY_ENTRY)
+assert _spec is not None and _spec.loader is not None
+bootstrap = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(bootstrap)
 from kakao_adblocker.config import LayoutRulesV11, LayoutSettingsV11
 
 

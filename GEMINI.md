@@ -3,7 +3,7 @@
 ## Project Snapshot
 
 - Platform: Windows
-- Runtime: Python 3.9+
+- Runtime: Rust native (`kakao-adblock-rs`); Python v11 reference in `legacy/python-v11`
 - Version line: `v11`
 - Scope: Layout-only ad blocking (no hosts, no DNS flush, no AdFit registry writes)
 - Non-Windows execution: fail-fast with message and exit code `2`
@@ -27,7 +27,8 @@
 
 ## Runtime Entry
 
-- Main script: `kakaotalk_layout_adblock_v11.py`
+- Main binary: `dist/KakaoTalkLayoutAdBlocker_v11.exe` (`rust/crates/kakao-app`)
+- Python reference: `legacy/python-v11/kakaotalk_layout_adblock_v11.py`
 - Legacy script: `legacy/카카오톡 광고제거 v10.0.py` (deprecated notice only)
 - `--dump-tree` runs in a lightweight path without UI/tray module import
 - `--self-check` runs diagnostics only (no UI/tray/engine start)

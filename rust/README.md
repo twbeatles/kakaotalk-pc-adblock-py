@@ -1,12 +1,15 @@
 # Rust workspace
 
-Python v11 remains the default release. This tree is the native port.
+This is the **default** KakaoTalk Layout AdBlocker implementation.
+
+Python v11 is archived at `../legacy/python-v11/` and kept for golden/regression tests.
 
 ## Status
 
-- **Done:** `kakao-core` golden 10/10, `kakao-win32`, `kakao-app` (`kakao-adblock-rs`) with `--shadow`, `--apply`, dump, self-check, updater verify.
-- **Not the default release:** Python v11 still ships. Do not archive Python until live DoD.
-- **Manual:** tray icon UI, live KakaoTalk matrix.
+- `kakao-core` golden 10/10
+- `kakao-win32` + tray
+- `kakao-app` (`kakao-adblock-rs`): `--shadow`, `--apply`, dump, self-check, tray UI
+- Release EXE: `../dist/KakaoTalkLayoutAdBlocker_v11.exe` via `../scripts/build_release.ps1 -NoSign`
 
 ## Docs
 

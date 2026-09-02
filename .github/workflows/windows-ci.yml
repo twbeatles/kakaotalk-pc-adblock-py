@@ -25,25 +25,15 @@ jobs:
 
       - name: Pyright
         shell: pwsh
-        run: python -m pyright
+        run: |
+          $env:PYTHONPATH = "legacy/python-v11"
+          python -m pyright
 
       - name: Pytest
         shell: pwsh
-        run: pytest -q --basetemp .pytest_tmp
-
-      - name: Self Check
-        shell: pwsh
-        run: python kakaotalk_layout_adblock_v11.py --self-check --json
-
-      - name: Build Release
-        shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: KakaoTalkLayoutAdBlocker_v11
-          path: dist/KakaoTalkLayoutAdBlocker_v11.exe
+        run: |
+          $env:PYTHONPATH = "legacy/python-v11"
+          pytest -q --basetemp .pytest_tmp
 
   rust-core:
     runs-on: windows-latest
@@ -70,3 +60,19 @@ jobs:
 
       - name: Release Build
         run: cargo build --release -p kakao-app
+
+      - name: Copy Release Artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ..\dist | Out-Null
+          Copy-Item -Force .\target\release\kakao-adblock-rs.exe ..\dist\KakaoTalkLayoutAdBlocker_v11.exe
+
+      - name: Packaged Self Check
+        shell: pwsh
+        run: ..\dist\KakaoTalkLayoutAdBlocker_v11.exe --self-check --json
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KakaoTalkLayoutAdBlocker_v11
+          path: dist/KakaoTalkLayoutAdBlocker_v11.exe

@@ -70,19 +70,17 @@ hosts 파일 수정, DNS 변경, 레지스트리 변조, 네트워크 패킷 차
 
 ### 방법 2: 소스 코드에서 실행하기
 
-Python 3.9 이상이 설치된 환경에서 직접 구동할 수 있습니다.
+Rust stable이 설치된 Windows에서 직접 구동할 수 있습니다.
 
-```bash
-# 1. 저장소 클론
+```powershell
 git clone https://github.com/twbeatles/kakaotalk-pc-adblock-py.git
-cd kakaotalk-pc-adblock-py
-
-# 2. 필수 의존성 패키지 설치
-pip install -r requirements.txt
-
-# 3. 프로그램 실행
-python kakaotalk_layout_adblock_v11.py
+cd kakaotalk-pc-adblock-py\rust
+cargo run -p kakao-app --release
 ```
+
+릴리스 EXE는 `.\scripts\build_release.ps1 -NoSign` 으로 `dist/KakaoTalkLayoutAdBlocker_v11.exe`에 생성됩니다.
+
+Python v11 참고 구현은 `legacy/python-v11/`에 보관되어 있습니다.
 
 ---
 
@@ -345,50 +343,40 @@ KakaoTalkLayoutAdBlocker_v11.exe --dump-tree-series --dump-series-duration-ms 20
 
 ### 개발 환경 구축
 
-Python 3.9 이상의 환경에서 개발 의존성을 포함하여 설치합니다.
+```powershell
+# Rust
+rustup toolchain install stable
 
-```bash
-# 개발/테스트 의존성 설치
+# Python 골든/회귀 테스트용
 pip install -r requirements-dev.txt
+$env:PYTHONPATH = "legacy\python-v11"
 ```
 
 ---
 
 ### 정적 분석 및 테스트
 
-Pyright 정적 타입 분석과 Pytest 단위 테스트를 수행합니다.
-
 ```powershell
-# PowerShell 전용 종합 검사 스크립트 실행
 .\scripts\dev_check.ps1
-
-# 또는 개별 도구 실행
-python -m pyright
-pytest -q --basetemp .pytest_tmp
-```
-
-- `pyrightconfig.json` 기준 활성 분석 범위: `kakao_adblocker`, `tests`, `kakaotalk_layout_adblock_v11.py`
-
-Rust 네이티브 포팅은 `rust/` 워크스페이스에서 Python과 공존합니다. 현재 기본 릴리스는 Python v11이며, `kakao-core`는 window dump golden fixture와 판정 결과를 맞추는 순수 엔진입니다. 남은 구현(Win32/shadow/mutation/tray)은 [`docs/superpowers/plans/2026-09-02-rust-native-remaining.md`](docs/superpowers/plans/2026-09-02-rust-native-remaining.md)를 따른다.
-
-```powershell
-python -m kakao_adblocker.dev.export_fixture_decisions --check
 cd rust
 cargo test --workspace
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
+- Python 참고 구현 범위: `legacy/python-v11/kakao_adblocker`, `tests`
+- 기본 런타임: `rust/`
+
 ---
 
-### PyInstaller 단일 파일(Onefile) 빌드
+### 릴리스 EXE 빌드
 
 ```powershell
-# Spec 파일을 사용한 빌드
-pyinstaller kakaotalk_adblock.spec
+.\scripts\build_release.ps1 -NoSign
 ```
 
-- 빌드가 완료되면 `dist/KakaoTalkLayoutAdBlocker_v11.exe` 단일 실행 파일이 생성됩니다.
-- 관리자 권한을 요구하지 않는 non-UAC 실행 파일로 패키징됩니다.
+- 산출물: `dist/KakaoTalkLayoutAdBlocker_v11.exe` (`cargo build --release -p kakao-app` 복사)
+- 관리자 권한을 요구하지 않는 non-UAC 실행 파일입니다.
+- 구 PyInstaller spec은 `legacy/python-v11/kakaotalk_adblock.spec`에 보관되어 있습니다.
 
 ---
 

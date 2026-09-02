@@ -4,9 +4,10 @@
 
 - 목적: 카카오톡 Windows 클라이언트의 광고 영역을 레이아웃 조정으로 제거
 - 버전: `11.x`
-- 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, 적응형 폴링 엔진(active 50ms / idle 200ms 기본)
+- 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, Rust 네이티브 엔진(WinEvent + reconciliation)
 - 실행 정책: Windows 전용(비Windows에서는 fail-fast 종료 코드 `2`)
-- Rust 포팅: 브랜치 `feat/rust-native-migration`. `kakao-core` golden 10/10, `kakao-win32`, `kakao-app` (`kakao-adblock-rs --shadow|--apply|--dump-tree|--self-check`) 구현됨. 기본 릴리스는 여전히 Python v11. Python archive/default switch와 실기기 오탐 매트릭스는 DoD 전까지 하지 않는다. 남은 수동 항목은 `docs/superpowers/plans/2026-09-02-rust-native-remaining.md` 상단 status.
+- 기본 구현: Rust `rust/crates/kakao-app` (`kakao-adblock-rs` / `dist/KakaoTalkLayoutAdBlocker_v11.exe`)
+- Python v11 참고 구현: `legacy/python-v11/` (골든 fixture/회귀 테스트용). 루트 `kakaotalk_layout_adblock_v11.py`는 사용중단 안내만 출력한다.
 
 ## 광고차단 알고리즘 고정 규칙
 
@@ -29,15 +30,20 @@
 
 ## 엔트리포인트
 
-- 실행: `kakaotalk_layout_adblock_v11.py`
-- 기존 `카카오톡 광고제거 v10.0.py`는 루트에서 제거되었고, `legacy/카카오톡 광고제거 v10.0.py`에서 사용중단 안내만 출력
-- 패키지 `kakao_adblocker`는 lazy export(`__getattr__`)를 사용해 초기 import 비용을 줄임
-- 정적 분석 기준선은 루트 `pyrightconfig.json`으로 고정되며 활성 범위는 `kakao_adblocker`, `tests`, `kakaotalk_layout_adblock_v11.py`
-- 권장 로컬 검증 명령은 `.\scripts\dev_check.ps1`이며 필요 시 `-SkipTests`로 타입 검사만 수행
-- 일반 UI 실행 경로는 Windows named mutex(`Local\KakaoTalkLayoutAdBlocker_v11`)로 단일 인스턴스만 허용한다. 중복 실행은 Tk/root, tray, engine을 시작하지 않고 stderr 메시지 후 종료 코드 `0`으로 끝낸다.
-- `--self-check`, `--dump-tree`, `--dump-tree-series`는 mutex를 획득하지 않는 진단 경로로 유지한다.
+- 실행(기본): `dist/KakaoTalkLayoutAdBlocker_v11.exe` 또는 `cargo run -p kakao-app --release`
+- 소스: `rust/crates/kakao-app` (`kakao-adblock-rs`)
+- 루트 `kakaotalk_layout_adblock_v11.py`는 Rust EXE 안내만 출력하고 종료 코드 `0`
+- Python 참고 구현: `legacy/python-v11/kakao_adblocker`, 엔트리 `legacy/python-v11/kakaotalk_layout_adblock_v11.py`
+- 정적 분석: `pyrightconfig.json` extraPaths=`legacy/python-v11`, include=`legacy/python-v11/kakao_adblocker`, `tests`
+- 권장 검증: `.\scripts\dev_check.ps1` (Python 골든) + `cd rust; cargo test --workspace`
+- 일반 UI: named mutex `Local\KakaoTalkLayoutAdBlocker_v11`. 중복 실행은 stderr 후 종료 코드 `0`
+- `--self-check`, `--dump-tree`, `--dump-tree-series`, `--shadow`는 mutex 밖 진단 경로
+- 트레이: 차단 On/Off, 공격 모드, 시작프로그램, 복원 실패 초기화, 로그/릴리스/업데이트, 종료(restore 후)
 
 ## 핵심 모듈
+
+- 활성 런타임: `rust/crates/kakao-core`, `kakao-win32`, `kakao-app`
+- Python 참고 구현은 `legacy/python-v11/kakao_adblocker/` 아래에 있다. 아래 모듈 설명은 그 참고 구현의 알고리즘 계약이다.
 
 - `kakao_adblocker/app/`
   - `main`, CLI parser, self-check, startup trace helper
@@ -176,11 +182,11 @@
 
 ## 레거시 보관
 
-- 구버전 자산은 `legacy/`로 이동됨
+- Python v11 참고 구현: `legacy/python-v11/`
 - 원본 모놀리식: `legacy/kakao_adblocker/legacy.py`
 - deprecated 엔트리포인트: `legacy/카카오톡 광고제거 v10.0.py`
-- 레거시 스크립트는 보관 자산이며 활성 repo-wide `pyright` 범위에서는 제외; 기존 파일 상단 지시문은 개별 유지보수 시 참고용으로 유지
-- CodeGraph broad query는 `legacy/` symbol을 함께 노출할 수 있으므로 active v11 구현 판단은 `kakao_adblocker/`, `tests/`, `kakaotalk_layout_adblock_v11.py` 범위로 좁혀서 해석
+- 활성 런타임 판단은 `rust/`, `tests/fixtures/` 범위로 좁힌다. Python 알고리즘 회귀는 `legacy/python-v11` + `tests/`
+- CodeGraph는 `legacy/` symbol을 노출할 수 있으므로 기본 구현은 Rust로 해석한다
 
 <!-- SPECKIT-AGENT-GUIDE:START -->
 
@@ -194,7 +200,7 @@
 - **프로젝트**: `kakaotalk-pc-adblock-py`
 - **Spec Kit 초기화**: `.specify/ 있음`
 - **에이전트 스킬**: Grok=True, Claude=True, Codex/Agy(.agents)=True
-- **활성 기능**: Rust 네이티브 전환은 `specs/`가 아니라 `kakaotalk_rust_migration_plan.md` + `docs/superpowers/plans/2026-09-02-rust-native-remaining.md` 가 실행 계약이다 (`feat/rust-native-migration`, Phase 2부터)
+- **활성 기능**: 기본 구현은 Rust `kakao-app`. Python v11은 `legacy/python-v11`. 계약 문서는 `kakaotalk_rust_migration_plan.md`와 `docs/superpowers/plans/2026-09-02-rust-native-remaining.md`
 
 ### 에이전트가 먼저 읽을 파일
 

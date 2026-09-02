@@ -40,6 +40,8 @@ pub struct Args {
     pub strict_self_check: bool,
     #[arg(long)]
     pub json: bool,
+    #[arg(long, hide = true)]
+    pub self_check_report: Option<PathBuf>,
     #[arg(long)]
     pub shadow: bool,
     #[arg(long)]
@@ -61,7 +63,7 @@ pub fn run_with_args(args: Args) -> i32 {
     init_tracing();
 
     if args.self_check {
-        return self_check::run(args.json);
+        return self_check::run(args.json, args.self_check_report.as_deref());
     }
     if args.check_update {
         return match updater::check_for_update() {
@@ -192,10 +194,80 @@ pub fn run_with_args(args: Args) -> i32 {
         return 0;
     }
 
-    let worker = spawn_worker(api, flags.clone(), settings, rules);
-    let _ = std::sync::mpsc::channel::<()>()
-        .1
-        .recv_timeout(Duration::from_secs(60 * 60 * 24));
+    let worker = spawn_worker(api, flags.clone(), settings.clone(), rules);
+    #[cfg(windows)]
+    {
+        use std::sync::atomic::Ordering;
+
+        use kakao_win32::tray::{TrayCommand, TrayFlags};
+
+        use crate::config::save_settings;
+
+        let flags_for_tray = flags.clone();
+        let settings_path = paths.settings_file.clone();
+        let log_dir = paths.appdata_dir.clone();
+        let mut settings = settings;
+        if let Err(err) = kakao_win32::tray::run_loop(
+            TrayFlags {
+                enabled: flags.enabled.clone(),
+                aggressive: flags.aggressive.clone(),
+                startup: flags.startup.clone(),
+            },
+            move |command| match command {
+                TrayCommand::ToggleEnabled => {
+                    let next = !flags_for_tray.enabled.load(Ordering::SeqCst);
+                    flags_for_tray.enabled.store(next, Ordering::SeqCst);
+                    settings.enabled = next;
+                    let _ = save_settings(&settings_path, &settings);
+                }
+                TrayCommand::ToggleAggressive => {
+                    let next = !flags_for_tray.aggressive.load(Ordering::SeqCst);
+                    flags_for_tray.aggressive.store(next, Ordering::SeqCst);
+                    settings.aggressive_mode = next;
+                    let _ = save_settings(&settings_path, &settings);
+                }
+                TrayCommand::ToggleStartup => {
+                    let next = !flags_for_tray.startup.load(Ordering::SeqCst);
+                    if crate::startup::set_enabled(next) {
+                        flags_for_tray.startup.store(next, Ordering::SeqCst);
+                        settings.run_on_startup = next;
+                        let _ = save_settings(&settings_path, &settings);
+                    }
+                }
+                TrayCommand::ResetRestoreFailures => {
+                    flags_for_tray.reset_restore.store(true, Ordering::SeqCst);
+                    flags_for_tray.restore_failures.store(0, Ordering::SeqCst);
+                }
+                TrayCommand::OpenLogs => {
+                    let _ = kakao_win32::tray::shell_open(&log_dir.to_string_lossy());
+                }
+                TrayCommand::OpenReleases => {
+                    let _ = kakao_win32::tray::shell_open(
+                        "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases",
+                    );
+                }
+                TrayCommand::CheckUpdate => match updater::check_for_update() {
+                    Ok(manifest) => {
+                        info!("update available {}", manifest.version);
+                    }
+                    Err(updater::UpdateError::NoUpdate) => info!("up to date"),
+                    Err(err) => tracing::warn!("update check failed: {err}"),
+                },
+                TrayCommand::Exit => {}
+            },
+        ) {
+            tracing::warn!("tray unavailable: {err}");
+            let _ = std::sync::mpsc::channel::<()>()
+                .1
+                .recv_timeout(Duration::from_secs(60 * 60 * 24));
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::sync::mpsc::channel::<()>()
+            .1
+            .recv_timeout(Duration::from_secs(60 * 60 * 24));
+    }
     flags
         .stopping
         .store(true, std::sync::atomic::Ordering::SeqCst);

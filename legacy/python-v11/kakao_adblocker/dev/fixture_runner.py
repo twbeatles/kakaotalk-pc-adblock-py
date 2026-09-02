@@ -11,7 +11,7 @@ from kakao_adblocker.event_engine import LayoutOnlyEngine
 from kakao_adblocker.protocols import WindowTextResult
 from kakao_adblocker.win32_api import SW_HIDE, SW_SHOW, WM_CLOSE
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[4]
 FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "window_dumps"
 GOLDEN_DIR = REPO_ROOT / "tests" / "fixtures" / "golden"
 

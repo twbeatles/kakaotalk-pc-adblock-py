@@ -11,6 +11,8 @@ pub mod real;
 pub mod single_instance;
 #[cfg(windows)]
 pub mod startup;
+#[cfg(windows)]
+pub mod tray;
 
 pub use api::{
     Win32Api, SMTO_ABORTIFHUNG, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE,

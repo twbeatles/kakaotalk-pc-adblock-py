@@ -5,8 +5,7 @@
 > 핵심 전략: **동작 규격 고정 → 순수 Rust 판단 엔진 → Win32 래퍼 → Shadow Mode → 이벤트 기반 감시 → 실제 mutation → UI/업데이터 → Python 제거**  
 > 최우선 원칙: **오탐 방지와 원상복구 안전성이 성능보다 우선한다.**
 
-**진행 상태 (2026-09-02):** Phase 0·1 완료 브랜치 `feat/rust-native-migration` (`ae7eb03`).  
-**다음 에이전트는 이 문서를 처음부터 다시 구현하지 말고** [남은 구현 계획](docs/superpowers/plans/2026-09-02-rust-native-remaining.md)의 Phase 2부터 진행한다.
+**진행 상태:** Rust가 기본 구현이다 (`kakao-adblock-rs` / `dist/KakaoTalkLayoutAdBlocker_v11.exe`). Python v11은 `legacy/python-v11/`. 실기기 오탐 매트릭스는 수동.
 
 ---
 

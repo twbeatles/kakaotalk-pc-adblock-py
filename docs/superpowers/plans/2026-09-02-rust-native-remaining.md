@@ -19,11 +19,11 @@
 - [x] Phase 4 WinEvent + coalesce + reconciliation (engine worker)
 - [x] Phase 5 hide/resize/close apply + restore on FakeWin32 (live `--apply`)
 - [x] Phase 6 v11 settings/rules load
-- [x] Phase 7 CLI + named mutex (`--shadow`, `--apply`, dump, self-check)
-- [x] Phase 8 startup registry helpers + updater verify/download-hash (no default switch)
-- [ ] Visual tray icon / settings window (CLI covers the same commands)
+- [x] Phase 7 CLI + named mutex + Win32 tray menu
+- [x] Phase 8 startup registry helpers + updater verify/download-hash
+- [x] Python v11 moved to `legacy/python-v11`; default release is Rust EXE
 - [ ] Live KakaoTalk false-positive matrix (manual)
-- [ ] Python archive / default release switch (DoD gate)
+- [ ] Settings window (tray-only is the shipped UI)
 
 ## Global Constraints
 

@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -19,19 +19,25 @@ pub struct RestoreSnapshot {
 }
 
 pub struct SharedFlags {
-    pub enabled: AtomicBool,
-    pub aggressive: AtomicBool,
-    pub stopping: AtomicBool,
-    pub apply: AtomicBool,
+    pub enabled: Arc<AtomicBool>,
+    pub aggressive: Arc<AtomicBool>,
+    pub stopping: Arc<AtomicBool>,
+    pub apply: Arc<AtomicBool>,
+    pub startup: Arc<AtomicBool>,
+    pub reset_restore: Arc<AtomicBool>,
+    pub restore_failures: Arc<AtomicU32>,
 }
 
 impl SharedFlags {
     pub fn from_settings(settings: &AppSettings, apply: bool) -> Arc<Self> {
         Arc::new(Self {
-            enabled: AtomicBool::new(settings.enabled),
-            aggressive: AtomicBool::new(settings.aggressive_mode),
-            stopping: AtomicBool::new(false),
-            apply: AtomicBool::new(apply),
+            enabled: Arc::new(AtomicBool::new(settings.enabled)),
+            aggressive: Arc::new(AtomicBool::new(settings.aggressive_mode)),
+            stopping: Arc::new(AtomicBool::new(false)),
+            apply: Arc::new(AtomicBool::new(apply)),
+            startup: Arc::new(AtomicBool::new(settings.run_on_startup)),
+            reset_restore: Arc::new(AtomicBool::new(false)),
+            restore_failures: Arc::new(AtomicU32::new(0)),
         })
     }
 }
@@ -193,9 +199,22 @@ pub fn spawn_worker(
         let mut last_pids: HashSet<i64> = HashSet::new();
         let mut burst_left = 0u32;
         let mut last_full = Instant::now() - Duration::from_secs(10);
+        let mut was_enabled = flags.enabled.load(Ordering::SeqCst);
         #[cfg(windows)]
         let hook = kakao_win32::event_hook::EventHook::install();
         while !flags.stopping.load(Ordering::SeqCst) {
+            if flags.reset_restore.swap(false, Ordering::SeqCst) {
+                flags.restore_failures.store(0, Ordering::SeqCst);
+            }
+            let enabled_now = flags.enabled.load(Ordering::SeqCst);
+            if was_enabled && !enabled_now && flags.apply.load(Ordering::SeqCst) {
+                let (failures, err) = restore_all(api.as_ref(), &mut snapshots);
+                if failures > 0 {
+                    flags.restore_failures.fetch_add(failures, Ordering::SeqCst);
+                    warn!(failures, last_error = %err, "restore on disable had failures");
+                }
+            }
+            was_enabled = enabled_now;
             #[cfg(windows)]
             let pids: Vec<i64> = kakao_win32::process::kakaotalk_pids().into_iter().collect();
             #[cfg(not(windows))]
@@ -251,6 +270,7 @@ pub fn spawn_worker(
         if flags.apply.load(Ordering::SeqCst) {
             let (failures, err) = restore_all(api.as_ref(), &mut snapshots);
             if failures > 0 {
+                flags.restore_failures.fetch_add(failures, Ordering::SeqCst);
                 warn!(failures, last_error = %err, "restore on stop had failures");
             }
         }

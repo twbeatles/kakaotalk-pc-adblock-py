@@ -1,6 +1,16 @@
 # Legacy Archive
 
-이 디렉터리는 v11 전면 재설계 과정에서 분리된 구버전 코드 보관소입니다.
+이 디렉터리는 구버전 코드 보관소입니다. **기본 구현은 루트 `rust/` 의 네이티브 앱입니다.**
+
+## python-v11
+
+Python v11 참고 구현(골든 fixture 엔진)은 `legacy/python-v11/`에 있습니다.
+
+```powershell
+$env:PYTHONPATH = "legacy\python-v11"
+python legacy\python-v11\kakaotalk_layout_adblock_v11.py --self-check --json
+python -m kakao_adblocker.dev.export_fixture_decisions --check
+```
 
 ## 구성
 
@@ -21,8 +31,9 @@
 
 ## 정책
 
-- v11 런타임은 이 폴더를 참조하지 않습니다.
-- 신규 기능/버그 수정은 `kakao_adblocker/`의 v11 코드에만 반영합니다.
+- 기본 런타임은 `rust/`이며 이 폴더를 참조하지 않습니다.
+- Python 알고리즘 회귀가 필요하면 `legacy/python-v11`과 `tests/`를 사용합니다.
+- 신규 기능은 Rust 쪽에 반영합니다. Python 참고 구현은 골든 패리티용입니다.
 - active packaging은 루트 `kakaotalk_adblock.spec`가 기준이며, 레거시 spec shim은 같은 v11 엔트리포인트를 빌드해야 하므로 패키징 hidden import와 버전 리소스만 동기화합니다.
 - 레거시 spec shim은 active v11 hidden import 표면만 미러링합니다. mutex/text-result/Run command parsing처럼 stdlib `ctypes` 기반으로 추가된 기능은 별도 hidden import를 추가하지 않습니다.
 - 루트 `pyrightconfig.json`의 활성 범위에서는 이 폴더를 제외합니다. 기존 파일 상단 `pyright` 지시문은 개별 유지보수 시 참고용으로만 남겨둡니다.

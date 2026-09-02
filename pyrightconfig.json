@@ -1,11 +1,16 @@
 {
+  "extraPaths": ["legacy/python-v11"],
   "include": [
-    "kakao_adblocker",
+    "legacy/python-v11/kakao_adblocker",
     "tests",
-    "kakaotalk_layout_adblock_v11.py"
+    "kakaotalk_layout_adblock_v11.py",
+    "legacy/python-v11/kakaotalk_layout_adblock_v11.py"
   ],
   "exclude": [
-    "legacy",
+    "legacy/backup",
+    "legacy/kakao_adblocker",
+    "legacy/scripts",
+    "legacy/tools",
     "build",
     "dist",
     "__pycache__",

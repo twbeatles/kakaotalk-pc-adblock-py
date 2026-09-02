@@ -1,0 +1,62 @@
+{
+  "fixture": "owned_popup_legacy_ad.json",
+  "settings": {
+    "enabled": true,
+    "aggressive_mode": true
+  },
+  "rules_overrides": {},
+  "expected": {
+    "main_windows": [
+      {
+        "hwnd": 526240,
+        "pid": 30948,
+        "class": "EVA_Window_Dblclk",
+        "text": "카카오톡",
+        "structural_candidate": true,
+        "title_match": true,
+        "child_signature": true,
+        "confirmed": true,
+        "confirmation": "title-and-child-signature"
+      }
+    ],
+    "candidates": [
+      {
+        "hwnd": 527936,
+        "pid": 30948,
+        "class": "EVA_Window_Dblclk",
+        "signals": {
+          "legacy_signature": "exact",
+          "popup_direct_class": false,
+          "popup_descendant_class": false,
+          "popup_match_depth": 0,
+          "chrome_widget_bottom_banner": false,
+          "subtree_ad_token": false,
+          "empty_eva_child": false,
+          "popup_host_guard": "n/a"
+        },
+        "decision": "strong",
+        "action": "hide",
+        "match_streak": 1,
+        "miss_streak": 0
+      }
+    ],
+    "actions": {
+      "hide": [
+        527936
+      ],
+      "show": [],
+      "close": [],
+      "set_pos": []
+    },
+    "state": {
+      "main_window_count": 1,
+      "candidate_main_window_count": 1,
+      "hidden_windows": 1,
+      "closed_windows": 0,
+      "resized_windows": 0,
+      "popup_close_requests": 0,
+      "popup_hide_fallbacks": 0,
+      "popup_zero_size_fallbacks": 0
+    }
+  }
+}

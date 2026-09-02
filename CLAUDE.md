@@ -6,6 +6,7 @@
 - 버전: `11.x`
 - 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, 적응형 폴링 엔진(active 50ms / idle 200ms 기본)
 - 실행 정책: Windows 전용(비Windows에서는 fail-fast 종료 코드 `2`)
+- Rust 포팅: 브랜치 `feat/rust-native-migration`에서 Phase 0·1(`kakao-core` golden 10/10) 완료. 이어서 구현할 때는 Phase 0/1을 다시 하지 말고 `docs/superpowers/plans/2026-09-02-rust-native-remaining.md`의 Phase 2부터 진행한다. 기본 릴리스는 여전히 Python v11이다.
 
 ## 광고차단 알고리즘 고정 규칙
 
@@ -193,7 +194,7 @@
 - **프로젝트**: `kakaotalk-pc-adblock-py`
 - **Spec Kit 초기화**: `.specify/ 있음`
 - **에이전트 스킬**: Grok=True, Claude=True, Codex/Agy(.agents)=True
-- **활성 기능**: 아직 `specs/` 기능 명세 없음 — `.specify/` 만 준비된 상태
+- **활성 기능**: Rust 네이티브 전환은 `specs/`가 아니라 `kakaotalk_rust_migration_plan.md` + `docs/superpowers/plans/2026-09-02-rust-native-remaining.md` 가 실행 계약이다 (`feat/rust-native-migration`, Phase 2부터)
 
 ### 에이전트가 먼저 읽을 파일
 

@@ -369,7 +369,7 @@ pytest -q --basetemp .pytest_tmp
 
 - `pyrightconfig.json` 기준 활성 분석 범위: `kakao_adblocker`, `tests`, `kakaotalk_layout_adblock_v11.py`
 
-Rust 네이티브 포팅은 `rust/` 워크스페이스에서 Python과 공존합니다. 현재 기본 릴리스는 Python v11이며, `kakao-core`는 window dump golden fixture와 판정 결과를 맞추는 순수 엔진입니다.
+Rust 네이티브 포팅은 `rust/` 워크스페이스에서 Python과 공존합니다. 현재 기본 릴리스는 Python v11이며, `kakao-core`는 window dump golden fixture와 판정 결과를 맞추는 순수 엔진입니다. 남은 구현(Win32/shadow/mutation/tray)은 [`docs/superpowers/plans/2026-09-02-rust-native-remaining.md`](docs/superpowers/plans/2026-09-02-rust-native-remaining.md)를 따른다.
 
 ```powershell
 python -m kakao_adblocker.dev.export_fixture_decisions --check

@@ -5,6 +5,9 @@
 > 핵심 전략: **동작 규격 고정 → 순수 Rust 판단 엔진 → Win32 래퍼 → Shadow Mode → 이벤트 기반 감시 → 실제 mutation → UI/업데이터 → Python 제거**  
 > 최우선 원칙: **오탐 방지와 원상복구 안전성이 성능보다 우선한다.**
 
+**진행 상태 (2026-09-02):** Phase 0·1 완료 브랜치 `feat/rust-native-migration` (`ae7eb03`).  
+**다음 에이전트는 이 문서를 처음부터 다시 구현하지 말고** [남은 구현 계획](docs/superpowers/plans/2026-09-02-rust-native-remaining.md)의 Phase 2부터 진행한다.
+
 ---
 
 ## 1. 에이전트 작업 지침
@@ -919,17 +922,29 @@ Rust 전환 완료는 다음 조건을 모두 만족해야 한다.
 
 # 20. 첫 구현 작업
 
-에이전트가 이 문서를 처음 읽었다면 다음 작업부터 시작한다.
+## 완료됨 (다시 하지 말 것)
 
-1. 현재 저장소와 테스트 전체 조사
-2. Python 엔진의 decision/action 입출력 목록 작성
-3. 기존 window dump fixture inventory 작성
-4. 부족한 fixture 추가
-5. deterministic golden JSON exporter 구현
-6. `rust/Cargo.toml` workspace 생성
-7. `kakao-core` 생성
-8. WindowSnapshot/WindowIdentity/AdDecision/ActionPlan 타입 구현
-9. 첫 fixture를 Rust unit test로 통과
-10. 그 다음 fixture 전체로 확대
+브랜치 `feat/rust-native-migration`:
 
-**Win32 mutation 구현은 golden parity가 확보된 뒤 시작한다.**
+1. ~~현재 저장소와 테스트 전체 조사~~
+2. ~~Python 엔진의 decision/action 입출력 목록 작성~~
+3. ~~기존 window dump fixture inventory 작성~~
+4. ~~부족한 fixture 추가~~ (기존 10개 dump로 golden 고정)
+5. ~~deterministic golden JSON exporter 구현~~ → `kakao_adblocker/dev/export_fixture_decisions.py`
+6. ~~`rust/Cargo.toml` workspace 생성~~
+7. ~~`kakao-core` 생성~~
+8. ~~WindowSnapshot/WindowIdentity/AdDecision/ActionPlan 타입 구현~~
+9. ~~첫 fixture를 Rust unit test로 통과~~
+10. ~~fixture 전체 golden parity~~ → `rust/crates/kakao-core/tests/golden_parity.rs` 10/10
+
+커밋: `a244e13` 계획 문서, `6953f65` Python golden, `ae7eb03` kakao-core.
+
+## 이어서 할 일
+
+**Win32 mutation 구현은 golden parity가 유지되는 동안만 시작한다.**
+
+남은 작업의 실행 계약(파일 경로, API, 검증 명령, 금지사항)은 다음 문서가 정본이다.
+
+- [docs/superpowers/plans/2026-09-02-rust-native-remaining.md](docs/superpowers/plans/2026-09-02-rust-native-remaining.md)
+
+시작점: Phase 2 `kakao-win32`. `--apply` / 실제 Hide는 Phase 3 shadow 이후.

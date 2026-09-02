@@ -11,8 +11,11 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+LEGACY_PYTHON = ROOT / "legacy" / "python-v11"
+for path in (LEGACY_PYTHON, ROOT):
+    text = str(path)
+    if text not in sys.path:
+        sys.path.insert(0, text)
 
 from kakao_adblocker.config import UPDATE_PUBLIC_KEY_B64
 from kakao_adblocker.services import UpdateService

@@ -14,6 +14,12 @@ pub mod startup;
 #[cfg(windows)]
 pub mod tray;
 
+#[cfg(windows)]
+pub fn attach_parent_console() -> bool {
+    use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+    unsafe { AttachConsole(ATTACH_PARENT_PROCESS).is_ok() }
+}
+
 pub use api::{
     Win32Api, SMTO_ABORTIFHUNG, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE,
     SW_SHOW, WM_CLOSE,

@@ -16,3 +16,26 @@ def test_startup_smoke_uses_bounded_wait_in_build_script():
     assert "-Wait `" not in startup_section
     assert ".WaitForExit(60000)" in startup_section
     assert "packaged startup smoke timed out" in startup_section
+
+
+def test_release_workflow_reads_rust_version_and_toolchain():
+    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert "rust/crates/kakao-app/src/config.rs" in workflow
+    assert "kakao_adblocker/config/paths.py" not in workflow
+    assert "dtolnay/rust-toolchain@stable" in workflow
+    assert "PYTHONPATH: legacy/python-v11" in workflow
+
+
+def test_native_exe_is_windows_gui_and_embeds_app_icon():
+    main = Path("rust/crates/kakao-app/src/main.rs").read_text(encoding="utf-8")
+    build = Path("rust/crates/kakao-app/build.rs").read_text(encoding="utf-8")
+    tray = Path("rust/crates/kakao-win32/src/tray.rs").read_text(encoding="utf-8")
+
+    assert 'windows_subsystem = "windows"' in main
+    assert "HWND_MESSAGE" in tray
+    assert Path("packaging/app_icon.ico").is_file()
+    assert "packaging" in build and "app_icon.ico" in build
+    assert "set_icon" in build
+    assert "app_icon_resource" in tray
+    assert "LoadIconW(None, IDI_APPLICATION)" not in tray.split("fn load_app_icon", 1)[0]

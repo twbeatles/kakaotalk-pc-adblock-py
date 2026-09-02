@@ -50,6 +50,17 @@ pub struct Args {
     pub check_update: bool,
 }
 
+/// GUI-subsystem release EXE has no console on Explorer double-click.
+/// Attach the parent console only for diagnostic CLI flags, not tray launch.
+pub fn should_attach_parent_console<I, S>(args: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    args.into_iter()
+        .any(|arg| !matches!(arg.as_ref(), "--minimized" | "--startup-launch" | "--apply"))
+}
+
 pub fn run_with_args(args: Args) -> i32 {
     if !cfg!(windows) {
         eprintln!("This application only supports Windows.");
@@ -294,4 +305,28 @@ fn file_stamp() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs().to_string())
         .unwrap_or_else(|_| "0".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_attach_parent_console;
+
+    #[test]
+    fn tray_launch_does_not_attach_console() {
+        assert!(!should_attach_parent_console(Vec::<&str>::new()));
+        assert!(!should_attach_parent_console(["--minimized"]));
+        assert!(!should_attach_parent_console([
+            "--startup-launch",
+            "--minimized"
+        ]));
+        assert!(!should_attach_parent_console(["--apply"]));
+    }
+
+    #[test]
+    fn diagnostic_cli_attaches_parent_console() {
+        assert!(should_attach_parent_console(["--self-check"]));
+        assert!(should_attach_parent_console(["--dump-tree"]));
+        assert!(should_attach_parent_console(["--shadow"]));
+        assert!(should_attach_parent_console(["--help"]));
+    }
 }

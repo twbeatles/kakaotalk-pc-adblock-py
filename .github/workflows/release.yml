@@ -18,6 +18,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
       - name: Install build dependencies
         shell: pwsh
         run: |
@@ -26,7 +28,7 @@ jobs:
       - name: Verify tag matches application version
         shell: pwsh
         run: |
-          $version = (Select-String -Path kakao_adblocker/config/paths.py -Pattern '^VERSION = "([^"]+)"').Matches[0].Groups[1].Value
+          $version = (Select-String -Path rust/crates/kakao-app/src/config.rs -Pattern 'pub const VERSION: &str = "([^"]+)"').Matches[0].Groups[1].Value
           if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag $env:GITHUB_REF_NAME must match application version v$version" }
       - name: Build release executable
         shell: pwsh
@@ -35,6 +37,7 @@ jobs:
         shell: pwsh
         env:
           KAKAO_UPDATE_PRIVATE_KEY_B64: ${{ secrets.KAKAO_UPDATE_PRIVATE_KEY_B64 }}
+          PYTHONPATH: legacy/python-v11
         run: |
           python scripts/build_update_manifest.py `
             --version $env:GITHUB_REF_NAME `
@@ -54,6 +57,8 @@ jobs:
           gh release upload $env:GITHUB_REF_NAME dist/KakaoTalkLayoutAdBlocker_v11.exe dist/update.json --clobber
       - name: Verify published manifest asset
         shell: pwsh
+        env:
+          PYTHONPATH: legacy/python-v11
         run: |
           $url = "https://github.com/${{ github.repository }}/releases/download/$env:GITHUB_REF_NAME/update.json"
           Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile published-update.json

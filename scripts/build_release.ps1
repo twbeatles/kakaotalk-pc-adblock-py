@@ -107,8 +107,12 @@ function Test-InteractiveShell {
 function Test-VersionMetadata {
     $pathsFile = Join-Path $repoRoot "rust\crates\kakao-app\src\config.rs"
     $versionInfoFile = Join-Path $repoRoot "packaging\windows_version_info.txt"
+    $iconFile = Join-Path $repoRoot "packaging\app_icon.ico"
     $pathsText = Get-Content $pathsFile -Raw
     $versionInfoText = Get-Content $versionInfoFile -Raw
+    if (-not (Test-Path $iconFile)) {
+        throw "Missing application icon: $iconFile"
+    }
 
     $versionMatch = [regex]::Match($pathsText, 'pub const VERSION: &str = "([^"]+)"')
     if (-not $versionMatch.Success) {

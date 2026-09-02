@@ -14,10 +14,16 @@ use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
     DispatchMessageW, GetCursorPos, GetMessageW, GetWindowLongPtrW, LoadIconW, PostQuitMessage,
     RegisterClassW, SetForegroundWindow, SetWindowLongPtrW, TrackPopupMenu, TranslateMessage,
-    CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA, IDI_APPLICATION, MF_CHECKED, MF_GRAYED, MF_SEPARATOR,
-    MF_STRING, MSG, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WM_APP, WM_COMMAND, WM_CONTEXTMENU,
-    WM_DESTROY, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPED,
+    CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA, HWND_MESSAGE, IDI_APPLICATION, MF_CHECKED, MF_GRAYED,
+    MF_SEPARATOR, MF_STRING, MSG, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
+    WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_RBUTTONUP, WNDCLASSW,
 };
+
+// MAKEINTRESOURCE(1): first ICON resource embedded by kakao-app/build.rs.
+#[allow(clippy::manual_dangling_ptr)]
+fn app_icon_resource() -> PCWSTR {
+    PCWSTR(1usize as *const u16)
+}
 
 const WM_TRAY: u32 = WM_APP + 1;
 pub const ID_TOGGLE_ENABLED: u32 = 1001;
@@ -84,11 +90,13 @@ where
     F: FnMut(TrayCommand),
 {
     let instance = GetModuleHandleW(None).map_err(|err| err.to_string())?;
+    let icon = load_app_icon(instance.into())?;
     let class = w!("KakaoTalkLayoutAdBlockerTray");
     let wc = WNDCLASSW {
         style: CS_HREDRAW | CS_VREDRAW,
         lpfnWndProc: Some(wnd_proc::<F>),
         hInstance: instance.into(),
+        hIcon: icon,
         lpszClassName: class,
         ..Default::default()
     };
@@ -97,19 +105,17 @@ where
         WINDOW_EX_STYLE::default(),
         class,
         w!("KakaoTalk Layout AdBlocker"),
-        WS_OVERLAPPED,
+        WINDOW_STYLE::default(),
         0,
         0,
         0,
         0,
-        None,
+        Some(HWND_MESSAGE),
         None,
         Some(instance.into()),
         None,
     )
     .map_err(|err| err.to_string())?;
-
-    let icon = LoadIconW(None, IDI_APPLICATION).map_err(|err| err.to_string())?;
     let mut nid = NOTIFYICONDATAW {
         cbSize: size_of::<NOTIFYICONDATAW>() as u32,
         hWnd: hwnd,
@@ -250,6 +256,16 @@ fn append(
 
 fn append_sep(menu: windows::Win32::UI::WindowsAndMessaging::HMENU) {
     let _ = unsafe { AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null()) };
+}
+
+fn load_app_icon(
+    instance: windows::Win32::Foundation::HINSTANCE,
+) -> Result<windows::Win32::UI::WindowsAndMessaging::HICON, String> {
+    unsafe {
+        LoadIconW(Some(instance), app_icon_resource())
+            .or_else(|_| LoadIconW(None, IDI_APPLICATION))
+            .map_err(|err| err.to_string())
+    }
 }
 
 fn write_tip(nid: &mut NOTIFYICONDATAW, tip: &str) {

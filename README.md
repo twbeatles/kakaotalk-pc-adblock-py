@@ -1,6 +1,6 @@
 # 💬 KakaoTalk Layout AdBlocker v11 (Rust Native)
 
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(64--bit)-0078D6?logo=windows)](https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(64--bit)-0078D6?logo=windows)](https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases)
 [![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.0-orange?logo=rust)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![No Admin Required](https://img.shields.io/badge/UAC-Not%20Required-brightgreen)](#-안전한-순수-레이아웃-차단-layout-only)
@@ -69,7 +69,7 @@ v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전
 ## 🚀 빠른 시작 (3단계 사용법)
 
 ### 1단계: 실행 파일 다운로드
-[GitHub Releases](https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases)에서 최신 버전의 **`KakaoTalkLayoutAdBlocker_v11.exe`**를 다운로드합니다.
+[GitHub Releases](https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases)에서 최신 버전의 **`KakaoTalkLayoutAdBlocker_v11.exe`**를 다운로드합니다.
 > 권장 위치: `C:\Tools\KakaoTalkAdBlocker\` 등 로컬 드라이브의 안정적인 폴더에 배치합니다. (바탕화면의 OneDrive 동기화 폴더 제외 권장)
 
 ### 2단계: 실행
@@ -282,7 +282,7 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
      ```powershell
      KakaoTalkLayoutAdBlocker_v11.exe --dump-tree-series
      ```
-  3. 콘솔에 출력된 경로의 `window_dump_series_*.json` 파일을 첨부하여 [GitHub Issues](https://github.com/twbeatles/kakaotalk-pc-adblock-py/issues)에 제보해 주시면 빠르게 규칙이 업데이트됩니다.
+  3. 콘솔에 출력된 경로의 `window_dump_series_*.json` 파일을 첨부하여 [GitHub Issues](https://github.com/twbeatles/kakaotalk-pc-adblock-rust/issues)에 제보해 주시면 빠르게 규칙이 업데이트됩니다.
 
 ### Q3. 여러 번 실행하면 중복으로 켜지나요?
 - Windows Named Mutex(`Local\KakaoTalkLayoutAdBlocker_v11`)를 통해 **단일 인스턴스 실행**이 엄격히 보장됩니다. 이미 실행 중인 경우 추가 프로세스는 즉시 안전하게 종료(`exit 0`)됩니다.
@@ -317,8 +317,8 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
 
 ```powershell
 # 저장소 클론
-git clone https://github.com/twbeatles/kakaotalk-pc-adblock-py.git
-cd kakaotalk-pc-adblock-py
+git clone https://github.com/twbeatles/kakaotalk-pc-adblock-rust.git
+cd kakaotalk-pc-adblock-rust
 ```
 
 ### 빌드 및 로컬 실행

@@ -467,7 +467,7 @@ class ShellService:
 
 
 class ReleaseService:
-    RELEASES_URL = "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases"
+    RELEASES_URL = "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases"
 
     @staticmethod
     def open_releases_page() -> bool:
@@ -501,11 +501,11 @@ class StagedUpdate:
 class UpdateService:
     """Signed GitHub Releases updater for the frozen Windows executable."""
 
-    MANIFEST_URL = "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases/latest/download/update.json"
+    MANIFEST_URL = "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/latest/download/update.json"
     MAX_MANIFEST_BYTES = 64 * 1024
     MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
     USER_AGENT = "KakaoTalkLayoutAdBlocker-Updater"
-    RELEASE_DOWNLOAD_PREFIX = "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases/download/"
+    RELEASE_DOWNLOAD_PREFIX = "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/download/"
     RESULT_FILE_NAME = "last-update-result.json"
 
     @staticmethod

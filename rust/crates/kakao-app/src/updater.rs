@@ -10,10 +10,10 @@ use thiserror::Error;
 use crate::config::{UPDATE_PUBLIC_KEY_B64, VERSION};
 
 pub const MANIFEST_URL: &str =
-    "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases/latest/download/update.json";
+    "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/latest/download/update.json";
 pub const USER_AGENT: &str = "KakaoTalkLayoutAdBlocker-Updater";
 pub const RELEASE_DOWNLOAD_PREFIX: &str =
-    "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases/download/";
+    "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/download/";
 const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 const MAX_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
 
@@ -301,7 +301,7 @@ mod tests {
     fn artifact_url_is_pinned() {
         assert_eq!(
             expected_artifact_url("v11.0.2"),
-            "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases/download/v11.0.2/KakaoTalkLayoutAdBlocker_v11.exe"
+            "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/download/v11.0.2/KakaoTalkLayoutAdBlocker_v11.exe"
         );
     }
 }

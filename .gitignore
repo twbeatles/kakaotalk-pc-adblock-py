@@ -44,3 +44,5 @@ env/
 
 .idea/
 .vscode/
+
+rust/target/

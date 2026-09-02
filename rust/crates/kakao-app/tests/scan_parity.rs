@@ -66,3 +66,54 @@ fn owned_popup_hide_and_restore_on_fake_api() {
     assert_eq!((failures, err.as_str()), (0, ""), "restore should succeed");
     assert!(api.is_window_visible(527936));
 }
+
+#[test]
+fn view_resize_keeps_child_top_left_like_python_swp_nomove() {
+    // OnlineMainView sits at y=38 under the KakaoTalk chrome. Resize must keep
+    // that offset (SWP_NOMOVE). Applying (0,0,w,h) without NOMOVE leaves a
+    // blank strip at the bottom that looks like a leftover ad banner.
+    let dump = r#"{
+        "pids": [42],
+        "windows": [{
+            "hwnd": 100,
+            "class": "EVA_Window_Dblclk",
+            "text": "카카오톡",
+            "pid": 42,
+            "visible": true,
+            "rect": [1337, 0, 1920, 1032],
+            "children": [{
+                "hwnd": 101,
+                "class": "EVA_ChildWindow",
+                "text": "OnlineMainView_0x1",
+                "pid": 42,
+                "visible": true,
+                "rect": [1338, 38, 1919, 800],
+                "children": []
+            }]
+        }]
+    }"#;
+    let api = FakeWin32::from_dump_json(dump).unwrap();
+    let pids = api.pids();
+    let settings = AppSettings {
+        enabled: true,
+        aggressive_mode: true,
+        ..AppSettings::default()
+    };
+    let flags = SharedFlags::from_settings(&settings, true);
+    let rules = LayoutRules::default();
+    let mut snapshots = HashMap::new();
+    let evaluation = tick(&api, &pids, &settings, &rules, &mut snapshots, &flags);
+    assert!(
+        evaluation
+            .actions
+            .set_pos
+            .iter()
+            .any(|pos| pos.first() == Some(&101)),
+        "expected OnlineMainView resize"
+    );
+    let rect = api.get_window_rect(101).expect("resized child");
+    assert_eq!(rect.left, 1338, "SWP_NOMOVE must keep child left");
+    assert_eq!(rect.top, 38, "SWP_NOMOVE must keep child top");
+    assert_eq!(rect.width(), 581);
+    assert_eq!(rect.height(), 1001);
+}

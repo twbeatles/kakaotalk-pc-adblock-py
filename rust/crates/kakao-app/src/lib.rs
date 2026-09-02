@@ -171,15 +171,20 @@ pub fn run_with_args(args: Args) -> i32 {
 
     let diagnostic = args.shadow && !args.apply;
     let apply = args.apply || !args.shadow;
-    if !diagnostic {
-        #[cfg(windows)]
-        {
-            if kakao_win32::single_instance::InstanceMutex::acquire().is_err() {
+    // Keep the named mutex handle alive until this function returns so a
+    // second Explorer/startup launch cannot start another apply+tray loop.
+    #[cfg(windows)]
+    let _instance_guard = if !diagnostic {
+        match kakao_win32::single_instance::InstanceMutex::acquire() {
+            Ok(guard) => Some(guard),
+            Err(_) => {
                 eprintln!("already running");
                 return 0;
             }
         }
-    }
+    } else {
+        None
+    };
 
     let flags = SharedFlags::from_settings(&settings, apply && !args.shadow);
     if args.shadow {

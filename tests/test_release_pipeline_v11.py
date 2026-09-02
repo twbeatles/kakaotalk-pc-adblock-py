@@ -39,3 +39,15 @@ def test_native_exe_is_windows_gui_and_embeds_app_icon():
     assert "set_icon" in build
     assert "app_icon_resource" in tray
     assert "LoadIconW(None, IDI_APPLICATION)" not in tray.split("fn load_app_icon", 1)[0]
+
+
+def test_rust_holds_single_instance_mutex_and_resizes_with_nomove():
+    app_lib = Path("rust/crates/kakao-app/src/lib.rs").read_text(encoding="utf-8")
+    engine = Path("rust/crates/kakao-app/src/engine.rs").read_text(encoding="utf-8")
+    mutex = Path("rust/crates/kakao-win32/src/single_instance.rs").read_text(encoding="utf-8")
+
+    assert "let _instance_guard" in app_lib
+    assert "InstanceMutex::acquire()" in app_lib
+    assert "CloseHandle(self.handle)" in mutex
+    apply = engine.split("for pos in &evaluation.actions.set_pos", 1)[1].split("restore_all", 1)[0]
+    assert "SWP_NOMOVE" in apply

@@ -5,7 +5,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use kakao_core::{evaluate_graph, Evaluation, LayoutRules, WindowGraph, WindowIdentity};
-use kakao_win32::api::{Win32Api, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_SHOW, WM_CLOSE};
+use kakao_win32::api::{
+    Win32Api, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SW_HIDE, SW_SHOW, WM_CLOSE,
+};
 use tracing::{info, warn};
 
 use crate::config::AppSettings;
@@ -114,13 +116,19 @@ pub fn apply_evaluation(
         if let Some(snap) = capture_snapshot(api, graph, hwnd) {
             snapshots.entry(snap.identity.clone()).or_insert(snap);
         }
+        // View resize is size-only (Python SWP_NOMOVE). Zero-size popup
+        // fallback must still be allowed to move to 0,0.
+        let mut flags = SWP_NOZORDER | SWP_NOACTIVATE;
+        if pos[3] > 0 && pos[4] > 0 {
+            flags |= SWP_NOMOVE;
+        }
         let _ = api.set_window_pos(
             hwnd,
             pos[1] as i32,
             pos[2] as i32,
             pos[3] as i32,
             pos[4] as i32,
-            SWP_NOZORDER | SWP_NOACTIVATE,
+            flags,
         );
     }
 }

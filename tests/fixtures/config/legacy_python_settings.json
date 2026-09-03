@@ -1,0 +1,14 @@
+{
+  "enabled": false,
+  "run_on_startup": true,
+  "start_minimized": false,
+  "poll_interval_ms": 75,
+  "idle_poll_interval_ms": 300,
+  "pid_scan_interval_ms": 500,
+  "cache_cleanup_interval_ms": 2000,
+  "burst_scan_iterations": 5,
+  "burst_scan_interval_ms": 30,
+  "aggressive_mode": false,
+  "log_level": "DEBUG",
+  "legacy_custom_field": "preserved_val"
+}

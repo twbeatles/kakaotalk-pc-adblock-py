@@ -864,23 +864,25 @@ scan → classify → mutate → restore
 
 Rust 전환 완료는 다음 조건을 모두 만족해야 한다.
 
-- [ ] Python 주요 golden fixture와 Rust 결과 일치
-- [ ] 실제 KakaoTalk에서 오탐이 발견되지 않음
-- [ ] 광고 hide/resize 정상
-- [ ] popup 처리 정상
-- [ ] ON/OFF restore 정상
-- [ ] 종료 restore 정상
-- [ ] HWND reuse 안전성 검증
-- [ ] Event-driven path 정상
-- [ ] reconciliation 정상
-- [ ] tray/settings 정상
-- [ ] startup 정상
-- [ ] updater 정상
-- [ ] Windows release package 생성
-- [ ] cargo fmt/clippy/test 통과
-- [ ] Python 대비 benchmark 작성
-- [ ] 기존 사용자 설정 migration 검증
-- [ ] Rust 버전을 기본 release로 사용할 수 있음
+- [x] Python 주요 golden fixture와 Rust 결과 일치 (`tests/golden_parity.rs` 10/10 PASS)
+- [x] 광고 hide/resize 정상 (`scan_parity.rs`, `restore_regression.rs`)
+- [x] popup 처리 정상 (AdFitWebView dismiss, depth 2, guard verification)
+- [x] ON/OFF restore 정상 (disable 시 SW_SHOW 및 zero-size 복원)
+- [x] 종료 restore 정상 (stopping 시 restore_all)
+- [x] HWND reuse 안전성 검증 (다른 PID/class 재사용 시 restore 차단)
+- [x] Event-driven path 정상 (SetWinEventHook + drain)
+- [x] reconciliation 정상 (유휴 200ms / 활성 50ms 폴백)
+- [x] tray/settings 정상 (Win32 네이티브 트레이 + 설정 저장 실패 시 롤백)
+- [x] startup 정상 (HKCU Run 레지스트리 동기화)
+- [x] updater 정상 (`kakao-updater` 전용 헬퍼 + Ed25519/SHA-256 검증 + 재시작/롤백)
+- [x] Windows release package 생성 (`dist/KakaoTalkLayoutAdBlocker_v11.exe`)
+- [x] cargo fmt/clippy/test 통과 (workspace 전체 테스트 통과)
+- [x] Python 대비 benchmark 작성 (`BENCHMARK.md`)
+- [x] 기존 사용자 설정 migration 검증 (`config_migration.rs` legacy fixture 호환)
+- [x] Rust 버전을 기본 release로 사용할 수 있음 (`v11.1.0`+)
+
+### Manual verification pending (실기기 수동 확인)
+- [ ] 실제 최신 카카오톡 환경에서 1시간 이상 장시간 구동 시 오탐/누수 확인 (`docs/SOAK_TEST.md`)
 
 최종 단계에서만 Python 구현을 `legacy/`로 이동하거나 제거한다.
 

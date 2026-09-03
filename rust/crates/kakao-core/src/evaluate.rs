@@ -291,8 +291,8 @@ fn inspect_candidates(
     graph: &WindowGraph,
     settings: &LayoutSettings,
     rules: &LayoutRules,
+    preview_states: &mut HashMap<WindowIdentity, CandidateState>,
 ) -> Vec<CandidatePayload> {
-    let mut preview_states: HashMap<WindowIdentity, CandidateState> = HashMap::new();
     let mut payloads = Vec::new();
     let ticks = rules.weak_signal_confirm_ticks;
     let main_handles: HashSet<Hwnd> = confirmed_main_handles(graph, rules).into_iter().collect();
@@ -379,12 +379,8 @@ fn inspect_candidates(
                     || preview_states.contains_key(&identity)
                     || close_decision.signals.has_relevant_signal()
                 {
-                    let (state, confirmed) = store_update(
-                        &mut preview_states,
-                        identity.clone(),
-                        &close_decision,
-                        ticks,
-                    );
+                    let (state, confirmed) =
+                        store_update(preview_states, identity.clone(), &close_decision, ticks);
                     payloads.push(candidate_payload(
                         &identity,
                         &close_decision,
@@ -402,7 +398,7 @@ fn inspect_candidates(
                 || aggressive_decision.signals.has_relevant_signal()
             {
                 let (state, confirmed) = store_update(
-                    &mut preview_states,
+                    preview_states,
                     identity.clone(),
                     &aggressive_decision,
                     ticks,
@@ -428,12 +424,8 @@ fn inspect_candidates(
             || preview_states.contains_key(&identity)
             || legacy_decision.signals.has_relevant_signal()
         {
-            let (state, confirmed) = store_update(
-                &mut preview_states,
-                identity.clone(),
-                &legacy_decision,
-                ticks,
-            );
+            let (state, confirmed) =
+                store_update(preview_states, identity.clone(), &legacy_decision, ticks);
             payloads.push(candidate_payload(
                 &identity,
                 &legacy_decision,
@@ -465,7 +457,7 @@ fn inspect_candidates(
             let popup_decision = popup_dismiss_decision(popup_guard, depth);
             if popup_guard == PopupGuard::Allow {
                 let (host_state, host_confirmed) = store_update(
-                    &mut preview_states,
+                    preview_states,
                     host_identity.clone(),
                     &popup_decision,
                     ticks,
@@ -477,12 +469,8 @@ fn inspect_candidates(
                     host_confirmed,
                 ));
             }
-            let (popup_state, popup_confirmed) = store_update(
-                &mut preview_states,
-                identity.clone(),
-                &popup_decision,
-                ticks,
-            );
+            let (popup_state, popup_confirmed) =
+                store_update(preview_states, identity.clone(), &popup_decision, ticks);
             payloads.push(candidate_payload(
                 &identity,
                 &popup_decision,
@@ -507,9 +495,9 @@ fn apply_once(
     rules: &LayoutRules,
     main_handles: &[Hwnd],
     candidates: &[Hwnd],
+    states: &mut HashMap<WindowIdentity, CandidateState>,
 ) -> MutationLog {
     let mut log = MutationLog::new(graph);
-    let mut states: HashMap<WindowIdentity, CandidateState> = HashMap::new();
     let ticks = rules.weak_signal_confirm_ticks;
     let kakao_pids: HashSet<i64> = graph.pids.iter().copied().collect();
 
@@ -599,12 +587,12 @@ fn apply_once(
                 );
                 if close_decision.matched() || states.contains_key(&identity) {
                     let (_state, close_confirmed) =
-                        store_update(&mut states, identity.clone(), &close_decision, ticks);
+                        store_update(states, identity.clone(), &close_decision, ticks);
                     if close_confirmed {
                         log.send_close(child);
                     }
                 } else if close_decision.signals.has_relevant_signal() {
-                    store_update(&mut states, identity.clone(), &close_decision, ticks);
+                    store_update(states, identity.clone(), &close_decision, ticks);
                 }
             }
 
@@ -620,7 +608,7 @@ fn apply_once(
             }
             if aggressive_decision.matched() || states.contains_key(&identity) {
                 let (_state, aggressive_confirmed) =
-                    store_update(&mut states, identity.clone(), &aggressive_decision, ticks);
+                    store_update(states, identity.clone(), &aggressive_decision, ticks);
                 if aggressive_confirmed
                     && aggressive_decision.action == crate::model::ActionKind::Hide
                 {
@@ -643,7 +631,7 @@ fn apply_once(
         let legacy_decision = legacy_hide_decision(&legacy_kind);
         if legacy_decision.matched() || states.contains_key(&identity) {
             let (_state, legacy_confirmed) =
-                store_update(&mut states, identity, &legacy_decision, ticks);
+                store_update(states, identity, &legacy_decision, ticks);
             if legacy_confirmed && legacy_decision.action == crate::model::ActionKind::Hide {
                 log.hide_window(*wnd);
                 log.hidden += 1;
@@ -666,7 +654,7 @@ fn apply_once(
         for (child, depth, _class_name) in find_popup_matches(graph, rules, item.hwnd, true) {
             let popup_decision = popup_dismiss_decision(popup_guard, depth);
             if let Some(child_node) = graph.get(child) {
-                store_update(&mut states, child_node.identity(), &popup_decision, ticks);
+                store_update(states, child_node.identity(), &popup_decision, ticks);
             }
             if popup_guard != PopupGuard::Allow {
                 continue;
@@ -703,6 +691,16 @@ pub fn evaluate_graph(
     settings: &LayoutSettings,
     rules: &LayoutRules,
 ) -> Evaluation {
+    let mut states = HashMap::new();
+    evaluate_graph_with_states(graph, settings, rules, &mut states)
+}
+
+pub fn evaluate_graph_with_states(
+    graph: &WindowGraph,
+    settings: &LayoutSettings,
+    rules: &LayoutRules,
+    states: &mut HashMap<WindowIdentity, CandidateState>,
+) -> Evaluation {
     let main_windows = inspect_main_windows(graph, rules);
     let confirmed: Vec<Hwnd> = main_windows
         .iter()
@@ -711,8 +709,9 @@ pub fn evaluate_graph(
         .collect();
     let confirmed_set: HashSet<Hwnd> = confirmed.iter().copied().collect();
     let candidates = candidate_handles(graph, rules, &confirmed_set);
-    let candidate_payloads = inspect_candidates(graph, settings, rules);
-    let log = apply_once(graph, settings, rules, &confirmed, &candidates);
+    let mut preview_states = states.clone();
+    let candidate_payloads = inspect_candidates(graph, settings, rules, &mut preview_states);
+    let log = apply_once(graph, settings, rules, &confirmed, &candidates, states);
     let candidate_main_window_count = main_windows.len() as i64;
     Evaluation {
         main_windows,

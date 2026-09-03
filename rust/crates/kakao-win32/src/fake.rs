@@ -70,6 +70,30 @@ impl FakeWin32 {
         self.inner.lock().expect("fake lock").pids.clone()
     }
 
+    pub fn set_text(&self, hwnd: i64, text: &str) {
+        self.with(|inner| {
+            if let Some(rec) = inner.windows.get_mut(&hwnd) {
+                rec.text = text.to_string();
+            }
+        });
+    }
+
+    pub fn set_pid(&self, hwnd: i64, pid: i64) {
+        self.with(|inner| {
+            if let Some(rec) = inner.windows.get_mut(&hwnd) {
+                rec.pid = pid;
+            }
+        });
+    }
+
+    pub fn set_class_name(&self, hwnd: i64, class_name: &str) {
+        self.with(|inner| {
+            if let Some(rec) = inner.windows.get_mut(&hwnd) {
+                rec.class_name = class_name.to_string();
+            }
+        });
+    }
+
     fn with<R>(&self, f: impl FnOnce(&mut Inner) -> R) -> R {
         let mut inner = self.inner.lock().expect("fake lock");
         f(&mut inner)

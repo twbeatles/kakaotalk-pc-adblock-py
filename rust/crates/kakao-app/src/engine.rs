@@ -4,7 +4,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use kakao_core::{evaluate_graph, Evaluation, LayoutRules, WindowGraph, WindowIdentity};
+use kakao_core::{
+    evaluate_graph_with_states, CandidateState, Evaluation, LayoutRules, WindowGraph,
+    WindowIdentity,
+};
 use kakao_win32::api::{
     Win32Api, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SW_HIDE, SW_SHOW, WM_CLOSE,
 };
@@ -13,11 +16,14 @@ use tracing::{info, warn};
 use crate::config::AppSettings;
 use crate::graph_build::build_graph;
 
+const RESTORE_MISS_THRESHOLD: u32 = 2;
+
 #[derive(Clone, Debug)]
 pub struct RestoreSnapshot {
     pub identity: WindowIdentity,
     pub was_visible: bool,
     pub rect: Option<kakao_core::Rect>,
+    pub top_level: bool,
 }
 
 pub struct SharedFlags {
@@ -54,6 +60,7 @@ pub fn capture_snapshot(
         identity: node.identity(),
         was_visible: api.is_window_visible(hwnd),
         rect: api.get_window_rect(hwnd).or(node.rect),
+        top_level: node.structural_parent.is_none(),
     })
 }
 
@@ -153,43 +160,102 @@ pub fn restore_all(
         if !identity_matches(api, &snap.identity) {
             continue;
         }
-        if snap.was_visible && !api.show_window(snap.identity.hwnd, SW_SHOW) {
+        if !restore_snapshot(api, &snap, &mut last_error) {
             failures += 1;
-            last_error = format!("restore show failed hwnd={}", snap.identity.hwnd);
         }
-        if let Some(rect) = snap.rect {
+    }
+    (failures, last_error)
+}
+
+fn restore_snapshot(api: &dyn Win32Api, snap: &RestoreSnapshot, last_error: &mut String) -> bool {
+    let mut ok = true;
+    if let Some(rect) = snap.rect {
+        if rect.width() > 0 && rect.height() > 0 {
+            let mut flags = SWP_NOZORDER | SWP_NOACTIVATE;
+            if !snap.top_level {
+                flags |= SWP_NOMOVE;
+            }
             if !api.set_window_pos(
                 snap.identity.hwnd,
                 rect.left,
                 rect.top,
                 rect.width(),
                 rect.height(),
-                SWP_NOZORDER | SWP_NOACTIVATE,
+                flags,
             ) {
-                failures += 1;
-                last_error = format!("restore pos failed hwnd={}", snap.identity.hwnd);
+                ok = false;
+                *last_error = format!("restore pos failed hwnd={}", snap.identity.hwnd);
             }
+        }
+    }
+    if snap.was_visible {
+        let _ = api.show_window(snap.identity.hwnd, SW_SHOW);
+        if !api.is_window_visible(snap.identity.hwnd) {
+            ok = false;
+            *last_error = format!("restore show failed hwnd={}", snap.identity.hwnd);
+        }
+    }
+    ok
+}
+
+fn restore_stale_hidden(
+    api: &dyn Win32Api,
+    snapshots: &mut HashMap<WindowIdentity, RestoreSnapshot>,
+    matched: &HashSet<WindowIdentity>,
+    stale_miss: &mut HashMap<WindowIdentity, u32>,
+) -> (u32, String) {
+    let mut failures = 0u32;
+    let mut last_error = String::new();
+    let pending: Vec<WindowIdentity> = snapshots.keys().cloned().collect();
+    for identity in pending {
+        if matched.contains(&identity) {
+            stale_miss.remove(&identity);
+            continue;
+        }
+        let misses = stale_miss.entry(identity.clone()).or_insert(0);
+        *misses = misses.saturating_add(1);
+        if *misses < RESTORE_MISS_THRESHOLD {
+            continue;
+        }
+        let Some(snap) = snapshots.remove(&identity) else {
+            continue;
+        };
+        stale_miss.remove(&identity);
+        if !identity_matches(api, &snap.identity) {
+            continue;
+        }
+        if !restore_snapshot(api, &snap, &mut last_error) {
+            failures += 1;
         }
     }
     (failures, last_error)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn tick(
     api: &dyn Win32Api,
     pids: &[i64],
     settings: &AppSettings,
     rules: &LayoutRules,
     snapshots: &mut HashMap<WindowIdentity, RestoreSnapshot>,
+    states: &mut HashMap<WindowIdentity, CandidateState>,
+    stale_miss: &mut HashMap<WindowIdentity, u32>,
     flags: &SharedFlags,
 ) -> Evaluation {
     let mut core = settings.to_core();
     core.enabled = flags.enabled.load(Ordering::SeqCst);
     core.aggressive_mode = flags.aggressive.load(Ordering::SeqCst);
     let graph = build_graph(api, pids);
-    let evaluation = evaluate_graph(&graph, &core, rules);
+    let evaluation = evaluate_graph_with_states(&graph, &core, rules, states);
     if flags.apply.load(Ordering::SeqCst) && core.enabled {
         let pid_set: HashSet<i64> = pids.iter().copied().collect();
         apply_evaluation(api, &graph, &evaluation, snapshots, &pid_set, flags);
+        let matched = matched_identities(&graph, &evaluation);
+        let (failures, err) = restore_stale_hidden(api, snapshots, &matched, stale_miss);
+        if failures > 0 {
+            flags.restore_failures.fetch_add(failures, Ordering::SeqCst);
+            warn!(failures, last_error = %err, "stale hide restore had failures");
+        }
     } else {
         for candidate in &evaluation.candidates {
             info!(
@@ -205,6 +271,27 @@ pub fn tick(
     evaluation
 }
 
+fn matched_identities(graph: &WindowGraph, evaluation: &Evaluation) -> HashSet<WindowIdentity> {
+    let mut matched = HashSet::new();
+    let mut push = |hwnd: i64| {
+        if let Some(node) = graph.get(hwnd) {
+            matched.insert(node.identity());
+        }
+    };
+    for hwnd in &evaluation.actions.hide {
+        push(*hwnd);
+    }
+    for hwnd in &evaluation.actions.close {
+        push(*hwnd);
+    }
+    for pos in &evaluation.actions.set_pos {
+        if pos.len() >= 5 && (pos[3] <= 0 || pos[4] <= 0) {
+            push(pos[0]);
+        }
+    }
+    matched
+}
+
 pub fn spawn_worker(
     api: Arc<dyn Win32Api>,
     flags: Arc<SharedFlags>,
@@ -213,6 +300,8 @@ pub fn spawn_worker(
 ) -> thread::JoinHandle<HashMap<WindowIdentity, RestoreSnapshot>> {
     thread::spawn(move || {
         let mut snapshots = HashMap::new();
+        let mut states = HashMap::new();
+        let mut stale_miss = HashMap::new();
         let mut last_pids: HashSet<i64> = HashSet::new();
         let mut burst_left = 0u32;
         let mut last_full = Instant::now() - Duration::from_secs(10);
@@ -232,6 +321,10 @@ pub fn spawn_worker(
                 }
             }
             was_enabled = enabled_now;
+            if !enabled_now {
+                thread::sleep(Duration::from_millis(1000));
+                continue;
+            }
             #[cfg(windows)]
             let pids: Vec<i64> = kakao_win32::process::kakaotalk_pids().into_iter().collect();
             #[cfg(not(windows))]
@@ -246,8 +339,9 @@ pub fn spawn_worker(
             if let Some(hook) = hook.as_ref() {
                 events = hook.drain();
             }
-            let due_recon = last_full.elapsed()
-                >= Duration::from_millis(settings.idle_poll_interval_ms.max(2000) as u64);
+            let idle_ms = u64::from(settings.idle_poll_interval_ms.max(200));
+            let active_ms = u64::from(settings.poll_interval_ms.max(50));
+            let due_recon = last_full.elapsed() >= Duration::from_millis(idle_ms);
             let due_burst = burst_left > 0;
             if events.is_empty() && !due_recon && !due_burst {
                 #[cfg(windows)]
@@ -255,11 +349,9 @@ pub fn spawn_worker(
                     hook.wait_message(Duration::from_millis(80));
                     continue;
                 }
-                #[cfg(not(windows))]
-                {
-                    thread::sleep(Duration::from_millis(80));
-                    continue;
-                }
+                let wait = if pids.is_empty() { idle_ms } else { active_ms };
+                thread::sleep(Duration::from_millis(wait));
+                continue;
             }
             if !events.is_empty() {
                 thread::sleep(Duration::from_millis(80));
@@ -274,6 +366,8 @@ pub fn spawn_worker(
                 &settings,
                 &rules,
                 &mut snapshots,
+                &mut states,
+                &mut stale_miss,
                 &flags,
             );
             last_full = Instant::now();

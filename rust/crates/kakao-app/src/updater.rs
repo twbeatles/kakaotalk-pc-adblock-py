@@ -195,6 +195,19 @@ pub fn parse_and_verify_manifest(
             "업데이트 파일 크기가 허용 범위를 벗어났습니다.".into(),
         ));
     }
+    if let Some(expires_at_str) = payload.get("expires_at").and_then(Value::as_str) {
+        if let Some(exp_ts) = parse_rfc3339_timestamp(expires_at_str) {
+            let now_ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            if exp_ts <= now_ts {
+                return Err(UpdateError::Message(
+                    "업데이트 매니페스트가 만료되었습니다.".into(),
+                ));
+            }
+        }
+    }
     if !is_newer(&version, current_version)? {
         return Err(UpdateError::NoUpdate);
     }
@@ -205,6 +218,40 @@ pub fn parse_and_verify_manifest(
         sha256,
         size,
     })
+}
+
+fn parse_rfc3339_timestamp(s: &str) -> Option<u64> {
+    let s = s.trim();
+    if s.len() < 19 {
+        return None;
+    }
+    let year: u64 = s[0..4].parse().ok()?;
+    let month: u64 = s[5..7].parse().ok()?;
+    let day: u64 = s[8..10].parse().ok()?;
+    let hour: u64 = s[11..13].parse().ok()?;
+    let min: u64 = s[14..16].parse().ok()?;
+    let sec: u64 = s[17..19].parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || min > 59 || sec > 60 {
+        return None;
+    }
+    let mut days = 0;
+    for y in 1970..year {
+        days += if is_leap_year(y) { 366 } else { 365 };
+    }
+    let days_in_months = if is_leap_year(year) {
+        [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    for m in 1..month {
+        days += days_in_months[m as usize];
+    }
+    days += day - 1;
+    Some(days * 86400 + hour * 3600 + min * 60 + sec)
+}
+
+fn is_leap_year(y: u64) -> bool {
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -239,6 +286,73 @@ pub fn download_and_verify(
     }
     std::fs::write(dest, bytes)
         .map_err(|err| UpdateError::Message(format!("업데이트 저장 실패: {err}")))?;
+    Ok(())
+}
+
+fn find_or_extract_helper(
+    current_exe: &std::path::Path,
+) -> Result<std::path::PathBuf, UpdateError> {
+    let current_dir = current_exe
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let same_dir = current_dir.join("kakao-updater.exe");
+    if same_dir.is_file() {
+        return Ok(same_dir);
+    }
+    // Check target dirs for dev/test runs
+    let candidates = [
+        current_dir.join("target/release/kakao-updater.exe"),
+        current_dir.join("target/debug/kakao-updater.exe"),
+        current_dir.join("../target/release/kakao-updater.exe"),
+        current_dir.join("../target/debug/kakao-updater.exe"),
+        current_dir.join("../../target/release/kakao-updater.exe"),
+        current_dir.join("../../target/debug/kakao-updater.exe"),
+    ];
+    for cand in &candidates {
+        if cand.is_file() {
+            return Ok(cand.clone());
+        }
+    }
+    let temp_helper = std::env::temp_dir().join("kakao-updater.exe");
+    if temp_helper.is_file() {
+        return Ok(temp_helper);
+    }
+    Err(UpdateError::Message(
+        "kakao-updater.exe 헬퍼 바이너리를 찾을 수 없습니다.".into(),
+    ))
+}
+
+pub fn apply_update(manifest: &UpdateManifest) -> Result<(), UpdateError> {
+    let temp_dir = std::env::temp_dir();
+    let temp_exe = temp_dir.join(format!(
+        "KakaoTalkLayoutAdBlocker_v11_update_{}.exe",
+        manifest.version
+    ));
+
+    download_and_verify(manifest, &temp_exe)?;
+
+    let current_exe = std::env::current_exe()
+        .map_err(|e| UpdateError::Message(format!("현재 실행 파일 경로 확인 실패: {e}")))?;
+    let helper_exe = find_or_extract_helper(&current_exe)?;
+
+    let pid = std::process::id();
+    let mut cmd = std::process::Command::new(&helper_exe);
+    cmd.arg("--pid")
+        .arg(pid.to_string())
+        .arg("--current")
+        .arg(&current_exe)
+        .arg("--replacement")
+        .arg(&temp_exe);
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    cmd.spawn()
+        .map_err(|e| UpdateError::Message(format!("업데이트 헬퍼 실행 실패: {e}")))?;
+
     Ok(())
 }
 

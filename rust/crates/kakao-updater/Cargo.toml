@@ -1,0 +1,31 @@
+[package]
+name = "kakao-updater"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Self-update helper binary for KakaoTalk Layout AdBlocker"
+
+[[bin]]
+name = "kakao-updater"
+path = "src/main.rs"
+
+[lib]
+name = "kakao_updater"
+path = "src/lib.rs"
+
+[dependencies]
+clap.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+winresource = "0.1"

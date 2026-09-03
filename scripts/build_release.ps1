@@ -18,33 +18,33 @@ function Get-SigningConfig {
         throw "signtool.exe not found. Install Windows SDK Signing Tools, or run with -NoSign."
     }
 
-    $args = @("sign", "/fd", "SHA256")
+    $signtoolArgs = @("sign", "/fd", "SHA256")
 
     if ($env:SIGN_PFX_PATH) {
         if (-not (Test-Path $env:SIGN_PFX_PATH)) {
             throw "SIGN_PFX_PATH not found: $($env:SIGN_PFX_PATH)"
         }
-        $args += @("/f", $env:SIGN_PFX_PATH)
+        $signtoolArgs += @("/f", $env:SIGN_PFX_PATH)
         if ($env:SIGN_PFX_PASSWORD) {
-            $args += @("/p", $env:SIGN_PFX_PASSWORD)
+            $signtoolArgs += @("/p", $env:SIGN_PFX_PASSWORD)
         }
     } elseif ($env:SIGN_CERT_SHA1) {
-        $args += @("/sha1", $env:SIGN_CERT_SHA1)
+        $signtoolArgs += @("/sha1", $env:SIGN_CERT_SHA1)
         if ($env:SIGN_CERT_STORE) {
-            $args += @("/s", $env:SIGN_CERT_STORE)
+            $signtoolArgs += @("/s", $env:SIGN_CERT_STORE)
         }
         if ($env:SIGN_CERT_SUBJECT) {
-            $args += @("/n", $env:SIGN_CERT_SUBJECT)
+            $signtoolArgs += @("/n", $env:SIGN_CERT_SUBJECT)
         }
     } else {
         throw "Signing configuration missing. Set SIGN_PFX_PATH (and optional SIGN_PFX_PASSWORD) or SIGN_CERT_SHA1."
     }
 
     $timestampUrl = if ($env:SIGN_TIMESTAMP_URL) { $env:SIGN_TIMESTAMP_URL } else { "http://timestamp.digicert.com" }
-    $args += @("/tr", $timestampUrl, "/td", "SHA256")
+    $signtoolArgs += @("/tr", $timestampUrl, "/td", "SHA256")
     return [PSCustomObject]@{
         SignTool = $signtool.Source
-        SignArgs = $args
+        SignArgs = $signtoolArgs
     }
 }
 
@@ -270,13 +270,29 @@ try {
         $signingConfig = Get-SigningConfig
     }
 
-    Write-Host "Building Rust release binary (kakao-app)"
+    Write-Host "Building Rust release binaries (kakao-app, kakao-updater)"
     $rustDir = Join-Path $repoRoot "rust"
     Push-Location $rustDir
     try {
-        cargo build --release -p kakao-app
+        $link = Get-Command link.exe -ErrorAction SilentlyContinue
+        if ($link) {
+            cargo build --release -p kakao-app -p kakao-updater
+        } else {
+            $vcvarsCandidates = @(
+                "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsarm64_amd64.bat",
+                "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat",
+                "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat",
+                "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+            )
+            $vcvars = $vcvarsCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if ($vcvars) {
+                cmd.exe /c "`"$vcvars`" && rustup run stable-x86_64-pc-windows-msvc cargo build --release -p kakao-app -p kakao-updater"
+            } else {
+                rustup run stable-x86_64-pc-windows-msvc cargo build --release -p kakao-app -p kakao-updater
+            }
+        }
         if ($LASTEXITCODE -ne 0) {
-            throw "cargo build --release -p kakao-app failed with exit code $LASTEXITCODE"
+            throw "cargo build --release failed with exit code $LASTEXITCODE"
         }
     } finally {
         Pop-Location
@@ -286,11 +302,17 @@ try {
     if (-not (Test-Path $builtExe)) {
         throw "Built EXE not found: $builtExe"
     }
+    $builtUpdater = Join-Path $rustDir "target\release\kakao-updater.exe"
     $distPath = Join-Path $repoRoot $DistDir
     New-Item -ItemType Directory -Force -Path $distPath | Out-Null
     $exePath = Join-Path $distPath $ExeName
     Copy-Item -LiteralPath $builtExe -Destination $exePath -Force
     Write-Host "Copied $builtExe -> $exePath"
+    if (Test-Path $builtUpdater) {
+        $updaterDist = Join-Path $distPath "kakao-updater.exe"
+        Copy-Item -LiteralPath $builtUpdater -Destination $updaterDist -Force
+        Write-Host "Copied $builtUpdater -> $updaterDist"
+    }
 
     if ($SkipSmokeCheck) {
         Write-Host "Skipping packaged smoke check (-SkipSmokeCheck)."
@@ -315,6 +337,10 @@ try {
         Write-Host "Skipping code signing (-NoSign)."
     } else {
         Invoke-Sign -ExePath $exePath -SigningConfig $signingConfig
+        $updaterDist = Join-Path $distPath "kakao-updater.exe"
+        if (Test-Path $updaterDist) {
+            Invoke-Sign -ExePath $updaterDist -SigningConfig $signingConfig
+        }
     }
 
     Write-Host "Done: $exePath"

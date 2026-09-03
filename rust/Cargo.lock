@@ -502,6 +502,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ureq",
+ "windows",
  "winresource",
 ]
 
@@ -512,6 +513,18 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "kakao-updater"
+version = "11.1.0"
+dependencies = [
+ "clap",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+ "windows",
+ "winresource",
 ]
 
 [[package]]

@@ -1,0 +1,9 @@
+{
+  "banner_min_height_px": 50,
+  "banner_max_height_px": 200,
+  "popup_search_depth": 1,
+  "popup_host_text_contains": [
+    "특별할인"
+  ],
+  "legacy_rules_custom_field": 123
+}

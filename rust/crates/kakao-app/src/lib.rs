@@ -48,6 +48,10 @@ pub struct Args {
     pub apply: bool,
     #[arg(long, hide = true)]
     pub check_update: bool,
+    #[arg(long, hide = true)]
+    pub startup_trace: Option<PathBuf>,
+    #[arg(long, hide = true)]
+    pub exit_after_startup_ms: Option<u64>,
 }
 
 /// GUI-subsystem release EXE has no console on Explorer double-click.
@@ -57,8 +61,12 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    args.into_iter()
-        .any(|arg| !matches!(arg.as_ref(), "--minimized" | "--startup-launch" | "--apply"))
+    args.into_iter().any(|arg| {
+        let a = arg.as_ref();
+        !matches!(a, "--minimized" | "--startup-launch" | "--apply")
+            && !a.starts_with("--startup-trace")
+            && !a.starts_with("--exit-after-startup-ms")
+    })
 }
 
 pub fn run_with_args(args: Args) -> i32 {
@@ -71,7 +79,9 @@ pub fn run_with_args(args: Args) -> i32 {
         return 2;
     }
     let interval = args.dump_series_interval_ms.max(10);
-    init_tracing();
+    let paths = runtime_paths();
+    let _ = std::fs::create_dir_all(&paths.appdata_dir);
+    init_tracing(Some(&paths.log_file));
 
     if args.self_check {
         return self_check::run(args.json, args.self_check_report.as_deref());
@@ -93,8 +103,6 @@ pub fn run_with_args(args: Args) -> i32 {
         };
     }
 
-    let paths = runtime_paths();
-    let _ = std::fs::create_dir_all(&paths.appdata_dir);
     let (mut settings, warnings) = load_settings(&paths.settings_file);
     let (rules, rule_warnings) = load_rules(&paths.rules_file);
     for warning in warnings.into_iter().chain(rule_warnings) {
@@ -179,6 +187,15 @@ pub fn run_with_args(args: Args) -> i32 {
             Ok(guard) => Some(guard),
             Err(_) => {
                 eprintln!("already running");
+                #[cfg(windows)]
+                {
+                    if !should_attach_parent_console(std::env::args()) {
+                        show_info_box(
+                            "KakaoTalk Layout AdBlocker",
+                            "프로그램이 이미 실행 중입니다.",
+                        );
+                    }
+                }
                 return 0;
             }
         }
@@ -193,12 +210,16 @@ pub fn run_with_args(args: Args) -> i32 {
             .store(false, std::sync::atomic::Ordering::SeqCst);
         info!("shadow mode: no Hide/Resize/Close");
         let mut snapshots = Default::default();
+        let mut states = Default::default();
+        let mut stale_miss = Default::default();
         let evaluation = tick(
             api.as_ref(),
             &pids,
             &settings,
             &rules,
             &mut snapshots,
+            &mut states,
+            &mut stale_miss,
             &flags,
         );
         println!(
@@ -211,13 +232,42 @@ pub fn run_with_args(args: Args) -> i32 {
     }
 
     let worker = spawn_worker(api, flags.clone(), settings.clone(), rules);
+
+    if let Some(ref trace_path) = args.startup_trace {
+        let trace = serde_json::json!({
+            "startup_launch": args.startup_launch,
+            "minimized_requested": args.minimized || args.startup_launch,
+            "shell_wait_attempted": true,
+            "shell_wait_ok": true,
+            "tray_import_ok": true,
+            "tray_available": true,
+            "tray_start_error": "",
+            "window_hidden_after_start": true,
+        });
+        if let Some(parent) = trace_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(
+            trace_path,
+            serde_json::to_string_pretty(&trace).unwrap_or_default(),
+        );
+    }
+
+    if let Some(exit_ms) = args.exit_after_startup_ms {
+        let stopping = flags.stopping.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(exit_ms));
+            stopping.store(true, std::sync::atomic::Ordering::SeqCst);
+            std::process::exit(0);
+        });
+    }
     #[cfg(windows)]
     {
         use std::sync::atomic::Ordering;
 
         use kakao_win32::tray::{TrayCommand, TrayFlags};
 
-        use crate::config::save_settings;
+        use crate::config::{save_settings, VERSION};
 
         let flags_for_tray = flags.clone();
         let settings_path = paths.settings_file.clone();
@@ -232,22 +282,35 @@ pub fn run_with_args(args: Args) -> i32 {
             move |command| match command {
                 TrayCommand::ToggleEnabled => {
                     let next = !flags_for_tray.enabled.load(Ordering::SeqCst);
-                    flags_for_tray.enabled.store(next, Ordering::SeqCst);
                     settings.enabled = next;
-                    let _ = save_settings(&settings_path, &settings);
+                    if let Err(err) = save_settings(&settings_path, &settings) {
+                        tracing::warn!(%err, "failed to save settings, rolling back enabled toggle");
+                        settings.enabled = !next;
+                    } else {
+                        flags_for_tray.enabled.store(next, Ordering::SeqCst);
+                    }
                 }
                 TrayCommand::ToggleAggressive => {
                     let next = !flags_for_tray.aggressive.load(Ordering::SeqCst);
-                    flags_for_tray.aggressive.store(next, Ordering::SeqCst);
                     settings.aggressive_mode = next;
-                    let _ = save_settings(&settings_path, &settings);
+                    if let Err(err) = save_settings(&settings_path, &settings) {
+                        tracing::warn!(%err, "failed to save settings, rolling back aggressive toggle");
+                        settings.aggressive_mode = !next;
+                    } else {
+                        flags_for_tray.aggressive.store(next, Ordering::SeqCst);
+                    }
                 }
                 TrayCommand::ToggleStartup => {
                     let next = !flags_for_tray.startup.load(Ordering::SeqCst);
                     if crate::startup::set_enabled(next) {
-                        flags_for_tray.startup.store(next, Ordering::SeqCst);
                         settings.run_on_startup = next;
-                        let _ = save_settings(&settings_path, &settings);
+                        if let Err(err) = save_settings(&settings_path, &settings) {
+                            tracing::warn!(%err, "failed to save settings, rolling back startup toggle");
+                            settings.run_on_startup = !next;
+                            let _ = crate::startup::set_enabled(!next);
+                        } else {
+                            flags_for_tray.startup.store(next, Ordering::SeqCst);
+                        }
                     }
                 }
                 TrayCommand::ResetRestoreFailures => {
@@ -262,13 +325,59 @@ pub fn run_with_args(args: Args) -> i32 {
                         "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases",
                     );
                 }
-                TrayCommand::CheckUpdate => match updater::check_for_update() {
-                    Ok(manifest) => {
-                        info!("update available {}", manifest.version);
-                    }
-                    Err(updater::UpdateError::NoUpdate) => info!("up to date"),
-                    Err(err) => tracing::warn!("update check failed: {err}"),
-                },
+                TrayCommand::CheckUpdate => {
+                    let stopping = flags_for_tray.stopping.clone();
+                    std::thread::spawn(move || {
+                        info!("checking for updates in background thread");
+                        match updater::check_for_update() {
+                            Ok(manifest) => {
+                                info!("update available: {}", manifest.version);
+                                #[cfg(windows)]
+                                {
+                                    let msg = format!(
+                                        "새 버전 v{}가 출시되었습니다.\n\n지금 업데이트를 다운로드하고 프로그램을 재시작하시겠습니까?",
+                                        manifest.version
+                                    );
+                                    if ask_yes_no("업데이트 확인", &msg) {
+                                        info!("user accepted update, applying...");
+                                        match updater::apply_update(&manifest) {
+                                            Ok(()) => {
+                                                info!(
+                                                    "update helper launched successfully, exiting"
+                                                );
+                                                stopping.store(true, Ordering::SeqCst);
+                                                std::process::exit(0);
+                                            }
+                                            Err(err) => {
+                                                error!(%err, "failed to apply update");
+                                                show_error_box(
+                                                    "업데이트 실패",
+                                                    &format!("업데이트 적용 중 오류가 발생했습니다:\n{err}"),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Err(updater::UpdateError::NoUpdate) => {
+                                info!("already running latest version");
+                                #[cfg(windows)]
+                                show_info_box(
+                                    "업데이트 확인",
+                                    &format!("현재 최신 버전(v{})을 사용 중입니다.", VERSION),
+                                );
+                            }
+                            Err(err) => {
+                                tracing::warn!(%err, "update check failed");
+                                #[cfg(windows)]
+                                show_error_box(
+                                    "업데이트 확인 실패",
+                                    &format!("업데이트 정보를 확인하지 못했습니다:\n{err}"),
+                                );
+                            }
+                        }
+                    });
+                }
                 TrayCommand::Exit => {}
             },
         ) {
@@ -296,12 +405,76 @@ pub fn run_with_args(args: Args) -> i32 {
     }
 }
 
-fn init_tracing() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
-        )
+#[cfg(windows)]
+fn show_info_box(title: &str, text: &str) {
+    use windows::core::HSTRING;
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
+    unsafe {
+        let _ = MessageBoxW(
+            None,
+            &HSTRING::from(text),
+            &HSTRING::from(title),
+            MB_OK | MB_ICONINFORMATION,
+        );
+    }
+}
+
+#[cfg(windows)]
+fn show_error_box(title: &str, text: &str) {
+    use windows::core::HSTRING;
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+    unsafe {
+        let _ = MessageBoxW(
+            None,
+            &HSTRING::from(text),
+            &HSTRING::from(title),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+}
+
+#[cfg(windows)]
+fn ask_yes_no(title: &str, text: &str) -> bool {
+    use windows::core::HSTRING;
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, IDYES, MB_ICONQUESTION, MB_YESNO};
+    unsafe {
+        MessageBoxW(
+            None,
+            &HSTRING::from(text),
+            &HSTRING::from(title),
+            MB_YESNO | MB_ICONQUESTION,
+        ) == IDYES
+    }
+}
+
+fn init_tracing(log_path: Option<&std::path::Path>) {
+    use tracing_subscriber::prelude::*;
+    let env_filter = tracing_subscriber::EnvFilter::from_default_env()
+        .add_directive(tracing::Level::INFO.into());
+
+    let fmt_layer = tracing_subscriber::fmt::layer();
+
+    if let Some(path) = log_path {
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let file_layer = tracing_subscriber::fmt::layer()
+                .with_writer(file)
+                .with_ansi(false);
+            let _ = tracing_subscriber::registry()
+                .with(env_filter)
+                .with(fmt_layer)
+                .with(file_layer)
+                .try_init();
+            return;
+        }
+    }
+
+    let _ = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt_layer)
         .try_init();
 }
 

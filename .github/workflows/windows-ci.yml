@@ -2,7 +2,25 @@ name: windows-ci
 
 on:
   push:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".gitignore"
+      - "LICENSE"
   pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".gitignore"
+      - "LICENSE"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
@@ -59,13 +77,14 @@ jobs:
         run: cargo test --workspace
 
       - name: Release Build
-        run: cargo build --release -p kakao-app
+        run: cargo build --release -p kakao-app -p kakao-updater
 
       - name: Copy Release Artifact
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path ..\dist | Out-Null
           Copy-Item -Force .\target\release\kakao-adblock-rs.exe ..\dist\KakaoTalkLayoutAdBlocker_v11.exe
+          Copy-Item -Force .\target\release\kakao-updater.exe ..\dist\kakao-updater.exe
 
       - name: Packaged Self Check
         shell: pwsh

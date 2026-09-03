@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/kakao-core", "crates/kakao-win32", "crates/kakao-app"]
+members = [
+    "crates/kakao-core",
+    "crates/kakao-win32",
+    "crates/kakao-app",
+    "crates/kakao-updater",
+]
 resolver = "2"
 
 [workspace.package]

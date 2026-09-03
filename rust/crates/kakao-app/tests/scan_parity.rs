@@ -58,7 +58,18 @@ fn owned_popup_hide_and_restore_on_fake_api() {
     let flags = SharedFlags::from_settings(&settings, true);
     let rules = LayoutRules::default();
     let mut snapshots = HashMap::new();
-    let evaluation = tick(&api, &pids, &settings, &rules, &mut snapshots, &flags);
+    let mut states = HashMap::new();
+    let mut stale_miss = HashMap::new();
+    let evaluation = tick(
+        &api,
+        &pids,
+        &settings,
+        &rules,
+        &mut snapshots,
+        &mut states,
+        &mut stale_miss,
+        &flags,
+    );
     assert!(evaluation.actions.hide.contains(&527936));
     assert!(!api.is_window_visible(527936));
     flags.enabled.store(false, Ordering::SeqCst);
@@ -102,7 +113,18 @@ fn view_resize_keeps_child_top_left_like_python_swp_nomove() {
     let flags = SharedFlags::from_settings(&settings, true);
     let rules = LayoutRules::default();
     let mut snapshots = HashMap::new();
-    let evaluation = tick(&api, &pids, &settings, &rules, &mut snapshots, &flags);
+    let mut states = HashMap::new();
+    let mut stale_miss = HashMap::new();
+    let evaluation = tick(
+        &api,
+        &pids,
+        &settings,
+        &rules,
+        &mut snapshots,
+        &mut states,
+        &mut stale_miss,
+        &flags,
+    );
     assert!(
         evaluation
             .actions

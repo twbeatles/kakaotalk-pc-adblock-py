@@ -14,6 +14,8 @@ pub const MANIFEST_URL: &str =
 pub const USER_AGENT: &str = "KakaoTalkLayoutAdBlocker-Updater";
 pub const RELEASE_DOWNLOAD_PREFIX: &str =
     "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/download/";
+pub const LEGACY_RELEASE_DOWNLOAD_PREFIX: &str =
+    "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases/download/";
 const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 const MAX_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
 
@@ -110,6 +112,16 @@ pub fn expected_artifact_url(tag: &str) -> String {
     format!("{RELEASE_DOWNLOAD_PREFIX}{tag}/KakaoTalkLayoutAdBlocker_v11.exe")
 }
 
+pub fn is_valid_artifact_url(artifact_url: &str, tag: &str) -> bool {
+    if !artifact_url.starts_with("https://") {
+        return false;
+    }
+    let expected_rust = expected_artifact_url(tag);
+    let expected_legacy =
+        format!("{LEGACY_RELEASE_DOWNLOAD_PREFIX}{tag}/KakaoTalkLayoutAdBlocker_v11.exe");
+    artifact_url == expected_rust || artifact_url == expected_legacy
+}
+
 pub fn parse_and_verify_manifest(
     document: &[u8],
     current_version: &str,
@@ -180,7 +192,7 @@ pub fn parse_and_verify_manifest(
             "업데이트 태그 정보가 올바르지 않습니다.".into(),
         ));
     }
-    if artifact_url != expected_artifact_url(&tag) || !artifact_url.starts_with("https://") {
+    if !is_valid_artifact_url(&artifact_url, &tag) {
         return Err(UpdateError::Message(
             "업데이트 파일 위치가 올바르지 않습니다.".into(),
         ));
@@ -417,5 +429,39 @@ mod tests {
             expected_artifact_url("v11.0.2"),
             "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/download/v11.0.2/KakaoTalkLayoutAdBlocker_v11.exe"
         );
+        assert!(is_valid_artifact_url(
+            "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/download/v11.1.0/KakaoTalkLayoutAdBlocker_v11.exe",
+            "v11.1.0"
+        ));
+        assert!(is_valid_artifact_url(
+            "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases/download/v11.1.0/KakaoTalkLayoutAdBlocker_v11.exe",
+            "v11.1.0"
+        ));
+        assert!(!is_valid_artifact_url(
+            "https://malicious.example.com/KakaoTalkLayoutAdBlocker_v11.exe",
+            "v11.1.0"
+        ));
+    }
+
+    #[test]
+    fn verifies_published_v11_1_0_manifest() {
+        let doc = r#"{
+    "payload": {
+        "artifact_url": "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases/download/v11.1.0/KakaoTalkLayoutAdBlocker_v11.exe",
+        "expires_at": "2027-09-02T13:41:52Z",
+        "sha256": "7dad779564b43d7d7009f40367e78891a5f56dc1e8cab7d149de90318d26d28d",
+        "size": 4316672,
+        "tag": "v11.1.0",
+        "version": "11.1.0"
+    },
+    "signature": "KGAgTr2SgsgtMNrE6kvZklJOr9IjU9PtMOhRcGi2bipnN7jod9+0Vs6UujH/dd9unffdvu5+Kfh8ArgyBNhvCQ=="
+}"#;
+        // Against an older version, update should be available
+        let manifest = parse_and_verify_manifest(doc.as_bytes(), "11.0.1").unwrap();
+        assert_eq!(manifest.version, "11.1.0");
+
+        // Against current version 11.1.0, it should recognize it as latest (NoUpdate)
+        let err = parse_and_verify_manifest(doc.as_bytes(), "11.1.0").unwrap_err();
+        assert!(matches!(err, UpdateError::NoUpdate));
     }
 }

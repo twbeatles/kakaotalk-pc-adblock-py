@@ -67,7 +67,7 @@ pub struct CandidatePayload {
     pub miss_streak: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ActionLog {
     pub hide: Vec<Hwnd>,
     pub show: Vec<Hwnd>,
@@ -75,7 +75,7 @@ pub struct ActionLog {
     pub set_pos: Vec<Vec<i64>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EngineStatePayload {
     pub main_window_count: i64,
     pub candidate_main_window_count: i64,
@@ -87,7 +87,7 @@ pub struct EngineStatePayload {
     pub popup_zero_size_fallbacks: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Evaluation {
     pub main_windows: Vec<MainWindowPayload>,
     pub candidates: Vec<CandidatePayload>,
@@ -241,14 +241,6 @@ fn inspect_main_windows(graph: &WindowGraph, rules: &LayoutRules) -> Vec<MainWin
     payloads
 }
 
-fn confirmed_main_handles(graph: &WindowGraph, rules: &LayoutRules) -> Vec<Hwnd> {
-    collect_top_level(graph)
-        .into_iter()
-        .filter(|node| main_window_debug_payload(graph, rules, node).confirmed)
-        .map(|node| node.hwnd)
-        .collect()
-}
-
 fn candidate_handles(
     graph: &WindowGraph,
     rules: &LayoutRules,
@@ -291,14 +283,15 @@ fn inspect_candidates(
     graph: &WindowGraph,
     settings: &LayoutSettings,
     rules: &LayoutRules,
+    confirmed_main: &[Hwnd],
+    confirmed_set: &HashSet<Hwnd>,
+    candidates: &[Hwnd],
     preview_states: &mut HashMap<WindowIdentity, CandidateState>,
 ) -> Vec<CandidatePayload> {
     let mut payloads = Vec::new();
     let ticks = rules.weak_signal_confirm_ticks;
-    let main_handles: HashSet<Hwnd> = confirmed_main_handles(graph, rules).into_iter().collect();
-    let candidates = candidate_handles(graph, rules, &main_handles);
 
-    for wnd in confirmed_main_handles(graph, rules) {
+    for &wnd in confirmed_main {
         let Some(parent) = graph.get(wnd) else {
             continue;
         };
@@ -413,7 +406,7 @@ fn inspect_candidates(
         }
     }
 
-    for wnd in candidates {
+    for &wnd in candidates {
         let Some(node) = graph.get(wnd) else {
             continue;
         };
@@ -439,7 +432,7 @@ fn inspect_candidates(
         if item.win32_parent() != 0 {
             continue;
         }
-        if main_window_debug_payload(graph, rules, item).confirmed {
+        if confirmed_set.contains(&item.hwnd) {
             continue;
         }
         if !item.visible {
@@ -494,6 +487,7 @@ fn apply_once(
     settings: &LayoutSettings,
     rules: &LayoutRules,
     main_handles: &[Hwnd],
+    confirmed_set: &HashSet<Hwnd>,
     candidates: &[Hwnd],
     states: &mut HashMap<WindowIdentity, CandidateState>,
 ) -> MutationLog {
@@ -511,9 +505,6 @@ fn apply_once(
         let Some(parent_rect) = parent.rect else {
             continue;
         };
-        if !main_window_debug_payload(graph, rules, parent).confirmed {
-            continue;
-        }
         let parent_text = parent.text().to_string();
         let children = graph.enum_children(*wnd);
         let mut main_window_has_ad_signal = false;
@@ -644,7 +635,7 @@ fn apply_once(
         if item.win32_parent() != 0 {
             continue;
         }
-        if main_window_debug_payload(graph, rules, item).confirmed {
+        if confirmed_set.contains(&item.hwnd) {
             continue;
         }
         if !item.visible {
@@ -710,8 +701,24 @@ pub fn evaluate_graph_with_states(
     let confirmed_set: HashSet<Hwnd> = confirmed.iter().copied().collect();
     let candidates = candidate_handles(graph, rules, &confirmed_set);
     let mut preview_states = states.clone();
-    let candidate_payloads = inspect_candidates(graph, settings, rules, &mut preview_states);
-    let log = apply_once(graph, settings, rules, &confirmed, &candidates, states);
+    let candidate_payloads = inspect_candidates(
+        graph,
+        settings,
+        rules,
+        &confirmed,
+        &confirmed_set,
+        &candidates,
+        &mut preview_states,
+    );
+    let log = apply_once(
+        graph,
+        settings,
+        rules,
+        &confirmed,
+        &confirmed_set,
+        &candidates,
+        states,
+    );
     let candidate_main_window_count = main_windows.len() as i64;
     Evaluation {
         main_windows,

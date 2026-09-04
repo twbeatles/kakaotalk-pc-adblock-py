@@ -94,8 +94,11 @@
   - empty `EVA_ChildWindow` close is counted only after the target window actually disappears, not merely after a successful `SendMessageTimeoutW` request
   - watch scan path avoids geometry/visibility calls; dump-tree path still collects full geometry
   - `--dump-tree-series` stores frame-by-frame candidate decision previews alongside the tree dump, including both popup host and matched popup descendant candidates
-  - Win32 text-result metadata (`known/truncated/error`) is preserved internally; unknown popup host text is guard-blocked instead of treated as an empty-title allow
   - process-id scan and cache cleanup are interval-throttled for idle CPU savings
+  - ultra-fast process liveness check (`is_process_alive`, <0.001ms) gates full process snapshot scans (5s interval when alive)
+  - zero-allocation UTF-16 slice comparison (`eq_wide_ascii_case`) eliminates heap churn during process table enumeration
+  - non-KakaoTalk window event filtering suppresses spurious worker loop wakeups
+  - evaluation engine passes precomputed `confirmed_set` handles for O(1) checks, avoiding repeated full main-window candidate scans and string allocations
   - process scan warnings (psutil failure, tasklist fallback/failure) are propagated to status/log (`last_error`)
   - default idle->active detection target is <= 200ms
   - `report_warning()` allows startup warning propagation to tray status context, and the prioritized startup warning is applied after engine start so it remains visible

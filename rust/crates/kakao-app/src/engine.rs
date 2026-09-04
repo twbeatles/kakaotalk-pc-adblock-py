@@ -245,16 +245,21 @@ pub fn tick(
     let mut core = settings.to_core();
     core.enabled = flags.enabled.load(Ordering::SeqCst);
     core.aggressive_mode = flags.aggressive.load(Ordering::SeqCst);
+    if pids.is_empty() && snapshots.is_empty() {
+        return Evaluation::default();
+    }
     let graph = build_graph(api, pids);
     let evaluation = evaluate_graph_with_states(&graph, &core, rules, states);
     if flags.apply.load(Ordering::SeqCst) && core.enabled {
         let pid_set: HashSet<i64> = pids.iter().copied().collect();
         apply_evaluation(api, &graph, &evaluation, snapshots, &pid_set, flags);
-        let matched = matched_identities(&graph, &evaluation);
-        let (failures, err) = restore_stale_hidden(api, snapshots, &matched, stale_miss);
-        if failures > 0 {
-            flags.restore_failures.fetch_add(failures, Ordering::SeqCst);
-            warn!(failures, last_error = %err, "stale hide restore had failures");
+        if !snapshots.is_empty() {
+            let matched = matched_identities(&graph, &evaluation);
+            let (failures, err) = restore_stale_hidden(api, snapshots, &matched, stale_miss);
+            if failures > 0 {
+                flags.restore_failures.fetch_add(failures, Ordering::SeqCst);
+                warn!(failures, last_error = %err, "stale hide restore had failures");
+            }
         }
     } else {
         for candidate in &evaluation.candidates {
@@ -299,10 +304,13 @@ pub fn spawn_worker(
     rules: LayoutRules,
 ) -> thread::JoinHandle<HashMap<WindowIdentity, RestoreSnapshot>> {
     thread::spawn(move || {
+        info!("engine worker thread started");
         let mut snapshots = HashMap::new();
         let mut states = HashMap::new();
         let mut stale_miss = HashMap::new();
         let mut last_pids: HashSet<i64> = HashSet::new();
+        let mut cached_pids: Vec<i64> = Vec::new();
+        let mut last_pid_scan = Instant::now() - Duration::from_secs(60);
         let mut burst_left = 0u32;
         let mut last_full = Instant::now() - Duration::from_secs(10);
         let mut was_enabled = flags.enabled.load(Ordering::SeqCst);
@@ -325,44 +333,105 @@ pub fn spawn_worker(
                 thread::sleep(Duration::from_millis(1000));
                 continue;
             }
+
+            // Interval-throttled PID scan with fast liveness check:
+            // When KakaoTalk PIDs are known and alive, use ultra-fast liveness checks (0.001ms)
+            // and perform full process snapshot (9ms) only every 5 seconds or when a PID dies.
+            let pid_scan_interval = Duration::from_millis(u64::from(settings.pid_scan_interval_ms.max(200)));
+            let full_sync_interval = Duration::from_secs(5);
             #[cfg(windows)]
-            let pids: Vec<i64> = kakao_win32::process::kakaotalk_pids().into_iter().collect();
-            #[cfg(not(windows))]
-            let pids: Vec<i64> = Vec::new();
-            let pid_set: HashSet<i64> = pids.iter().copied().collect();
+            {
+                let pids_alive = !cached_pids.is_empty()
+                    && cached_pids.iter().all(|&pid| kakao_win32::process::is_process_alive(pid));
+                let need_scan = if pids_alive {
+                    last_pid_scan.elapsed() >= full_sync_interval
+                } else {
+                    last_pid_scan.elapsed() >= pid_scan_interval
+                };
+                if need_scan {
+                    cached_pids = kakao_win32::process::kakaotalk_pids().into_iter().collect();
+                    last_pid_scan = Instant::now();
+                }
+            }
+
+            let pid_set: HashSet<i64> = cached_pids.iter().copied().collect();
             if !pid_set.is_empty() && pid_set != last_pids {
                 burst_left = settings.burst_scan_iterations.max(1);
-                last_pids = pid_set;
+                last_pids = pid_set.clone();
             }
+
             let mut events = Vec::new();
             #[cfg(windows)]
             if let Some(hook) = hook.as_ref() {
                 events = hook.drain();
+                // Filter events: only retain events belonging to KakaoTalk windows
+                if !pid_set.is_empty() {
+                    events.retain(|ev| {
+                        let pid = api.get_window_thread_process_id(ev.hwnd);
+                        pid_set.contains(&pid)
+                    });
+                } else {
+                    events.clear();
+                }
             }
+
             let idle_ms = u64::from(settings.idle_poll_interval_ms.max(200));
             let active_ms = u64::from(settings.poll_interval_ms.max(50));
+
+            // When KakaoTalk is not running, cleanup any remaining snapshots and stay completely idle.
+            if cached_pids.is_empty() {
+                if !snapshots.is_empty() {
+                    let (failures, err) = restore_all(api.as_ref(), &mut snapshots);
+                    if failures > 0 {
+                        flags.restore_failures.fetch_add(failures, Ordering::SeqCst);
+                        warn!(failures, last_error = %err, "restore on kakaotalk exit had failures");
+                    }
+                }
+                stale_miss.clear();
+                states.clear();
+                #[cfg(windows)]
+                if let Some(hook) = hook.as_ref() {
+                    hook.wait_message(Duration::from_millis(idle_ms));
+                    continue;
+                }
+                thread::sleep(Duration::from_millis(idle_ms));
+                continue;
+            }
+
             let due_recon = last_full.elapsed() >= Duration::from_millis(idle_ms);
             let due_burst = burst_left > 0;
             if events.is_empty() && !due_recon && !due_burst {
                 #[cfg(windows)]
                 if let Some(hook) = hook.as_ref() {
-                    hook.wait_message(Duration::from_millis(80));
+                    let remaining = Duration::from_millis(idle_ms).saturating_sub(last_full.elapsed());
+                    let wait = remaining.max(Duration::from_millis(10));
+                    hook.wait_message(wait);
                     continue;
                 }
-                let wait = if pids.is_empty() { idle_ms } else { active_ms };
-                thread::sleep(Duration::from_millis(wait));
+                thread::sleep(Duration::from_millis(active_ms));
                 continue;
             }
+
             if !events.is_empty() {
-                thread::sleep(Duration::from_millis(80));
+                thread::sleep(Duration::from_millis(u64::from(settings.burst_scan_interval_ms.max(10))));
                 #[cfg(windows)]
                 if let Some(hook) = hook.as_ref() {
-                    let _ = hook.drain();
+                    let mut extra = hook.drain();
+                    if !pid_set.is_empty() {
+                        extra.retain(|ev| {
+                            let pid = api.get_window_thread_process_id(ev.hwnd);
+                            pid_set.contains(&pid)
+                        });
+                    } else {
+                        extra.clear();
+                    }
+                    let _ = extra;
                 }
             }
+
             let _ = tick(
                 api.as_ref(),
-                &pids,
+                &cached_pids,
                 &settings,
                 &rules,
                 &mut snapshots,
@@ -378,6 +447,7 @@ pub fn spawn_worker(
                 ));
             }
         }
+        info!("engine worker loop exited: stopping={}", flags.stopping.load(Ordering::SeqCst));
         if flags.apply.load(Ordering::SeqCst) {
             let (failures, err) = restore_all(api.as_ref(), &mut snapshots);
             if failures > 0 {

@@ -14,7 +14,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
     DispatchMessageW, GetCursorPos, GetMessageW, GetWindowLongPtrW, LoadIconW, PostQuitMessage,
     RegisterClassW, SetForegroundWindow, SetWindowLongPtrW, TrackPopupMenu, TranslateMessage,
-    CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA, HWND_MESSAGE, IDI_APPLICATION, MF_CHECKED, MF_GRAYED,
+    CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA, IDI_APPLICATION, MF_CHECKED, MF_GRAYED,
     MF_SEPARATOR, MF_STRING, MSG, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
     WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_RBUTTONUP, WNDCLASSW,
 };
@@ -101,6 +101,8 @@ where
         ..Default::default()
     };
     let _ = RegisterClassW(&wc);
+    // Note: HWND_MESSAGE creates a message-only window which Shell_NotifyIconW rejects with 0x80004005 (E_FAIL).
+    // Shell_NotifyIconW requires a standard top-level window (parent: None) to receive shell callbacks.
     let hwnd = CreateWindowExW(
         WINDOW_EX_STYLE::default(),
         class,
@@ -110,7 +112,7 @@ where
         0,
         0,
         0,
-        Some(HWND_MESSAGE),
+        None,
         None,
         Some(instance.into()),
         None,
@@ -126,8 +128,15 @@ where
         ..Default::default()
     };
     write_tip(&mut nid, "KakaoTalk Layout AdBlocker");
-    if !Shell_NotifyIconW(NIM_ADD, &nid).as_bool() {
-        return Err("Shell_NotifyIconW NIM_ADD failed".into());
+    let mut added = Shell_NotifyIconW(NIM_ADD, &nid).as_bool();
+    if !added {
+        let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        added = Shell_NotifyIconW(NIM_ADD, &nid).as_bool();
+    }
+    if !added {
+        let err = windows::Win32::Foundation::GetLastError();
+        return Err(format!("Shell_NotifyIconW NIM_ADD failed: {err:?}"));
     }
 
     let mut host = TrayHost {

@@ -232,6 +232,7 @@ pub fn run_with_args(args: Args) -> i32 {
     }
 
     let worker = spawn_worker(api, flags.clone(), settings.clone(), rules);
+    info!("spawn_worker completed in main thread");
 
     if let Some(ref trace_path) = args.startup_trace {
         let trace = serde_json::json!({
@@ -382,16 +383,25 @@ pub fn run_with_args(args: Args) -> i32 {
             },
         ) {
             tracing::warn!("tray unavailable: {err}");
-            let _ = std::sync::mpsc::channel::<()>()
-                .1
-                .recv_timeout(Duration::from_secs(60 * 60 * 24));
+            info!("tray unavailable, main thread joining worker directly");
+            match worker.join() {
+                Ok(_) => return 0,
+                Err(_) => {
+                    error!("engine worker panic");
+                    return 1;
+                }
+            }
         }
     }
     #[cfg(not(windows))]
     {
-        let _ = std::sync::mpsc::channel::<()>()
-            .1
-            .recv_timeout(Duration::from_secs(60 * 60 * 24));
+        match worker.join() {
+            Ok(_) => return 0,
+            Err(_) => {
+                error!("engine worker panic");
+                return 1;
+            }
+        }
     }
     flags
         .stopping

@@ -45,12 +45,13 @@ impl Win32Api for RealWin32 {
     fn enum_windows(&self, cb: &mut dyn FnMut(i64) -> bool) -> bool {
         ENUM_ACCUM.with(|acc| acc.borrow_mut().clear());
         let ok = unsafe { EnumWindows(Some(enum_proc), LPARAM(0)) }.is_ok();
-        let hwnds = ENUM_ACCUM.with(|acc| acc.borrow().clone());
-        for hwnd in hwnds {
-            if !cb(hwnd) {
-                break;
+        ENUM_ACCUM.with(|acc| {
+            for &hwnd in acc.borrow().iter() {
+                if !cb(hwnd) {
+                    break;
+                }
             }
-        }
+        });
         ok
     }
 
@@ -59,12 +60,13 @@ impl Win32Api for RealWin32 {
         let ok =
             unsafe { EnumChildWindows(Some(hwnd_from_i64(parent)), Some(enum_proc), LPARAM(0)) }
                 .as_bool();
-        let hwnds = ENUM_ACCUM.with(|acc| acc.borrow().clone());
-        for hwnd in hwnds {
-            if !cb(hwnd) {
-                break;
+        ENUM_ACCUM.with(|acc| {
+            for &hwnd in acc.borrow().iter() {
+                if !cb(hwnd) {
+                    break;
+                }
             }
-        }
+        });
         ok
     }
 
@@ -91,6 +93,9 @@ impl Win32Api for RealWin32 {
         let length_error = unsafe { windows::Win32::Foundation::GetLastError() }.0;
         if length < 0 || (length == 0 && length_error != 0) {
             return window_text_from_length_and_copy(length, length_error, 0, 0, 1, "");
+        }
+        if length == 0 {
+            return WindowText::Known(String::new());
         }
         let buffer_len = length.saturating_add(1).max(1);
         let mut buf = vec![0u16; buffer_len as usize];

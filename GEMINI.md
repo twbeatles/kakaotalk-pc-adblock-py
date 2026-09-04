@@ -39,7 +39,9 @@
 - dump/report/startup-trace write failures return stderr plus exit `1`; `--dump-series-duration-ms` is capped at `10000` and `--dump-series-interval-ms` is floored at `10`
 - package `kakao_adblocker` exports are lazy-resolved via `__getattr__`
 - static analysis baseline is fixed by root `pyrightconfig.json`; active scope is `kakao_adblocker`, `tests`, and `kakaotalk_layout_adblock_v11.py`
-- preferred local verification entrypoint is `.\scripts\dev_check.ps1` (`-SkipTests` runs pyright only)
+- preferred local verification entrypoint is `.\scripts\dev_check.ps1` (`-SkipTests` runs format/clippy/pyright only)
+- `scripts/dev_check.ps1` covers Rust `fmt --check`, `clippy`, `cargo test` alongside Python `pyright` and `pytest`, ensuring local checks match `windows-ci.yml`
+- `.githooks/pre-commit` enforces `.\scripts\dev_check.ps1 -SkipTests` to prevent CI failures from slipping into commits
 - `scripts/dev_check.ps1` / `scripts/smoke_check.ps1` use `--basetemp .pytest_tmp` and clean the workspace-local pytest temp directory when possible
 
 ## Architecture

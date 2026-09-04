@@ -1,0 +1,7 @@
+#!/bin/sh
+echo "Running pre-commit check via scripts/dev_check.ps1..."
+powershell -ExecutionPolicy Bypass -File ./scripts/dev_check.ps1 -SkipTests
+if [ $? -ne 0 ]; then
+    echo "Pre-commit check failed. Please fix formatting or clippy warnings before committing."
+    exit 1
+fi

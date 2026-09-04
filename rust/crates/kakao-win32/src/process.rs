@@ -64,7 +64,7 @@ fn eq_wide_ascii_case(buf: &[u16], target: &[u16]) -> bool {
         return false;
     }
     slice.iter().zip(target.iter()).all(|(&a, &b)| {
-        let a_lower = if (b'A'..=b'Z').contains(&(a as u8)) && a <= 127 {
+        let a_lower = if a <= 127 && (a as u8).is_ascii_uppercase() {
             a + 32
         } else {
             a

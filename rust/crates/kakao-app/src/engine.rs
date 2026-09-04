@@ -337,12 +337,15 @@ pub fn spawn_worker(
             // Interval-throttled PID scan with fast liveness check:
             // When KakaoTalk PIDs are known and alive, use ultra-fast liveness checks (0.001ms)
             // and perform full process snapshot (9ms) only every 5 seconds or when a PID dies.
-            let pid_scan_interval = Duration::from_millis(u64::from(settings.pid_scan_interval_ms.max(200)));
+            let pid_scan_interval =
+                Duration::from_millis(u64::from(settings.pid_scan_interval_ms.max(200)));
             let full_sync_interval = Duration::from_secs(5);
             #[cfg(windows)]
             {
                 let pids_alive = !cached_pids.is_empty()
-                    && cached_pids.iter().all(|&pid| kakao_win32::process::is_process_alive(pid));
+                    && cached_pids
+                        .iter()
+                        .all(|&pid| kakao_win32::process::is_process_alive(pid));
                 let need_scan = if pids_alive {
                     last_pid_scan.elapsed() >= full_sync_interval
                 } else {
@@ -403,7 +406,8 @@ pub fn spawn_worker(
             if events.is_empty() && !due_recon && !due_burst {
                 #[cfg(windows)]
                 if let Some(hook) = hook.as_ref() {
-                    let remaining = Duration::from_millis(idle_ms).saturating_sub(last_full.elapsed());
+                    let remaining =
+                        Duration::from_millis(idle_ms).saturating_sub(last_full.elapsed());
                     let wait = remaining.max(Duration::from_millis(10));
                     hook.wait_message(wait);
                     continue;
@@ -413,7 +417,9 @@ pub fn spawn_worker(
             }
 
             if !events.is_empty() {
-                thread::sleep(Duration::from_millis(u64::from(settings.burst_scan_interval_ms.max(10))));
+                thread::sleep(Duration::from_millis(u64::from(
+                    settings.burst_scan_interval_ms.max(10),
+                )));
                 #[cfg(windows)]
                 if let Some(hook) = hook.as_ref() {
                     let mut extra = hook.drain();
@@ -447,7 +453,10 @@ pub fn spawn_worker(
                 ));
             }
         }
-        info!("engine worker loop exited: stopping={}", flags.stopping.load(Ordering::SeqCst));
+        info!(
+            "engine worker loop exited: stopping={}",
+            flags.stopping.load(Ordering::SeqCst)
+        );
         if flags.apply.load(Ordering::SeqCst) {
             let (failures, err) = restore_all(api.as_ref(), &mut snapshots);
             if failures > 0 {

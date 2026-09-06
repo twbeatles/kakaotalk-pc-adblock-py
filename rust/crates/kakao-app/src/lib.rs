@@ -6,15 +6,18 @@ pub mod self_check;
 pub mod startup;
 pub mod updater;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
 use tracing::{error, info};
 
-use config::{load_rules, load_settings, runtime_paths, VERSION};
-use dump::{dump_payload, write_json};
+use config::{
+    ensure_runtime_files, load_rules, load_settings, rotate_log_if_needed, runtime_paths, VERSION,
+};
+use dump::{dump_payload, dump_payload_with_states, write_json};
 use engine::{spawn_worker, tick, SharedFlags};
 
 #[derive(Parser, Debug)]
@@ -81,10 +84,15 @@ pub fn run_with_args(args: Args) -> i32 {
     let interval = args.dump_series_interval_ms.max(10);
     let paths = runtime_paths();
     let _ = std::fs::create_dir_all(&paths.appdata_dir);
-    init_tracing(Some(&paths.log_file));
 
     if args.self_check {
-        return self_check::run(args.json, args.self_check_report.as_deref());
+        rotate_log_if_needed(&paths.log_file);
+        init_tracing(Some(&paths.log_file), "INFO");
+        return self_check::run(
+            args.json,
+            args.self_check_report.as_deref(),
+            args.strict_self_check,
+        );
     }
     if args.check_update {
         return match updater::check_for_update() {
@@ -103,9 +111,16 @@ pub fn run_with_args(args: Args) -> i32 {
         };
     }
 
+    let bootstrap_warnings = ensure_runtime_files(&paths);
     let (mut settings, warnings) = load_settings(&paths.settings_file);
     let (rules, rule_warnings) = load_rules(&paths.rules_file);
-    for warning in warnings.into_iter().chain(rule_warnings) {
+    rotate_log_if_needed(&paths.log_file);
+    init_tracing(Some(&paths.log_file), &settings.log_level);
+    for warning in bootstrap_warnings
+        .into_iter()
+        .chain(warnings)
+        .chain(rule_warnings)
+    {
         tracing::warn!("{warning}");
     }
     if args.startup_launch || args.minimized {
@@ -150,12 +165,13 @@ pub fn run_with_args(args: Args) -> i32 {
             return 0;
         }
         let mut frames = Vec::new();
+        let mut states = HashMap::new();
         let deadline =
             std::time::Instant::now() + Duration::from_millis(args.dump_series_duration_ms);
         loop {
             #[cfg(windows)]
             let pids: Vec<i64> = kakao_win32::process::kakaotalk_pids().into_iter().collect();
-            let payload = dump_payload(api.as_ref(), &pids, &core, &rules);
+            let payload = dump_payload_with_states(api.as_ref(), &pids, &core, &rules, &mut states);
             frames.push(payload);
             if std::time::Instant::now() >= deadline {
                 break;
@@ -231,35 +247,45 @@ pub fn run_with_args(args: Args) -> i32 {
         return 0;
     }
 
+    if settings.run_on_startup {
+        let expected = crate::startup::build_command();
+        match crate::startup::registration_health(
+            crate::startup::current_command().as_deref(),
+            &expected,
+        ) {
+            "missing" => {
+                if !crate::startup::set_enabled(true) {
+                    tracing::warn!("시작프로그램 등록이 없어 복구를 시도했으나 실패했습니다.");
+                }
+            }
+            "custom" => {
+                tracing::info!("시작프로그램에 사용자 지정 명령이 있어 자동 복구하지 않습니다.");
+            }
+            _ => {}
+        }
+    }
+
     let worker = spawn_worker(api, flags.clone(), settings.clone(), rules);
     info!("spawn_worker completed in main thread");
-
-    if let Some(ref trace_path) = args.startup_trace {
-        let trace = serde_json::json!({
-            "startup_launch": args.startup_launch,
-            "minimized_requested": args.minimized || args.startup_launch,
-            "shell_wait_attempted": true,
-            "shell_wait_ok": true,
-            "tray_import_ok": true,
-            "tray_available": true,
-            "tray_start_error": "",
-            "window_hidden_after_start": true,
-        });
-        if let Some(parent) = trace_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(
-            trace_path,
-            serde_json::to_string_pretty(&trace).unwrap_or_default(),
-        );
-    }
+    let pending_update: Arc<Mutex<Option<updater::StagedUpdate>>> = Arc::new(Mutex::new(None));
+    let startup_trace = args.startup_trace.clone();
+    let startup_launch = args.startup_launch;
+    let minimized_requested = args.minimized || args.startup_launch;
 
     if let Some(exit_ms) = args.exit_after_startup_ms {
         let stopping = flags.stopping.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(exit_ms));
             stopping.store(true, std::sync::atomic::Ordering::SeqCst);
-            std::process::exit(0);
+            #[cfg(windows)]
+            {
+                for _ in 0..50 {
+                    if kakao_win32::tray::request_exit() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
         });
     }
     #[cfg(windows)]
@@ -273,8 +299,9 @@ pub fn run_with_args(args: Args) -> i32 {
         let flags_for_tray = flags.clone();
         let settings_path = paths.settings_file.clone();
         let log_dir = paths.appdata_dir.clone();
+        let pending_for_tray = pending_update.clone();
         let mut settings = settings;
-        if let Err(err) = kakao_win32::tray::run_loop(
+        let tray_result = kakao_win32::tray::run_loop_with_ready(
             TrayFlags {
                 enabled: flags.enabled.clone(),
                 aggressive: flags.aggressive.clone(),
@@ -327,50 +354,57 @@ pub fn run_with_args(args: Args) -> i32 {
                     );
                 }
                 TrayCommand::CheckUpdate => {
+                    if !updater::try_begin_update() {
+                        show_info_box("업데이트 확인", "업데이트 작업이 이미 진행 중입니다.");
+                        return;
+                    }
                     let stopping = flags_for_tray.stopping.clone();
+                    let pending = pending_for_tray.clone();
                     std::thread::spawn(move || {
                         info!("checking for updates in background thread");
                         match updater::check_for_update() {
                             Ok(manifest) => {
                                 info!("update available: {}", manifest.version);
-                                #[cfg(windows)]
-                                {
-                                    let msg = format!(
-                                        "새 버전 v{}가 출시되었습니다.\n\n지금 업데이트를 다운로드하고 프로그램을 재시작하시겠습니까?",
-                                        manifest.version
-                                    );
-                                    if ask_yes_no("업데이트 확인", &msg) {
-                                        info!("user accepted update, applying...");
-                                        match updater::apply_update(&manifest) {
-                                            Ok(()) => {
-                                                info!(
-                                                    "update helper launched successfully, exiting"
-                                                );
-                                                stopping.store(true, Ordering::SeqCst);
-                                                std::process::exit(0);
-                                            }
-                                            Err(err) => {
-                                                error!(%err, "failed to apply update");
-                                                show_error_box(
-                                                    "업데이트 실패",
-                                                    &format!("업데이트 적용 중 오류가 발생했습니다:\n{err}"),
-                                                );
-                                            }
+                                let msg = format!(
+                                    "새 버전 v{}가 출시되었습니다.\n\n지금 업데이트를 다운로드하고 프로그램을 재시작하시겠습니까?",
+                                    manifest.version
+                                );
+                                if !ask_yes_no("업데이트 확인", &msg) {
+                                    updater::end_update();
+                                    return;
+                                }
+                                info!("user accepted update, preparing...");
+                                match updater::prepare_update(&manifest) {
+                                    Ok(staged) => {
+                                        if let Ok(mut guard) = pending.lock() {
+                                            *guard = Some(staged);
                                         }
+                                        stopping.store(true, Ordering::SeqCst);
+                                        let _ = kakao_win32::tray::request_exit();
+                                    }
+                                    Err(err) => {
+                                        updater::end_update();
+                                        error!(%err, "failed to prepare update");
+                                        show_error_box(
+                                            "업데이트 실패",
+                                            &format!(
+                                                "업데이트 적용 중 오류가 발생했습니다:\n{err}"
+                                            ),
+                                        );
                                     }
                                 }
                             }
                             Err(updater::UpdateError::NoUpdate) => {
+                                updater::end_update();
                                 info!("already running latest version");
-                                #[cfg(windows)]
                                 show_info_box(
                                     "업데이트 확인",
                                     &format!("현재 최신 버전(v{})을 사용 중입니다.", VERSION),
                                 );
                             }
                             Err(err) => {
+                                updater::end_update();
                                 tracing::warn!(%err, "update check failed");
-                                #[cfg(windows)]
                                 show_error_box(
                                     "업데이트 확인 실패",
                                     &format!("업데이트 정보를 확인하지 못했습니다:\n{err}"),
@@ -381,16 +415,40 @@ pub fn run_with_args(args: Args) -> i32 {
                 }
                 TrayCommand::Exit => {}
             },
-        ) {
+            {
+                let startup_trace = startup_trace.clone();
+                move || {
+                    write_startup_trace(
+                        startup_trace.as_deref(),
+                        startup_launch,
+                        minimized_requested,
+                        true,
+                        "",
+                    );
+                }
+            },
+        );
+        if let Err(err) = tray_result {
             tracing::warn!("tray unavailable: {err}");
-            info!("tray unavailable, main thread joining worker directly");
-            match worker.join() {
-                Ok(_) => return 0,
+            write_startup_trace(
+                startup_trace.as_deref(),
+                startup_launch,
+                minimized_requested,
+                false,
+                &err,
+            );
+            flags
+                .stopping
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            info!("tray unavailable, stopping worker then exiting");
+            let join_code = match worker.join() {
+                Ok(_) => 1,
                 Err(_) => {
                     error!("engine worker panic");
-                    return 1;
+                    1
                 }
-            }
+            };
+            return join_code;
         }
     }
     #[cfg(not(windows))]
@@ -406,12 +464,35 @@ pub fn run_with_args(args: Args) -> i32 {
     flags
         .stopping
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    match worker.join() {
-        Ok(_) => 0,
+    let join_ok = match worker.join() {
+        Ok(_) => true,
         Err(_) => {
             error!("engine worker panic");
-            1
+            false
         }
+    };
+    let staged = pending_update
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.take());
+    if let Some(staged) = staged {
+        match updater::launch_helper(&staged) {
+            Ok(()) => {
+                info!("update helper launched after restore");
+                updater::end_update();
+                return if join_ok { 0 } else { 1 };
+            }
+            Err(err) => {
+                updater::end_update();
+                error!(%err, "failed to launch update helper after restore");
+                return 1;
+            }
+        }
+    }
+    if join_ok {
+        0
+    } else {
+        1
     }
 }
 
@@ -457,10 +538,45 @@ fn ask_yes_no(title: &str, text: &str) -> bool {
     }
 }
 
-fn init_tracing(log_path: Option<&std::path::Path>) {
+fn write_startup_trace(
+    path: Option<&std::path::Path>,
+    startup_launch: bool,
+    minimized_requested: bool,
+    tray_available: bool,
+    tray_start_error: &str,
+) {
+    let Some(trace_path) = path else {
+        return;
+    };
+    let trace = serde_json::json!({
+        "startup_launch": startup_launch,
+        "minimized_requested": minimized_requested,
+        "shell_wait_attempted": true,
+        "shell_wait_ok": tray_available,
+        "tray_import_ok": tray_available,
+        "tray_available": tray_available,
+        "tray_start_error": tray_start_error,
+        "window_hidden_after_start": tray_available,
+    });
+    if let Some(parent) = trace_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(
+        trace_path,
+        serde_json::to_string_pretty(&trace).unwrap_or_default(),
+    );
+}
+
+fn init_tracing(log_path: Option<&std::path::Path>, log_level: &str) {
     use tracing_subscriber::prelude::*;
-    let env_filter = tracing_subscriber::EnvFilter::from_default_env()
-        .add_directive(tracing::Level::INFO.into());
+    let level = match log_level.to_ascii_uppercase().as_str() {
+        "TRACE" => tracing::Level::TRACE,
+        "DEBUG" => tracing::Level::DEBUG,
+        "WARN" | "WARNING" => tracing::Level::WARN,
+        "ERROR" => tracing::Level::ERROR,
+        _ => tracing::Level::INFO,
+    };
+    let env_filter = tracing_subscriber::EnvFilter::from_default_env().add_directive(level.into());
 
     let fmt_layer = tracing_subscriber::fmt::layer();
 

@@ -93,3 +93,91 @@ fn malformed_json_creates_broken_backup_and_heals() {
 
     let _ = fs::remove_dir_all(&temp_dir);
 }
+
+#[test]
+fn typed_rules_field_error_does_not_panic_and_warns() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "kakao_rules_typed_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let path = temp_dir.join("layout_rules_v11.json");
+    fs::write(
+        &path,
+        r#"{"popup_search_depth":"2","banner_min_height_px":77}"#,
+    )
+    .unwrap();
+
+    let (rules, warnings) = load_rules(&path);
+    assert!(
+        warnings.iter().any(|w| w.contains("popup_search_depth")),
+        "expected type warning, got {warnings:?}"
+    );
+    assert_eq!(
+        rules.popup_search_depth, 2,
+        "invalid field uses default then clamp"
+    );
+    assert_eq!(rules.banner_min_height_px, 77);
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn typed_settings_preserves_valid_fields() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "kakao_settings_typed_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let path = temp_dir.join("layout_settings_v11.json");
+    fs::write(
+        &path,
+        r#"{"enabled":false,"poll_interval_ms":"bad","aggressive_mode":false}"#,
+    )
+    .unwrap();
+
+    let (settings, warnings) = load_settings(&path);
+    assert!(
+        warnings.iter().any(|w| w.contains("poll_interval_ms")),
+        "expected type warning, got {warnings:?}"
+    );
+    assert!(
+        !settings.enabled,
+        "valid enabled=false must be preserved instead of resetting all defaults"
+    );
+    assert!(!settings.aggressive_mode);
+    assert_eq!(settings.poll_interval_ms, 50);
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn typed_rules_null_and_bad_array_keep_defaults() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "kakao_rules_null_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let path = temp_dir.join("layout_rules_v11.json");
+    fs::write(
+        &path,
+        r#"{"popup_ad_classes":"AdFitWebView","popup_host_text_contains":null,"weak_signal_confirm_ticks":-1}"#,
+    )
+    .unwrap();
+    let (rules, warnings) = load_rules(&path);
+    assert!(warnings.iter().any(|w| w.contains("popup_ad_classes")));
+    assert!(warnings
+        .iter()
+        .any(|w| w.contains("popup_host_text_contains")));
+    assert_eq!(rules.popup_ad_classes, vec!["AdFitWebView".to_string()]);
+    assert!(rules.popup_host_text_contains.is_empty());
+    assert_eq!(rules.weak_signal_confirm_ticks, -1);
+    let _ = fs::remove_dir_all(&temp_dir);
+}

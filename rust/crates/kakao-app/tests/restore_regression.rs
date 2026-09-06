@@ -253,6 +253,116 @@ fn kakaotalk_restart_ignores_stale_snapshots() {
 }
 
 #[test]
+fn popup_hide_fallback_stays_hidden_across_ticks() {
+    let dump = fs::read_to_string(
+        repo_root().join("tests/fixtures/window_dumps/popup_adfit_webview.json"),
+    )
+    .unwrap();
+    let api = FakeWin32::from_dump_json(&dump).unwrap();
+    let pids = api.pids();
+    let settings = AppSettings {
+        enabled: true,
+        aggressive_mode: true,
+        ..AppSettings::default()
+    };
+    let flags = SharedFlags::from_settings(&settings, true);
+    let rules = LayoutRules::default();
+    let mut snapshots = HashMap::new();
+    let mut states = HashMap::new();
+    let mut stale_miss = HashMap::new();
+    let host = 200;
+
+    for _ in 0..20 {
+        tick(
+            &api,
+            &pids,
+            &settings,
+            &rules,
+            &mut snapshots,
+            &mut states,
+            &mut stale_miss,
+            &flags,
+        );
+        assert!(
+            !api.is_window_visible(host),
+            "close-refused popup host must stay hidden while the AdFit signal remains"
+        );
+    }
+
+    api.set_class_name(201, "NotAnAd");
+    tick(
+        &api,
+        &pids,
+        &settings,
+        &rules,
+        &mut snapshots,
+        &mut states,
+        &mut stale_miss,
+        &flags,
+    );
+    tick(
+        &api,
+        &pids,
+        &settings,
+        &rules,
+        &mut snapshots,
+        &mut states,
+        &mut stale_miss,
+        &flags,
+    );
+    assert!(
+        api.is_window_visible(host),
+        "popup must restore after the ad class disappears and grace ticks elapse"
+    );
+}
+
+#[test]
+fn failed_restore_keeps_snapshot_and_retries() {
+    let (api, pids) = load_owned_popup_fake();
+    let settings = AppSettings {
+        enabled: true,
+        aggressive_mode: true,
+        ..AppSettings::default()
+    };
+    let flags = SharedFlags::from_settings(&settings, true);
+    let rules = LayoutRules::default();
+    let mut snapshots = HashMap::new();
+    let mut states = HashMap::new();
+    let mut stale_miss = HashMap::new();
+    let ad_hwnd = 527936;
+
+    tick(
+        &api,
+        &pids,
+        &settings,
+        &rules,
+        &mut snapshots,
+        &mut states,
+        &mut stale_miss,
+        &flags,
+    );
+    assert!(!api.is_window_visible(ad_hwnd));
+    assert!(snapshots.values().any(|s| s.identity.hwnd == ad_hwnd));
+
+    api.set_fail_show_window(ad_hwnd, true);
+    api.set_fail_set_window_pos(ad_hwnd, true);
+    let (failures, _) = restore_all(&api, &mut snapshots);
+    assert_eq!(failures, 1);
+    assert!(
+        snapshots.values().any(|s| s.identity.hwnd == ad_hwnd),
+        "failed restore must keep the original snapshot"
+    );
+    assert!(!api.is_window_visible(ad_hwnd));
+
+    api.set_fail_show_window(ad_hwnd, false);
+    api.set_fail_set_window_pos(ad_hwnd, false);
+    let (failures, err) = restore_all(&api, &mut snapshots);
+    assert_eq!(failures, 0, "retry restore failed: {err}");
+    assert!(api.is_window_visible(ad_hwnd));
+    assert!(!snapshots.values().any(|s| s.identity.hwnd == ad_hwnd));
+}
+
+#[test]
 fn disable_flag_blocks_mutations() {
     let (api, pids) = load_owned_popup_fake();
     let settings = AppSettings {

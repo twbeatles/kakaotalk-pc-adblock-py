@@ -90,8 +90,16 @@ jobs:
         shell: pwsh
         run: ..\dist\KakaoTalkLayoutAdBlocker_v11.exe --self-check --json
 
+      - name: Pack Release Zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Force -Path ..\dist\KakaoTalkLayoutAdBlocker_v11.exe,..\dist\kakao-updater.exe -DestinationPath ..\dist\KakaoTalkLayoutAdBlocker_v11.zip
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: KakaoTalkLayoutAdBlocker_v11
-          path: dist/KakaoTalkLayoutAdBlocker_v11.exe
+          path: |
+            dist/KakaoTalkLayoutAdBlocker_v11.exe
+            dist/kakao-updater.exe
+            dist/KakaoTalkLayoutAdBlocker_v11.zip

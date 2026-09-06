@@ -12,11 +12,12 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, GetCursorPos, GetMessageW, GetWindowLongPtrW, LoadIconW, PostQuitMessage,
-    RegisterClassW, SetForegroundWindow, SetWindowLongPtrW, TrackPopupMenu, TranslateMessage,
-    CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA, IDI_APPLICATION, MF_CHECKED, MF_GRAYED, MF_SEPARATOR,
-    MF_STRING, MSG, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_COMMAND,
-    WM_CONTEXTMENU, WM_DESTROY, WM_RBUTTONUP, WNDCLASSW,
+    DispatchMessageW, GetCursorPos, GetMessageW, GetWindowLongPtrW, LoadIconW, PostMessageW,
+    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow,
+    SetWindowLongPtrW, TrackPopupMenu, TranslateMessage, CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA,
+    IDI_APPLICATION, MF_CHECKED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, TPM_RIGHTBUTTON,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_RBUTTONUP,
+    WNDCLASSW,
 };
 
 // MAKEINTRESOURCE(1): first ICON resource embedded by kakao-app/build.rs.
@@ -26,6 +27,7 @@ fn app_icon_resource() -> PCWSTR {
 }
 
 const WM_TRAY: u32 = WM_APP + 1;
+static TRAY_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 pub const ID_TOGGLE_ENABLED: u32 = 1001;
 pub const ID_TOGGLE_AGGRESSIVE: u32 = 1002;
 pub const ID_TOGGLE_STARTUP: u32 = 1003;
@@ -76,18 +78,41 @@ where
     flags: TrayFlags,
     on_command: F,
     nid: NOTIFYICONDATAW,
+    taskbar_created: u32,
 }
 
 pub fn run_loop<F>(flags: TrayFlags, on_command: F) -> Result<(), String>
 where
     F: FnMut(TrayCommand),
 {
-    unsafe { run_loop_inner(flags, on_command) }
+    unsafe { run_loop_inner(flags, on_command, None::<fn()>) }
 }
 
-unsafe fn run_loop_inner<F>(flags: TrayFlags, on_command: F) -> Result<(), String>
+pub fn run_loop_with_ready<F, R>(flags: TrayFlags, on_command: F, on_ready: R) -> Result<(), String>
 where
     F: FnMut(TrayCommand),
+    R: FnOnce(),
+{
+    unsafe { run_loop_inner(flags, on_command, Some(on_ready)) }
+}
+
+pub fn request_exit() -> bool {
+    let raw = TRAY_HWND.load(Ordering::SeqCst);
+    if raw == 0 {
+        return false;
+    }
+    let hwnd = HWND(raw as *mut core::ffi::c_void);
+    unsafe { PostMessageW(Some(hwnd), WM_COMMAND, WPARAM(ID_EXIT as usize), LPARAM(0)) }.is_ok()
+}
+
+unsafe fn run_loop_inner<F, R>(
+    flags: TrayFlags,
+    on_command: F,
+    on_ready: Option<R>,
+) -> Result<(), String>
+where
+    F: FnMut(TrayCommand),
+    R: FnOnce(),
 {
     let instance = GetModuleHandleW(None).map_err(|err| err.to_string())?;
     let icon = load_app_icon(instance.into())?;
@@ -136,15 +161,22 @@ where
     }
     if !added {
         let err = windows::Win32::Foundation::GetLastError();
+        let _ = DestroyWindow(hwnd);
         return Err(format!("Shell_NotifyIconW NIM_ADD failed: {err:?}"));
     }
 
+    let taskbar_created = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
+    TRAY_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
     let mut host = TrayHost {
         flags,
         on_command,
         nid,
+        taskbar_created,
     };
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, std::ptr::addr_of_mut!(host) as isize);
+    if let Some(on_ready) = on_ready {
+        on_ready();
+    }
 
     let mut msg = MSG::default();
     while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -152,6 +184,7 @@ where
         DispatchMessageW(&msg);
     }
 
+    TRAY_HWND.store(0, Ordering::SeqCst);
     let _ = Shell_NotifyIconW(NIM_DELETE, &host.nid);
     Ok(())
 }
@@ -189,8 +222,16 @@ unsafe extern "system" fn wnd_proc<F: FnMut(TrayCommand)>(
         }
         WM_DESTROY => {
             unsafe {
+                TRAY_HWND.store(0, Ordering::SeqCst);
                 let _ = Shell_NotifyIconW(NIM_DELETE, &(*host).nid);
                 PostQuitMessage(0);
+            }
+            LRESULT(0)
+        }
+        msg if msg == unsafe { (*host).taskbar_created } && msg != 0 => {
+            unsafe {
+                let _ = Shell_NotifyIconW(NIM_DELETE, &(*host).nid);
+                let _ = Shell_NotifyIconW(NIM_ADD, &(*host).nid);
             }
             LRESULT(0)
         }

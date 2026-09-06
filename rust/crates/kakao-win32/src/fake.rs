@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use kakao_core::{Rect, WindowText};
@@ -43,6 +43,9 @@ struct Inner {
     children: HashMap<i64, Vec<i64>>,
     pids: Vec<i64>,
     last_error: u32,
+    flatten_enum_children: bool,
+    fail_set_pos: HashSet<i64>,
+    fail_show: HashSet<i64>,
 }
 
 pub struct FakeWin32 {
@@ -57,6 +60,9 @@ impl FakeWin32 {
             children: HashMap::new(),
             pids: dump.pids,
             last_error: 0,
+            flatten_enum_children: false,
+            fail_set_pos: HashSet::new(),
+            fail_show: HashSet::new(),
         };
         for node in dump.windows {
             load_node(&mut inner, node, 0);
@@ -94,10 +100,49 @@ impl FakeWin32 {
         });
     }
 
+    pub fn set_flatten_enum_children(&self, flatten: bool) {
+        self.with(|inner| inner.flatten_enum_children = flatten);
+    }
+
+    pub fn set_fail_set_window_pos(&self, hwnd: i64, fail: bool) {
+        self.with(|inner| {
+            if fail {
+                inner.fail_set_pos.insert(hwnd);
+            } else {
+                inner.fail_set_pos.remove(&hwnd);
+            }
+        });
+    }
+
+    pub fn set_fail_show_window(&self, hwnd: i64, fail: bool) {
+        self.with(|inner| {
+            if fail {
+                inner.fail_show.insert(hwnd);
+            } else {
+                inner.fail_show.remove(&hwnd);
+            }
+        });
+    }
+
     fn with<R>(&self, f: impl FnOnce(&mut Inner) -> R) -> R {
         let mut inner = self.inner.lock().expect("fake lock");
         f(&mut inner)
     }
+}
+
+fn collect_descendants(inner: &Inner, parent: i64) -> Vec<i64> {
+    let mut out = Vec::new();
+    let mut queue = inner.children.get(&parent).cloned().unwrap_or_default();
+    let mut index = 0;
+    while index < queue.len() {
+        let hwnd = queue[index];
+        index += 1;
+        out.push(hwnd);
+        if let Some(children) = inner.children.get(&hwnd) {
+            queue.extend(children.iter().copied());
+        }
+    }
+    out
 }
 
 fn load_node(inner: &mut Inner, node: DumpNode, parent: i64) {
@@ -143,7 +188,13 @@ impl Win32Api for FakeWin32 {
     }
 
     fn enum_child_windows(&self, parent: i64, cb: &mut dyn FnMut(i64) -> bool) -> bool {
-        let children = self.with(|inner| inner.children.get(&parent).cloned().unwrap_or_default());
+        let children = self.with(|inner| {
+            if inner.flatten_enum_children {
+                collect_descendants(inner, parent)
+            } else {
+                inner.children.get(&parent).cloned().unwrap_or_default()
+            }
+        });
         for hwnd in children {
             if !cb(hwnd) {
                 break;
@@ -218,6 +269,9 @@ impl Win32Api for FakeWin32 {
 
     fn show_window(&self, hwnd: i64, cmd: i32) -> bool {
         self.with(|inner| {
+            if inner.fail_show.contains(&hwnd) {
+                return false;
+            }
             let Some(rec) = inner.windows.get_mut(&hwnd) else {
                 return false;
             };
@@ -240,6 +294,9 @@ impl Win32Api for FakeWin32 {
         flags: u32,
     ) -> bool {
         self.with(|inner| {
+            if inner.fail_set_pos.contains(&hwnd) {
+                return false;
+            }
             let Some(rec) = inner.windows.get_mut(&hwnd) else {
                 return false;
             };

@@ -60,8 +60,13 @@ impl Win32Api for RealWin32 {
         let ok =
             unsafe { EnumChildWindows(Some(hwnd_from_i64(parent)), Some(enum_proc), LPARAM(0)) }
                 .as_bool();
+        // Win32 EnumChildWindows walks all descendants. The API contract is
+        // direct children only; filter by GetParent == parent.
         ENUM_ACCUM.with(|acc| {
             for &hwnd in acc.borrow().iter() {
+                if self.get_parent(hwnd) != parent {
+                    continue;
+                }
                 if !cb(hwnd) {
                     break;
                 }

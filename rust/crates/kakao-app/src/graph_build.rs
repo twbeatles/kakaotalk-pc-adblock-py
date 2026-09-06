@@ -54,11 +54,21 @@ fn load_tree(
         rect: api.get_window_rect(hwnd),
         visible: api.is_window_visible(hwnd),
     });
-    let mut children = Vec::new();
+    // EnumChildWindows returns every descendant. Keep only windows whose
+    // GetParent is this hwnd so graph edges match the real child tree.
+    // Owned popups are top-level (not child windows); their owner is recorded
+    // on the node above and is not a structural parent edge.
+    let mut enumerated = Vec::new();
     api.enum_child_windows(hwnd, &mut |child| {
-        children.push(child);
+        enumerated.push(child);
         true
     });
+    let mut children = Vec::new();
+    for child in enumerated {
+        if api.get_parent(child) == hwnd {
+            children.push(child);
+        }
+    }
     for &child in &children {
         load_tree(api, graph, child, Some(hwnd), pid, visited);
     }

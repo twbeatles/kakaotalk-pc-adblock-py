@@ -1,5 +1,7 @@
 use std::io::Read;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -18,6 +20,11 @@ pub const LEGACY_RELEASE_DOWNLOAD_PREFIX: &str =
     "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases/download/";
 const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 const MAX_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const HTTP_READ_TIMEOUT: Duration = Duration::from_secs(60);
+const HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(90);
+static UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+static STAGING_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[derive(Debug, Error)]
 pub enum UpdateError {
@@ -272,12 +279,42 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
+fn http_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(HTTP_CONNECT_TIMEOUT)
+        .timeout_read(HTTP_READ_TIMEOUT)
+        .timeout(HTTP_TOTAL_TIMEOUT)
+        .user_agent(USER_AGENT)
+        .build()
+}
+
+pub fn try_begin_update() -> bool {
+    UPDATE_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
+pub fn end_update() {
+    UPDATE_IN_PROGRESS.store(false, Ordering::SeqCst);
+}
+
+pub fn update_in_progress() -> bool {
+    UPDATE_IN_PROGRESS.load(Ordering::SeqCst)
+}
+
+#[derive(Debug, Clone)]
+pub struct StagedUpdate {
+    pub helper: PathBuf,
+    pub current_exe: PathBuf,
+    pub replacement: PathBuf,
+}
+
 pub fn download_and_verify(
     manifest: &UpdateManifest,
     dest: &std::path::Path,
 ) -> Result<(), UpdateError> {
-    let response = ureq::get(&manifest.artifact_url)
-        .set("User-Agent", USER_AGENT)
+    let response = http_agent()
+        .get(&manifest.artifact_url)
         .call()
         .map_err(|err| UpdateError::Message(format!("업데이트 다운로드 실패: {err}")))?;
     let mut bytes = Vec::new();
@@ -296,65 +333,87 @@ pub fn download_and_verify(
             "업데이트 파일 해시가 일치하지 않습니다.".into(),
         ));
     }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| UpdateError::Message(format!("업데이트 저장 실패: {err}")))?;
+    }
     std::fs::write(dest, bytes)
         .map_err(|err| UpdateError::Message(format!("업데이트 저장 실패: {err}")))?;
     Ok(())
 }
 
-fn find_or_extract_helper(
-    current_exe: &std::path::Path,
-) -> Result<std::path::PathBuf, UpdateError> {
-    let current_dir = current_exe
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."));
-    let same_dir = current_dir.join("kakao-updater.exe");
-    if same_dir.is_file() {
-        return Ok(same_dir);
-    }
-    // Check target dirs for dev/test runs
-    let candidates = [
+pub fn resolve_helper(current_exe: &Path) -> Result<PathBuf, UpdateError> {
+    let current_dir = current_exe.parent().unwrap_or_else(|| Path::new("."));
+    let mut candidates = vec![current_dir.join("kakao-updater.exe")];
+    candidates.extend([
         current_dir.join("target/release/kakao-updater.exe"),
         current_dir.join("target/debug/kakao-updater.exe"),
         current_dir.join("../target/release/kakao-updater.exe"),
         current_dir.join("../target/debug/kakao-updater.exe"),
         current_dir.join("../../target/release/kakao-updater.exe"),
         current_dir.join("../../target/debug/kakao-updater.exe"),
-    ];
+    ]);
     for cand in &candidates {
-        if cand.is_file() {
+        if helper_looks_valid(cand) {
             return Ok(cand.clone());
         }
     }
-    let temp_helper = std::env::temp_dir().join("kakao-updater.exe");
-    if temp_helper.is_file() {
-        return Ok(temp_helper);
-    }
     Err(UpdateError::Message(
-        "kakao-updater.exe 헬퍼 바이너리를 찾을 수 없습니다.".into(),
+        "kakao-updater.exe 헬퍼 바이너리를 찾을 수 없습니다. 앱과 같은 폴더에 함께 두세요.".into(),
     ))
 }
 
-pub fn apply_update(manifest: &UpdateManifest) -> Result<(), UpdateError> {
-    let temp_dir = std::env::temp_dir();
-    let temp_exe = temp_dir.join(format!(
-        "KakaoTalkLayoutAdBlocker_v11_update_{}.exe",
-        manifest.version
-    ));
+fn helper_looks_valid(path: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    bytes.len() >= 2 && bytes[0] == b'M' && bytes[1] == b'Z'
+}
 
-    download_and_verify(manifest, &temp_exe)?;
+pub fn unique_staging_path(prefix: &str, version: &str) -> PathBuf {
+    let seq = STAGING_SEQ.fetch_add(1, Ordering::SeqCst);
+    std::env::temp_dir().join(format!(
+        "{prefix}_{version}_{}_{}_{}.exe",
+        std::process::id(),
+        unix_now(),
+        seq
+    ))
+}
 
+pub fn stage_helper(src: &Path) -> Result<PathBuf, UpdateError> {
+    let dest = unique_staging_path("kakao-updater", "helper");
+    std::fs::copy(src, &dest)
+        .map_err(|err| UpdateError::Message(format!("업데이트 헬퍼 준비 실패: {err}")))?;
+    Ok(dest)
+}
+
+pub fn prepare_update(manifest: &UpdateManifest) -> Result<StagedUpdate, UpdateError> {
     let current_exe = std::env::current_exe()
         .map_err(|e| UpdateError::Message(format!("현재 실행 파일 경로 확인 실패: {e}")))?;
-    let helper_exe = find_or_extract_helper(&current_exe)?;
+    let helper_src = resolve_helper(&current_exe)?;
+    let helper = stage_helper(&helper_src)?;
+    let replacement = unique_staging_path("KakaoTalkLayoutAdBlocker_v11_update", &manifest.version);
+    if let Err(err) = download_and_verify(manifest, &replacement) {
+        let _ = std::fs::remove_file(&helper);
+        let _ = std::fs::remove_file(&replacement);
+        return Err(err);
+    }
+    Ok(StagedUpdate {
+        helper,
+        current_exe,
+        replacement,
+    })
+}
 
+pub fn launch_helper(staged: &StagedUpdate) -> Result<(), UpdateError> {
     let pid = std::process::id();
-    let mut cmd = std::process::Command::new(&helper_exe);
+    let mut cmd = std::process::Command::new(&staged.helper);
     cmd.arg("--pid")
         .arg(pid.to_string())
         .arg("--current")
-        .arg(&current_exe)
+        .arg(&staged.current_exe)
         .arg("--replacement")
-        .arg(&temp_exe);
+        .arg(&staged.replacement);
 
     #[cfg(windows)]
     {
@@ -364,13 +423,17 @@ pub fn apply_update(manifest: &UpdateManifest) -> Result<(), UpdateError> {
 
     cmd.spawn()
         .map_err(|e| UpdateError::Message(format!("업데이트 헬퍼 실행 실패: {e}")))?;
-
     Ok(())
 }
 
+pub fn apply_update(manifest: &UpdateManifest) -> Result<(), UpdateError> {
+    let staged = prepare_update(manifest)?;
+    launch_helper(&staged)
+}
+
 pub fn check_for_update() -> Result<UpdateManifest, UpdateError> {
-    let body = ureq::get(MANIFEST_URL)
-        .set("User-Agent", USER_AGENT)
+    let body = http_agent()
+        .get(MANIFEST_URL)
         .call()
         .map_err(|err| UpdateError::Message(format!("업데이트 정보 다운로드 실패: {err}")))?
         .into_string()
@@ -441,6 +504,44 @@ mod tests {
             "https://malicious.example.com/KakaoTalkLayoutAdBlocker_v11.exe",
             "v11.1.0"
         ));
+    }
+
+    #[test]
+    fn unique_staging_paths_differ() {
+        let left = unique_staging_path("KakaoTalkLayoutAdBlocker_v11_update", "11.1.2");
+        let right = unique_staging_path("KakaoTalkLayoutAdBlocker_v11_update", "11.1.2");
+        assert_ne!(left, right);
+        assert!(left
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .contains("11.1.2"));
+    }
+
+    #[test]
+    fn resolve_helper_rejects_temp_placeholder_and_accepts_mz() {
+        let dir = std::env::temp_dir().join(format!("kakao_helper_resolve_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake_app = dir.join("app.exe");
+        std::fs::write(&fake_app, b"MZ-app").unwrap();
+        assert!(resolve_helper(&fake_app).is_err());
+
+        let helper = dir.join("kakao-updater.exe");
+        std::fs::write(&helper, b"MZ-helper-bytes").unwrap();
+        let found = resolve_helper(&fake_app).unwrap();
+        assert_eq!(found, helper);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn try_begin_update_is_single_flight() {
+        end_update();
+        assert!(try_begin_update());
+        assert!(!try_begin_update());
+        end_update();
+        assert!(try_begin_update());
+        end_update();
     }
 
     #[test]

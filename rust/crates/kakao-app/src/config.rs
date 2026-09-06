@@ -7,7 +7,7 @@ use kakao_core::{LayoutRules, LayoutSettings};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const VERSION: &str = "11.1.1";
+pub const VERSION: &str = "11.1.2";
 pub const APPDATA_DIRNAME: &str = "KakaoTalkAdBlockerLayout";
 pub const SETTINGS_FILE: &str = "layout_settings_v11.json";
 pub const RULES_FILE: &str = "layout_rules_v11.json";
@@ -102,12 +102,22 @@ pub fn runtime_paths() -> RuntimePaths {
 }
 
 pub fn load_settings(path: &Path) -> (AppSettings, Vec<String>) {
-    load_json(path, "layout_settings_v11.json", AppSettings::default())
+    let (value, mut warnings) = load_json_value(path, "layout_settings_v11.json");
+    if value.is_null()
+        || (value.as_object().map(|o| o.is_empty()).unwrap_or(false) && !path.is_file())
+    {
+        return (AppSettings::default(), warnings);
+    }
+    let (settings, merge_warnings) =
+        merge_typed_settings(AppSettings::default(), &value, "layout_settings_v11.json");
+    warnings.extend(merge_warnings);
+    (settings, warnings)
 }
 
 pub fn load_rules(path: &Path) -> (LayoutRules, Vec<String>) {
     let (value, mut warnings) = load_json_value(path, "layout_rules_v11.json");
-    let mut rules = LayoutRules::default().overlay(&value);
+    let (mut rules, merge_warnings) = LayoutRules::default().overlay_with_warnings(&value);
+    warnings.extend(merge_warnings);
     if rules.banner_min_height_px > rules.banner_max_height_px {
         std::mem::swap(
             &mut rules.banner_min_height_px,
@@ -124,21 +134,46 @@ pub fn load_rules(path: &Path) -> (LayoutRules, Vec<String>) {
     (rules, warnings)
 }
 
-fn load_json<T: for<'de> Deserialize<'de> + Serialize + Default>(
-    path: &Path,
+fn merge_typed_settings(
+    base: AppSettings,
+    overrides: &Value,
     label: &str,
-    default: T,
-) -> (T, Vec<String>) {
-    let (value, warnings) = load_json_value(path, label);
-    if value.is_null()
-        || value.as_object().map(|o| o.is_empty()).unwrap_or(false) && !path.is_file()
-    {
-        return (default, warnings);
+) -> (AppSettings, Vec<String>) {
+    if overrides.is_null() {
+        return (base, Vec::new());
     }
-    match serde_json::from_value::<T>(value) {
-        Ok(parsed) => (parsed, warnings),
-        Err(_) => (default, warnings),
+    let Some(over) = overrides.as_object() else {
+        return (base, Vec::new());
+    };
+    if over.is_empty() {
+        return (base, Vec::new());
     }
+    let Ok(mut current) = serde_json::to_value(&base) else {
+        return (
+            base,
+            vec![format!("{label} 직렬화에 실패해 기본값을 유지합니다.")],
+        );
+    };
+    let mut result = base;
+    let mut warnings = Vec::new();
+    for (key, value) in over {
+        let mut trial = current.clone();
+        if let Some(map) = trial.as_object_mut() {
+            map.insert(key.clone(), value.clone());
+        }
+        match serde_json::from_value::<AppSettings>(trial.clone()) {
+            Ok(parsed) => {
+                current = trial;
+                result = parsed;
+            }
+            Err(_) => {
+                warnings.push(format!(
+                    "{label} 필드 '{key}' 타입이 올바르지 않아 기존/기본값을 유지합니다."
+                ));
+            }
+        }
+    }
+    (result, warnings)
 }
 
 fn load_json_value(path: &Path, label: &str) -> (Value, Vec<String>) {
@@ -212,6 +247,43 @@ pub fn atomic_write(path: &Path, text: &str) -> io::Result<()> {
     fs::rename(&tmp, path)
 }
 
+const BROKEN_BACKUP_MAX_AGE_SECS: u64 = 30 * 24 * 60 * 60;
+const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
+
+pub fn ensure_runtime_files(paths: &RuntimePaths) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if let Err(err) = fs::create_dir_all(&paths.appdata_dir) {
+        warnings.push(format!("APPDATA 디렉터리 생성 실패: {err}"));
+        return warnings;
+    }
+    if !paths.settings_file.is_file() {
+        match save_settings(&paths.settings_file, &AppSettings::default()) {
+            Ok(()) => {}
+            Err(err) => warnings.push(format!("layout_settings_v11.json 기본값 생성 실패: {err}")),
+        }
+    }
+    if !paths.rules_file.is_file() {
+        let body =
+            serde_json::to_string_pretty(&LayoutRules::default()).unwrap_or_else(|_| "{}".into());
+        if let Err(err) = atomic_write(&paths.rules_file, &format!("{body}\n")) {
+            warnings.push(format!("layout_rules_v11.json 기본값 생성 실패: {err}"));
+        }
+    }
+    warnings
+}
+
+pub fn rotate_log_if_needed(path: &Path) {
+    let Ok(meta) = fs::metadata(path) else {
+        return;
+    };
+    if meta.len() <= LOG_ROTATE_BYTES {
+        return;
+    }
+    let rotated = path.with_extension("log.1");
+    let _ = fs::remove_file(&rotated);
+    let _ = fs::rename(path, rotated);
+}
+
 fn cleanup_broken_backups(path: &Path) {
     let Some(parent) = path.parent() else {
         return;
@@ -220,6 +292,10 @@ fn cleanup_broken_backups(path: &Path) {
         "{}.broken-",
         path.file_name().and_then(|n| n.to_str()).unwrap_or("")
     );
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let mut backups: Vec<PathBuf> = fs::read_dir(parent)
         .ok()
         .into_iter()
@@ -232,6 +308,17 @@ fn cleanup_broken_backups(path: &Path) {
                 .is_some_and(|n| n.starts_with(&prefix))
         })
         .collect();
+    backups.retain(|p| {
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let stamp = name.rsplit('-').next().and_then(|s| s.parse::<u64>().ok());
+        if let Some(secs) = stamp {
+            if now.saturating_sub(secs) > BROKEN_BACKUP_MAX_AGE_SECS {
+                let _ = fs::remove_file(p);
+                return false;
+            }
+        }
+        true
+    });
     backups.sort();
     let keep = 10usize;
     if backups.len() > keep {

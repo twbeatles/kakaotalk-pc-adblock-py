@@ -81,22 +81,11 @@ impl Default for LayoutRules {
 
 impl LayoutRules {
     pub fn overlay(self, overrides: &serde_json::Value) -> Self {
-        if overrides.is_null() {
-            return self;
-        }
-        let Some(over) = overrides.as_object() else {
-            return self;
-        };
-        if over.is_empty() {
-            return self;
-        }
-        let mut base = serde_json::to_value(&self).expect("serialize rules");
-        if let Some(map) = base.as_object_mut() {
-            for (key, value) in over {
-                map.insert(key.clone(), value.clone());
-            }
-        }
-        serde_json::from_value(base).expect("merge rules")
+        self.overlay_with_warnings(overrides).0
+    }
+
+    pub fn overlay_with_warnings(self, overrides: &serde_json::Value) -> (Self, Vec<String>) {
+        merge_typed_overlay(self, overrides, "layout_rules_v11.json")
     }
 
     pub fn aggressive_ad_tokens_lc(&self) -> Vec<String> {
@@ -105,6 +94,47 @@ impl LayoutRules {
             .map(|token| token.to_lowercase())
             .collect()
     }
+}
+
+fn merge_typed_overlay<T>(base: T, overrides: &serde_json::Value, label: &str) -> (T, Vec<String>)
+where
+    T: serde::Serialize + for<'de> serde::Deserialize<'de> + Clone,
+{
+    if overrides.is_null() {
+        return (base, Vec::new());
+    }
+    let Some(over) = overrides.as_object() else {
+        return (base, Vec::new());
+    };
+    if over.is_empty() {
+        return (base, Vec::new());
+    }
+    let Ok(mut current) = serde_json::to_value(&base) else {
+        return (
+            base,
+            vec![format!("{label} 직렬화에 실패해 기본값을 유지합니다.")],
+        );
+    };
+    let mut result = base;
+    let mut warnings = Vec::new();
+    for (key, value) in over {
+        let mut trial = current.clone();
+        if let Some(map) = trial.as_object_mut() {
+            map.insert(key.clone(), value.clone());
+        }
+        match serde_json::from_value::<T>(trial.clone()) {
+            Ok(parsed) => {
+                current = trial;
+                result = parsed;
+            }
+            Err(_) => {
+                warnings.push(format!(
+                    "{label} 필드 '{key}' 타입이 올바르지 않아 기존/기본값을 유지합니다."
+                ));
+            }
+        }
+    }
+    (result, warnings)
 }
 
 fn default_main_window_classes() -> Vec<String> {

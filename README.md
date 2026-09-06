@@ -1,22 +1,22 @@
 # 💬 KakaoTalk Layout AdBlocker v11 (Rust Native)
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(64--bit)-0078D6?logo=windows)](https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases)
-[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.1-orange?logo=rust)](https://www.rust-lang.org/)
+[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.2-orange?logo=rust)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![No Admin Required](https://img.shields.io/badge/UAC-Not%20Required-brightgreen)](#-안전한-순수-레이아웃-차단-layout-only)
 
 **Windows PC용 카카오톡 레이아웃 기반 무해한 광고 차단기**입니다.
 
-기존 Python 기반 런타임에서 **순수 Rust 네이티브(`kakao-adblock-rs`) 단일 바이너리로 전면 재작성**되어, Python 설치나 별도 의존성 없이 극도로 가볍고 빠르며 안전하게 동작합니다.
+기존 Python 기반 런타임에서 **순수 Rust 네이티브(`kakao-adblock-rs`)로 전면 재작성**되어, Python 설치나 별도 런타임 없이 가볍고 빠르게 동작합니다. 광고 차단 실행은 앱 EXE만으로 가능하고, **자동 업데이트**에는 같은 폴더의 `kakao-updater.exe`가 필요합니다.
 
-`hosts` 파일 수정, DNS 캐시 변조, AdFit 레지스트리 조작, 네트워크 패킷 감청을 **전혀 하지 않고**, 순수 **Win32 레이아웃 조정 및 광고 창 은닉**만으로 동작합니다. 관리자 권한(UAC)이 필요 없으며, 카카오톡 업데이트나 시스템 환경에 완벽히 안전합니다.
+`hosts` 파일 수정, DNS 캐시 변조, AdFit 레지스트리 조작, 네트워크 패킷 감청을 **전혀 하지 않고**, 순수 **Win32 레이아웃 조정 및 광고 창 은닉**만으로 동작합니다. 광고 차단 경로 자체는 레지스트리를 쓰지 않으며, 선택적 **시작프로그램 등록**만 `HKCU\...\Run`을 사용합니다. 관리자 권한(UAC)이 필요 없으며, 카카오톡 업데이트나 시스템 환경에 안전합니다.
 
 ---
 
 ## 📑 목차
 
 - [✨ 핵심 특징 (Key Highlights)](#-핵심-특징-key-highlights)
-- [🦀 Rust 네이티브 개편 안내 (v11.1.1)](#-rust-네이티브-개편-안내-v1111)
+- [🦀 Rust 네이티브 개편 안내 (v11.1.2)](#-rust-네이티브-개편-안내-v1112)
 - [🚀 빠른 시작 (3단계 사용법)](#-빠른-시작-3단계-사용법)
 - [🖥️ 시스템 트레이 사용 가이드](#️-시스템-트레이-사용-가이드)
 - [🧠 동작 원리 (Layout-Only 차단)](#-동작-원리-layout-only-차단)
@@ -26,12 +26,14 @@
 - [🛠️ 개발 및 빌드 가이드 (For Developers)](#️-개발-및-빌드-가이드-for-developers)
 - [📜 라이선스 및 크레딧](#-라이선스-및-크레딧)
 
+상세 변경 내역은 [CHANGELOG.md](CHANGELOG.md)를 참고하세요.
+
 ---
 
 ## ✨ 핵심 특징 (Key Highlights)
 
 - 🛡️ **안전한 순수 레이아웃 차단 (Layout-Only)**
-  - 시스템 네트워크, DNS, hosts, 레지스트리를 건드리지 않아 PC 보안에 아무런 부작용이 없습니다.
+  - 시스템 네트워크, DNS, hosts를 건드리지 않습니다. 레지스트리는 선택적 시작프로그램 등록(`HKCU Run`)에만 사용합니다.
   - 일반 사용자 권한(Non-UAC)으로 구동되며, 카카오톡 내부 메모리를 후킹하거나 패치하지 않습니다.
 - ⚡ **Rust 네이티브 초경량 & 초저지연 성능 (유휴 CPU 0.01%대)**
   - 가벼운 단일 바이너리로 메모리 사용량(~수 MB)과 유휴 CPU 점유율(~0.01%)을 극적으로 낮췄습니다.
@@ -48,11 +50,11 @@
 
 ---
 
-## 🦀 Rust 네이티브 개편 안내 (v11.1.1)
+## 🦀 Rust 네이티브 개편 안내 (v11.1.2)
 
-v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전면 재구축**되었으며, v11.1.1에서 **초저지연/초저전력 CPU 최적화(유휴 CPU 99% 절감)**가 완료되었습니다.
+v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전면 재구축**되었으며, v11.1.1에서 **초저지연/초저전력 CPU 최적화**가 완료되었고, v11.1.2에서 감사 지적 사항(창 트리 깊이, 팝업 재노출, 설정 타입 오류, 업데이트/트레이 종료 경로)을 수정했습니다.
 
-| 구분 | 이전 (Python v11 / PyInstaller) | 개편 후 (Rust v11.1.1 네이티브) |
+| 구분 | 이전 (Python v11 / PyInstaller) | 개편 후 (Rust v11.1.2 네이티브) |
 | :--- | :--- | :--- |
 | **런타임 의존성** | Python 인터프리터 임베딩 + Tkinter | **0 (순수 Win32 네이티브 API 바이너리)** |
 | **메모리 점유율** | 약 30MB ~ 60MB | **약 3MB ~ 8MB (최대 90% 절감)** |
@@ -61,7 +63,7 @@ v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전
 | **윈도우 감지** | 타이머 기반 반복 폴링 중심 | **`SetWinEventHook` 실시간 훅 + 적응형 폴링** |
 | **UI 방식** | 무거운 Tkinter GUI 설정창 | **경량 Win32 네이티브 트레이 메뉴** |
 | **단일 실행 보장** | 프로세스 스캔 및 파일 락 | **Windows 커널 Named Mutex 싱글톤 가드** |
-| **아키텍처** | 단일 스크립트 모듈 | **3-Tier 크레이트 분리 (`core`, `win32`, `app`)** |
+| **아키텍처** | 단일 스크립트 모듈 | **4개 크레이트 (`core`, `win32`, `app`, `updater`)** |
 
 > [!NOTE]
 > 이전 Python v11 구현체는 회귀 검증 및 골든 패리티(Golden Parity) 비교용 레퍼런스로 [`legacy/python-v11/`](legacy/python-v11/)에 안전하게 보존되어 있습니다.
@@ -71,11 +73,15 @@ v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전
 ## 🚀 빠른 시작 (3단계 사용법)
 
 ### 1단계: 실행 파일 다운로드
-[GitHub Releases](https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases)에서 최신 버전의 **`KakaoTalkLayoutAdBlocker_v11.exe`**를 다운로드합니다.
+[GitHub Releases](https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases)에서 최신 버전의 **`KakaoTalkLayoutAdBlocker_v11.zip`**을 받아 압축을 풉니다. 같은 폴더에 다음 두 파일이 있어야 합니다.
+- `KakaoTalkLayoutAdBlocker_v11.exe` — 광고 차단 앱
+- `kakao-updater.exe` — 자동 업데이트 헬퍼 (앱과 **반드시 같은 폴더**)
+
+앱 EXE만 받아도 광고 차단은 동작하지만, 트레이의 **업데이트 확인**은 헬퍼가 없으면 실패합니다.
 > 권장 위치: `C:\Tools\KakaoTalkAdBlocker\` 등 로컬 드라이브의 안정적인 폴더에 배치합니다. (바탕화면의 OneDrive 동기화 폴더 제외 권장)
 
 ### 2단계: 실행
-다운로드한 `KakaoTalkLayoutAdBlocker_v11.exe`를 더블클릭하여 실행합니다.
+같은 폴더의 `KakaoTalkLayoutAdBlocker_v11.exe`를 더블클릭하여 실행합니다.
 - 관리자 권한을 묻는 UAC 창이 뜨지 않습니다.
 - 실행 즉시 작업표시줄 알림 영역(트레이)에 **노란색 방패 아이콘**이 표시되며, 실행 중인 카카오톡의 광고가 즉시 사라집니다.
 
@@ -106,7 +112,7 @@ v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전
 ### 메뉴별 기능 상세 설명
 
 1. **차단 끄기 / 차단 켜기**
-   - 차단을 끄면(`차단 끄기`) 프로그램이 종료되지 않은 상태에서도 숨겨진 광고 창이 즉시 다시 나타나며 원래 레이아웃으로 완벽 복원됩니다.
+   - 차단을 끄면(`차단 끄기`) 워커가 숨긴 광고 창을 저장된 스냅샷으로 복원합니다. 복원이 한 번 실패해도 스냅샷을 남겨 재시도합니다. 일반 메인 뷰 크기 조정은 카카오톡 자체 레이아웃 갱신을 따릅니다.
    - 언제든지 `차단 켜기`를 눌러 다시 광고를 차단할 수 있습니다.
 2. **공격 모드 (Aggressive Mode)**
    - 기본 윈도우 시그니처 외에도 창 하위 요소 중 광고 토큰(`Ad`, `AdFit`, `광고` 등)이 포함된 요소를 추가로 식별하여 차단합니다. (기본값: **활성화**)
@@ -199,8 +205,9 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
 | `--shadow` | **시뮬레이션 모드**. 창을 숨기거나 닫지 않고 탐지된 메인 창 및 광고 후보 목록만 표준 출력합니다. |
 | `--self-check` | 엔진을 실행하지 않고 시스템 권한, 프로세스 탐색, 설정 파일 무결성을 진단합니다. |
 | `--json` | 진단 결과를 정형화된 JSON 포맷으로 출력합니다. |
-| `--dump-tree` | 현재 카카오톡의 윈도우 계층 구조를 JSON 파일로 저장합니다. |
-| `--dump-tree-series` | 지정된 시간 동안 연속으로 윈도우 프레임과 광고 후보 판정 결과를 기록합니다. |
+| `--dump-tree` | 현재 카카오톡의 윈도우 계층 구조를 JSON으로 저장합니다. 자식 트리는 `windows`, owned popup 광고 호스트는 `owned_popups`에 따로 있습니다. |
+| `--dump-tree-series` | 지정된 시간 동안 연속으로 윈도우 프레임과 광고 후보 판정 결과를 기록합니다. 프레임 사이 weak-signal 상태를 유지합니다. |
+| `--strict-self-check` | 설정 경고·쓰기 불가 등 진단 실패를 핵심 실패(종료 코드 1)로 올립니다. |
 | `--dump-dir <path>` | 덤프 파일이 저장될 디렉터리를 지정합니다. (기본값: `%APPDATA%\...`) |
 | `--dump-series-duration-ms <ms>` | 연속 덤프 수집 총 시간 (기본값: 1000, 최대: 10000). |
 | `--dump-series-interval-ms <ms>` | 연속 덤프 수집 간격 (기본값: 100, 최소: 10). |
@@ -265,8 +272,8 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
 ```
 
 ### 설정 파일 자동 복구 (Self-Healing)
-- 설정 파일을 편집하다가 JSON 문법 오류를 내더라도 프로그램이 종료되지 않습니다.
-- 손상된 파일은 `*.broken-YYYYMMDD-HHMMSS` 파일로 자동 백업되며, 정상 기본값으로 안전하게 자가 복구됩니다. 백업 파일은 30일 경과 시 자동 정리됩니다.
+- JSON 문법 오류나 최상위 타입 오류는 백업 후 기본값으로 복구합니다. 필드 타입만 잘못된 경우(예: 숫자를 문자열로 기록)에는 프로세스가 종료되지 않고, **올바른 필드는 유지**한 채 해당 필드만 기본값으로 두고 경고를 남깁니다.
+- 손상된 파일은 `*.broken-<unix-epoch>` 이름으로 백업됩니다. 백업은 30일이 지나거나 10개를 넘으면 정리됩니다.
 
 ---
 
@@ -297,7 +304,7 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
 ## 🛠️ 개발 및 빌드 가이드 (For Developers)
 
 ### 아키텍처 개요
-저장소의 Rust 워크스페이스(`rust/`)는 단일 책임 원칙에 따라 3개의 크레이트로 분리되어 있습니다:
+저장소의 Rust 워크스페이스(`rust/`)는 단일 책임 원칙에 따라 4개의 크레이트로 분리되어 있습니다:
 
 - **`crates/kakao-core`**:
   - Windows API에 의존하지 않는 순수 알고리즘 도메인.
@@ -311,7 +318,9 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
 - **`crates/kakao-app`**:
   - 최종 릴리스 바이너리(`KakaoTalkLayoutAdBlocker_v11.exe`).
   - CLI 파서(`clap`), 백그라운드 엔진 워커 스레드 오케스트레이션, 설정 파일 관리.
-  - Ed25519 서명 검증 기반 원클릭 업데이터.
+  - Ed25519 서명 검증 후 업데이트 헬퍼를 실행하는 업데이터 클라이언트.
+- **`crates/kakao-updater`**:
+  - 별도 헬퍼 바이너리(`kakao-updater.exe`). 앱 종료 후 EXE 교체·재시작·실패 시 롤백을 담당합니다.
 
 ### 빌드 환경 준비
 - Windows 10 / 11 (64-bit)
@@ -328,6 +337,14 @@ cd kakaotalk-pc-adblock-rust
 cd rust
 cargo run -p kakao-app --release
 ```
+
+릴리스 산출물(앱 EXE + 업데이트 헬퍼 + ZIP):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign
+```
+
+`dist/`에 `KakaoTalkLayoutAdBlocker_v11.exe`, `kakao-updater.exe`, `KakaoTalkLayoutAdBlocker_v11.zip`이 생성됩니다.
 
 ### 테스트 및 린트
 ```powershell

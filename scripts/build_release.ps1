@@ -343,6 +343,15 @@ try {
         }
     }
 
+    $updaterDist = Join-Path $distPath "kakao-updater.exe"
+    $zipPath = Join-Path $distPath "KakaoTalkLayoutAdBlocker_v11.zip"
+    if (Test-Path $updaterDist) {
+        Compress-Archive -Force -Path $exePath, $updaterDist -DestinationPath $zipPath
+        Write-Host "Packed $zipPath"
+    } else {
+        Write-Host "kakao-updater.exe missing; zip package was not created."
+    }
+
     Write-Host "Done: $exePath"
 } finally {
     Pop-Location

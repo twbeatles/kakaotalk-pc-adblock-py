@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+
 use chrono_lite::now_rfc3339;
 use kakao_core::{
-    evaluate_graph, Evaluation, LayoutRules, LayoutSettings, WindowGraph, WindowText,
+    evaluate_graph_with_states, CandidateState, Evaluation, LayoutRules, LayoutSettings,
+    WindowGraph, WindowIdentity, WindowText,
 };
 use serde_json::{json, Value};
 
@@ -24,8 +27,19 @@ pub fn dump_payload(
     settings: &LayoutSettings,
     rules: &LayoutRules,
 ) -> Value {
+    let mut states = HashMap::new();
+    dump_payload_with_states(api, pids, settings, rules, &mut states)
+}
+
+pub fn dump_payload_with_states(
+    api: &dyn Win32Api,
+    pids: &[i64],
+    settings: &LayoutSettings,
+    rules: &LayoutRules,
+    states: &mut HashMap<WindowIdentity, CandidateState>,
+) -> Value {
     let graph = build_graph(api, pids);
-    let evaluation = evaluate_graph(&graph, settings, rules);
+    let evaluation = evaluate_graph_with_states(&graph, settings, rules, states);
     graph_to_dump(&graph, &evaluation)
 }
 

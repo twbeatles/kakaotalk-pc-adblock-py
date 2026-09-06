@@ -160,9 +160,11 @@ pub fn restore_all(
         if !identity_matches(api, &snap.identity) {
             continue;
         }
-        if !restore_snapshot(api, &snap, &mut last_error) {
-            failures += 1;
+        if restore_snapshot(api, &snap, &mut last_error) {
+            continue;
         }
+        failures += 1;
+        snapshots.insert(snap.identity.clone(), snap);
     }
     (failures, last_error)
 }
@@ -220,13 +222,17 @@ fn restore_stale_hidden(
         let Some(snap) = snapshots.remove(&identity) else {
             continue;
         };
-        stale_miss.remove(&identity);
         if !identity_matches(api, &snap.identity) {
+            stale_miss.remove(&identity);
             continue;
         }
-        if !restore_snapshot(api, &snap, &mut last_error) {
-            failures += 1;
+        if restore_snapshot(api, &snap, &mut last_error) {
+            stale_miss.remove(&identity);
+            continue;
         }
+        failures += 1;
+        snapshots.insert(identity.clone(), snap);
+        stale_miss.insert(identity, RESTORE_MISS_THRESHOLD);
     }
     (failures, last_error)
 }
@@ -250,6 +256,7 @@ pub fn tick(
     }
     let graph = build_graph(api, pids);
     let evaluation = evaluate_graph_with_states(&graph, &core, rules, states);
+    prune_gone_identities(&graph, snapshots, states, stale_miss);
     if flags.apply.load(Ordering::SeqCst) && core.enabled {
         let pid_set: HashSet<i64> = pids.iter().copied().collect();
         apply_evaluation(api, &graph, &evaluation, snapshots, &pid_set, flags);
@@ -274,6 +281,17 @@ pub fn tick(
         }
     }
     evaluation
+}
+
+fn prune_gone_identities(
+    graph: &WindowGraph,
+    snapshots: &HashMap<WindowIdentity, RestoreSnapshot>,
+    states: &mut HashMap<WindowIdentity, CandidateState>,
+    stale_miss: &mut HashMap<WindowIdentity, u32>,
+) {
+    let live: HashSet<WindowIdentity> = graph.nodes.values().map(|node| node.identity()).collect();
+    states.retain(|id, _| live.contains(id) || snapshots.contains_key(id));
+    stale_miss.retain(|id, _| live.contains(id) || snapshots.contains_key(id));
 }
 
 fn matched_identities(graph: &WindowGraph, evaluation: &Evaluation) -> HashSet<WindowIdentity> {

@@ -54,7 +54,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             gh release create $env:GITHUB_REF_NAME --generate-notes --title $env:GITHUB_REF_NAME
           }
-          gh release upload $env:GITHUB_REF_NAME dist/KakaoTalkLayoutAdBlocker_v11.exe dist/kakao-updater.exe dist/update.json --clobber
+          Compress-Archive -Force -Path dist/KakaoTalkLayoutAdBlocker_v11.exe,dist/kakao-updater.exe -DestinationPath dist/KakaoTalkLayoutAdBlocker_v11.zip
+          gh release upload $env:GITHUB_REF_NAME dist/KakaoTalkLayoutAdBlocker_v11.exe dist/kakao-updater.exe dist/KakaoTalkLayoutAdBlocker_v11.zip dist/update.json --clobber
       - name: Verify published manifest asset
         shell: pwsh
         env:

@@ -435,11 +435,8 @@ fn inspect_candidates(
         if confirmed_set.contains(&item.hwnd) {
             continue;
         }
-        if !item.visible {
-            continue;
-        }
         let popup_guard = popup_host_guard_status(rules, item.text(), item.text_known());
-        for (child, depth, class_name) in find_popup_matches(graph, rules, item.hwnd, true) {
+        for (child, depth, class_name) in find_popup_matches(graph, rules, item.hwnd, false) {
             let child_pid = graph.get(child).map(|node| node.pid).unwrap_or(0);
             let identity = WindowIdentity {
                 hwnd: child,
@@ -638,11 +635,10 @@ fn apply_once(
         if confirmed_set.contains(&item.hwnd) {
             continue;
         }
-        if !item.visible {
-            continue;
-        }
         let popup_guard = popup_host_guard_status(rules, item.text(), item.text_known());
-        for (child, depth, _class_name) in find_popup_matches(graph, rules, item.hwnd, true) {
+        // Hidden hosts/descendants must still match so a refused WM_CLOSE
+        // fallback is not treated as a vanished ad signal.
+        for (child, depth, _class_name) in find_popup_matches(graph, rules, item.hwnd, false) {
             let popup_decision = popup_dismiss_decision(popup_guard, depth);
             if let Some(child_node) = graph.get(child) {
                 store_update(states, child_node.identity(), &popup_decision, ticks);
@@ -651,17 +647,26 @@ fn apply_once(
                 continue;
             }
             if !handled.contains(&item.hwnd) {
-                dismiss_popup(&mut log, item.hwnd);
+                retain_popup(&mut log, item.hwnd, item.visible);
                 handled.insert(item.hwnd);
             }
             if !handled.contains(&child) {
-                dismiss_popup(&mut log, child);
+                let child_visible = graph.get(child).map(|node| node.visible).unwrap_or(false);
+                retain_popup(&mut log, child, child_visible);
                 handled.insert(child);
             }
         }
     }
 
     log
+}
+
+fn retain_popup(log: &mut MutationLog, hwnd: Hwnd, visible: bool) {
+    if visible {
+        dismiss_popup(log, hwnd);
+    } else {
+        keep_hidden_popup(log, hwnd);
+    }
 }
 
 fn dismiss_popup(log: &mut MutationLog, hwnd: Hwnd) {
@@ -675,6 +680,11 @@ fn dismiss_popup(log: &mut MutationLog, hwnd: Hwnd) {
     if hidden_ok {
         log.hidden += 1;
     }
+}
+
+fn keep_hidden_popup(log: &mut MutationLog, hwnd: Hwnd) {
+    log.hide_window(hwnd);
+    log.set_pos(hwnd, 0, 0, 0, 0);
 }
 
 pub fn evaluate_graph(

@@ -30,7 +30,7 @@
 - Main binary: `dist/KakaoTalkLayoutAdBlocker_v11.exe` (`rust/crates/kakao-app`)
 - Python reference: `legacy/python-v11/kakaotalk_layout_adblock_v11.py`
 - Legacy script: `legacy/카카오톡 광고제거 v10.0.py` (deprecated notice only)
-- `--dump-tree` runs in a lightweight path without UI/tray module import
+- `--dump-tree` runs in a lightweight path without UI/tray module import. Child trees go in `windows`; owned popup ad hosts go in `owned_popups`. Graph child edges are direct children (`GetParent`), not flattened `EnumChildWindows` descendants.
 - `--self-check` runs diagnostics only (no UI/tray/engine start)
 - default `--self-check` treats tray import failure as optional; `--strict-self-check` upgrades it to core failure for packaging/release validation
 - `--self-check --json` emits structured diagnostics, and packaged smoke can persist the same payload via an internal report path
